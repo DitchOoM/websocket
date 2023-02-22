@@ -57,14 +57,14 @@ class BrowserWebSocketController(
         webSocket.binaryType = BinaryType.ARRAYBUFFER
     }
 
-    override fun isOpen() = isConnected
+    override fun isOpen() = isConnected && webSocket.readyState == WebSocket.OPEN
     override suspend fun localPort(): Int = throw UnsupportedOperationException("Unavailable on browser")
     override suspend fun remotePort(): Int = throw UnsupportedOperationException("Unavailable on browser")
 
     override suspend fun connect() = suspendCancellableCoroutine { continuation ->
         webSocket.onclose = {
             isConnected = false
-            console.error("\r\nonclose $it")
+            console.error("\r\nonclose", it)
             if (!continuation.isCompleted) {
                 continuation.resumeWithException(Exception(it.toString()))
             }
@@ -75,7 +75,7 @@ class BrowserWebSocketController(
             isConnected = false
             console.error("\r\nws error", it)
         }
-        webSocket.onopen = { event ->
+        webSocket.onopen = { _ ->
             isConnected = true
             continuation.resume(Unit)
         }

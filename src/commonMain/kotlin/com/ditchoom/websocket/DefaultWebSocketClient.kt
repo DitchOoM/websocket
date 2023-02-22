@@ -11,9 +11,7 @@ import com.ditchoom.socket.EMPTY_BUFFER
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SuspendingSocketInputStream
 import com.ditchoom.socket.allocate
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 
@@ -96,11 +94,7 @@ class DefaultWebSocketClient(
         val frameBuffer = frame.toBuffer()
         frameBuffer.resetForRead()
         val remainingBytes = frameBuffer.remaining()
-        coroutineScope {
-            launch {
-                socket.write(frameBuffer, timeout)
-            }
-        }
+        socket.write(frameBuffer, timeout)
         return remainingBytes
     }
 
@@ -162,9 +156,9 @@ class DefaultWebSocketClient(
         val actualPayloadLength = if (payloadLength <= 125) {
             payloadLength.toULong()
         } else if (payloadLength == 126) {
-            inputStream.sizedReadBuffer(UShort.SIZE_BYTES).readUnsignedShort().toULong()
+            inputStream.ensureBufferSize(UShort.SIZE_BYTES).readUnsignedShort().toULong()
         } else if (payloadLength == 127) {
-            inputStream.sizedReadBuffer(ULong.SIZE_BYTES).readUnsignedLong()
+            inputStream.ensureBufferSize(ULong.SIZE_BYTES).readUnsignedLong()
         } else {
             throw IllegalStateException("Invalid payload length $payloadLength")
         }
@@ -172,11 +166,9 @@ class DefaultWebSocketClient(
             EMPTY_BUFFER
         } else {
             check(actualPayloadLength < Int.MAX_VALUE.toULong()) { "Payloads larger than ${Int.MAX_VALUE} bytes is currently unsupported" }
-            val b = inputStream.sizedReadBuffer(actualPayloadLength.toInt())
-            val sliced = b.slice()
-            b.position(b.position() + actualPayloadLength.toInt())
-            sliced.position(sliced.limit())
-            sliced
+            val buffer = inputStream.readBuffer(actualPayloadLength.toInt())
+            buffer.position(buffer.limit())
+            buffer
         }
         val frame = Frame(fin, rsv1, rsv2, rsv3, opcode, MaskingKey.NoMaskingKey, payload)
         if (frame.opcode == Opcode.Ping) {
@@ -202,12 +194,5 @@ class DefaultWebSocketClient(
             sendCloseFrame()
         }
         socket.close()
-    }
-
-    companion object {
-        suspend fun open(connectionOptions: WebSocketConnectionOptions): DefaultWebSocketClient {
-
-            return DefaultWebSocketClient(connectionOptions)
-        }
     }
 }
