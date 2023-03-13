@@ -2,12 +2,16 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.yield
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Uint8Array
 import org.w3c.dom.ARRAYBUFFER
@@ -37,13 +41,13 @@ class BrowserWebSocketController(
                     val buffer = JsBuffer(array)
                     buffer.setLimit(array.length)
                     buffer.setPosition(array.length)
-                    check(trySend(DataRead.BinaryDataRead(buffer)).isSuccess) {
-                        "failed to emit incoming message"
+                    launch {
+                        send(DataRead.BinaryDataRead(buffer))
                     }
                 }
 
-                is String -> check(trySend(DataRead.StringDataRead(data)).isSuccess) {
-                    "failed to emit incoming message"
+                is String -> launch {
+                    send(DataRead.StringDataRead(data))
                 }
 
                 else -> throw IllegalArgumentException("Received invalid message type!")
@@ -51,6 +55,7 @@ class BrowserWebSocketController(
         }
         closeMutex.lock()
         channel.close()
+        awaitClose()
     }
 
     init {
