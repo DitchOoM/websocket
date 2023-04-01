@@ -1,7 +1,9 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
+import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filterIsInstance
@@ -21,6 +23,7 @@ import kotlin.time.Duration
 
 class BrowserWebSocketController(
     connectionOptions: WebSocketConnectionOptions,
+    private val zone: AllocationZone,
 ) : WebSocketClient {
     private val closeMutex = Mutex(true)
     private val url = connectionOptions.buildUrl()
@@ -31,14 +34,31 @@ class BrowserWebSocketController(
     }
 
     private var isConnected = false
+    private val crossOriginIsolated = js("crossOriginIsolated") == true
     private val incomingFlow = callbackFlow {
         webSocket.onmessage = {
             when (val data = it.data) {
                 is ArrayBuffer -> {
-                    val array = Uint8Array(data)
-                    val buffer = JsBuffer(array)
-                    buffer.setLimit(array.length)
-                    buffer.setPosition(array.length)
+                    val buffer = if (zone == AllocationZone.SharedMemory && crossOriginIsolated) {
+                        val sharedArrayBuffer = SharedArrayBuffer(data.byteLength)
+                        val array = Uint8Array(sharedArrayBuffer as ArrayBuffer)
+                        array.set(Uint8Array(it.data as ArrayBuffer), 0)
+                        JsBuffer(array, false, data.byteLength, data.byteLength, data.byteLength, sharedArrayBuffer)
+                    } else {
+                        if (zone == AllocationZone.SharedMemory && !crossOriginIsolated) {
+                            console.warn(
+                                "Failed to allocate shared buffer in BrowserWebSocketController.kt. " +
+                                    "Please check and validate the appropriate headers are set on the http request as " +
+                                    "defined in the SharedArrayBuffer MDN docs. see: " +
+                                    "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements"
+                            )
+                        }
+                        val array = Uint8Array(data)
+                        val buffer = JsBuffer(array)
+                        buffer.setLimit(array.length)
+                        buffer.setPosition(array.length)
+                        buffer
+                    }
                     launch {
                         send(DataRead.BinaryDataRead(buffer))
                     }
@@ -66,8 +86,8 @@ class BrowserWebSocketController(
 
     override suspend fun connect() = suspendCancellableCoroutine { continuation ->
         webSocket.onclose = {
+            console.error("onclose", it)
             isConnected = false
-            console.error("\r\nonclose", it)
             if (!continuation.isCompleted) {
                 continuation.resumeWithException(Exception(it.toString()))
             }
@@ -76,7 +96,7 @@ class BrowserWebSocketController(
         }
         webSocket.onerror = {
             isConnected = false
-            console.error("\r\nws error", it)
+            console.error("ws error", it)
         }
         webSocket.onopen = { _ ->
             isConnected = true
@@ -101,7 +121,7 @@ class BrowserWebSocketController(
     }
 
     override suspend fun write(buffer: ReadBuffer) {
-        val arrayBuffer = (buffer as JsBuffer).buffer.buffer
+        val arrayBuffer = (buffer as JsBuffer).buffer.subarray(0, buffer.limit()).buffer
         webSocket.send(arrayBuffer)
     }
 

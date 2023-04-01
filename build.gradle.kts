@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    kotlin("multiplatform") version "1.8.0"
-    kotlin("native.cocoapods") version "1.8.0"
+    kotlin("multiplatform") version "1.8.10"
+    kotlin("native.cocoapods") version "1.8.10"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -65,8 +65,8 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation("com.ditchoom:buffer:1.1.13")
-                implementation("com.ditchoom:socket:1.1.12")
+                implementation("com.ditchoom:buffer:1.3.0")
+                implementation("com.ditchoom:socket:1.1.23")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
             }
         }
@@ -83,7 +83,8 @@ kotlin {
         }
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.484")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.521")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
             }
         }
         val jsTest by getting
