@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import block
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.wrap
@@ -17,7 +18,7 @@ class WebSocketTests {
     @Test
     fun clientEchoString() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions)
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
         websocket.connect()
         val string1 = "test"
         launch { websocket.write(string1) }
@@ -33,7 +34,7 @@ class WebSocketTests {
     @Test
     fun clientEchoReadBuffer() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions)
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
         websocket.connect()
         websocket.write(createPayload())
         val firstBuffer = (websocket.read() as DataRead.BinaryDataRead).data
@@ -47,7 +48,7 @@ class WebSocketTests {
     @Test
     fun pingPongWorks() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions)
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
         websocket.connect()
         if (websocket.isPingSupported()) {
             val payload = createPayload()
@@ -61,7 +62,7 @@ class WebSocketTests {
     @Test
     fun allTypesWork() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions)
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
         websocket.connect()
         websocket.write(createPayload())
         val firstBuffer = (websocket.read() as DataRead.BinaryDataRead).data

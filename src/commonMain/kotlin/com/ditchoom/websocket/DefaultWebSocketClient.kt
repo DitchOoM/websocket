@@ -1,5 +1,6 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
@@ -17,12 +18,9 @@ import kotlin.time.Duration
 
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
+    allocationZone: AllocationZone,
 ) : WebSocketClient {
-    private val socket = if (connectionOptions.bufferFactory != null) {
-        ClientSocket.allocate(connectionOptions.tls, connectionOptions.bufferFactory)
-    } else {
-        ClientSocket.allocate(connectionOptions.tls)
-    }
+    private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
 
     private val inputStream = SuspendingSocketInputStream(connectionOptions.readTimeout, socket)

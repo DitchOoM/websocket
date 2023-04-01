@@ -1,14 +1,22 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.socket.NetworkCapabilities
-import com.ditchoom.socket.getNetworkCapabilities
+import org.w3c.dom.WebSocket
 
 actual fun WebSocketClient.Companion.allocate(
-    connectionOptions: WebSocketConnectionOptions
+    connectionOptions: WebSocketConnectionOptions,
+    zone: AllocationZone
 ): WebSocketClient {
-    return if (getNetworkCapabilities() == NetworkCapabilities.FULL_SOCKET_ACCESS) {
-        DefaultWebSocketClient(connectionOptions)
+    val networkCapabilities = try {
+        WebSocket("ws://localhost")
+        NetworkCapabilities.WEBSOCKETS_ONLY
+    } catch (e: Throwable) {
+        NetworkCapabilities.FULL_SOCKET_ACCESS
+    }
+    return if (networkCapabilities == NetworkCapabilities.FULL_SOCKET_ACCESS) {
+        DefaultWebSocketClient(connectionOptions, zone)
     } else {
-        BrowserWebSocketController(connectionOptions)
+        BrowserWebSocketController(connectionOptions, zone)
     }
 }
