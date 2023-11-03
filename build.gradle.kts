@@ -1,30 +1,28 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    kotlin("multiplatform") version "1.8.10"
-    kotlin("native.cocoapods") version "1.8.10"
+    kotlin("multiplatform") version "1.9.10"
+    kotlin("native.cocoapods") version "1.9.10"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
 }
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
-version = "$libraryVersionPrefix.0-SNAPSHOT"
-val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")))}"
-} else {
-    "${libraryVersionPrefix}0-SNAPSHOT"
-}
+version = "10.0.0-SNAPSHOT"
+val libraryVersion = "10.0.0-SNAPSHOT"
+
 repositories {
     google()
     mavenCentral()
+    mavenLocal()
 }
 
 kotlin {
-    android {
+    androidTarget {
         publishLibraryVariants("release")
     }
     jvm {
@@ -35,9 +33,15 @@ kotlin {
             useJUnit()
         }
     }
-    js(BOTH) {
+    js {
         browser()
-        nodejs()
+        nodejs{
+            testTask {
+                useMocha {
+                    timeout = "120s"
+                }
+            }
+        }
     }
     macosArm64()
     macosX64()
@@ -48,7 +52,7 @@ kotlin {
     ios()
     iosSimulatorArm64()
     tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        deviceId = "iPhone 14"
+        device.set("iPhone 14")
     }
 
     cocoapods {
@@ -60,14 +64,15 @@ kotlin {
             source = git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
                 tag = "0.1.3"
             }
+//            source = path(project.file("./../SocketWrapper/"))
         }
     }
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation("com.ditchoom:buffer:1.3.0")
+                implementation("com.ditchoom:buffer:1.3.6-SNAPSHOT")
                 implementation("com.ditchoom:socket:1.1.14")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val commonTest by getting {
@@ -80,11 +85,15 @@ kotlin {
         }
         val jvmTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
+            dependencies {
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.7.3")
+                implementation("junit:junit:4.13.2")
+            }
         }
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.521")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.615")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
             }
         }
         val jsTest by getting
@@ -135,12 +144,12 @@ kotlin {
             kotlin.srcDir("src/commonJvmMain/kotlin")
             dependsOn(commonMain)
         }
-        val androidTest by getting {
+        val androidUnitTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
             dependsOn(commonTest)
             dependsOn(jvmTest)
         }
-        val androidAndroidTest by getting {
+        val androidInstrumentedTest by getting {
             dependsOn(commonTest)
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }

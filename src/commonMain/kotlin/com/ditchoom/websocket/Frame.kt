@@ -66,13 +66,15 @@ internal data class Frame(
      * payload length is the length of the "Extension data" + the length of the "Application data".  The length of the
      * "Extension data" may be zero, in which case the payload length is the length of the "Application data".
      */
-    private val payloadLength: Int = if (payloadData.limit() <= 125) {
+    val payloadLength: Int = if (payloadData.limit() <= 125) {
         payloadData.limit()
-    } else if (payloadData.limit() <= Int.MAX_VALUE) {
-        126
     } else {
-        127
-    }.also { check(it in 0..127) }
+        if (payloadData.limit() <= UShort.MAX_VALUE.toInt()) {
+            126
+        } else {
+            127
+        }.also { check(it in 0..127) }
+    }
 ) {
 
     constructor(fin: Boolean, opcode: Opcode, maskingKey: MaskingKey, payloadData: ReadBuffer) :
@@ -94,9 +96,9 @@ internal data class Frame(
     private val actualPayloadLength = if (payloadLength <= 125) {
         payloadLength
     } else if (payloadLength == 126) {
-        payloadLength + UShort.SIZE_BYTES
+        payloadData.limit() + UShort.SIZE_BYTES
     } else if (payloadLength == 127) {
-        payloadLength + ULong.SIZE_BYTES
+        payloadData.limit() + ULong.SIZE_BYTES
     } else {
         throw IllegalStateException("Internal payload len size cannot be larger than 127")
     }

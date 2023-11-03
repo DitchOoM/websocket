@@ -14,6 +14,7 @@
 <p align="center">
 A kotlin multiplatform library that allows you to connect a client websocket to websocket server.
 <br />
+Fully tested on all platforms using the extensive Autobahn test suite.
 <!-- <a href="https://github.com/DitchOoM/websocket"><strong>Explore the docs »</strong></a> -->
 <br />
 <br />

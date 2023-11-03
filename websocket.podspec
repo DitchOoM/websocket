@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'websocket'
-    spec.version                  = '1.0..0-SNAPSHOT'
+    spec.version                  = '10.0.0-SNAPSHOT'
     spec.homepage                 = ''
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
@@ -15,7 +15,7 @@ Pod::Spec.new do |spec|
     spec.dependency 'SocketWrapper'
                 
     spec.pod_target_xcconfig = {
-        'KOTLIN_PROJECT_PATH' => ':',
+        'KOTLIN_PROJECT_PATH' => '',
         'PRODUCT_MODULE_NAME' => 'websocket',
     }
                 
@@ -31,7 +31,7 @@ Pod::Spec.new do |spec|
                 fi
                 set -ev
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
-                "$REPO_ROOT/../../../../private/var/folders/pf/yv2h4kt547v0wlfdlclcwt300000gn/T/wrap2010loc/gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
+                "$REPO_ROOT/../../../../private/var/folders/pf/yv2h4kt547v0wlfdlclcwt300000gn/T/wrap5loc/gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
                     -Pkotlin.native.cocoapods.configuration="$CONFIGURATION"

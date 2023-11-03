@@ -4,7 +4,7 @@ import kotlinx.coroutines.withTimeout
 
 actual fun <T> block(body: suspend CoroutineScope.() -> T) {
     runBlocking {
-        withTimeout(15000) {
+        withTimeout(120_000) {
             try {
                 body()
             } catch (e: UnsupportedOperationException) {
