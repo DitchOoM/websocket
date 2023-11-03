@@ -12,9 +12,12 @@ plugins {
 }
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
-version = "10.0.0-SNAPSHOT"
-val libraryVersion = "10.0.0-SNAPSHOT"
-
+version = "$libraryVersionPrefix.0-SNAPSHOT"
+val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
+    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")))}"
+} else {
+    "${libraryVersionPrefix}0-SNAPSHOT"
+}
 repositories {
     google()
     mavenCentral()
