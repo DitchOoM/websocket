@@ -1,1 +1,1 @@
-actual fun agentName(): String ="tvOS"
+actual fun agentName(): String = "tvOS"

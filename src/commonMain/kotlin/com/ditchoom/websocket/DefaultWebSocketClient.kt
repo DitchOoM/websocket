@@ -6,7 +6,6 @@ import com.ditchoom.buffer.FragmentedReadBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
-import com.ditchoom.buffer.toComposableBuffer
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.data.get
 import com.ditchoom.socket.ClientSocket
@@ -46,8 +45,8 @@ class DefaultWebSocketClient(
 
     override fun connect(scope: CoroutineScope, tag: String) {
         scope.launch(Dispatchers.Default + CoroutineName("Websocket Connection: $tag")) {
-            if (connectionState.value == ConnectionState.Connecting
-                || connectionState.value is ConnectionState.Connected
+            if (connectionState.value == ConnectionState.Connecting ||
+                connectionState.value is ConnectionState.Connected
             ) {
                 return@launch
             }
@@ -64,21 +63,22 @@ class DefaultWebSocketClient(
                     ""
                 }
                 val hostline =
-                    if ((connectionOptions.tls && connectionOptions.port == 443)
-                        || (!connectionOptions.tls && connectionOptions.port == 80)) {
+                    if ((connectionOptions.tls && connectionOptions.port == 443) ||
+                        (!connectionOptions.tls && connectionOptions.port == 80)
+                    ) {
                         connectionOptions.name
                     } else {
                         "${connectionOptions.name}:${connectionOptions.port}"
                     }
                 val request =
                     "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
-                            "Host: $hostline\r\n" +
-                            "Upgrade: websocket\r\n" +
-                            "Connection: Upgrade\r\n" +
-                            "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
-                            protocolString +
-                            "Sec-WebSocket-Version: 13\r\n" +
-                            "\r\n"
+                        "Host: $hostline\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
+                        protocolString +
+                        "Sec-WebSocket-Version: 13\r\n" +
+                        "\r\n"
                 socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
                 val readBuffer = socket.read(connectionOptions.readTimeout)
                 readBuffer.resetForRead()
@@ -96,14 +96,16 @@ class DefaultWebSocketClient(
                 }
                 inputStream.preBuffer = preBuffer?.slice()
                 if (!(
-                            response.contains("101 Switching Protocols", ignoreCase = true) &&
-                                    response.contains("Upgrade: websocket", ignoreCase = true) &&
-                                    response.contains("Connection: Upgrade", ignoreCase = true) &&
-                                    response.contains("Sec-WebSocket-Accept", ignoreCase = true)
-                            )
+                    response.contains("101 Switching Protocols", ignoreCase = true) &&
+                        response.contains("Upgrade: websocket", ignoreCase = true) &&
+                        response.contains("Connection: Upgrade", ignoreCase = true) &&
+                        response.contains("Sec-WebSocket-Accept", ignoreCase = true)
+                    )
                 ) {
-                    throw IllegalStateException("Invalid response from server when reading the result from " +
-                            "websockets. Response:\r\n$response")
+                    throw IllegalStateException(
+                        "Invalid response from server when reading the result from " +
+                            "websockets. Response:\r\n$response"
+                    )
                 }
                 _connectionStateFlow.value = ConnectionState.Connected
                 processIncomingMessages()
@@ -188,7 +190,7 @@ class DefaultWebSocketClient(
                         FragmentedReadBuffer(readPayload, frame.payloadData).slice()
                     }
                 }
-            } while(!frame!!.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
+            } while (!frame!!.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
 
             val firstFrame = frames.first()
             val payload = checkNotNull(readPayload)
@@ -296,8 +298,10 @@ class DefaultWebSocketClient(
             val payload = if (actualPayloadLength == 0uL) {
                 EMPTY_BUFFER
             } else {
-                check(actualPayloadLength < Int.MAX_VALUE.toULong()) { "Payloads larger than ${Int.MAX_VALUE} " +
-                        "bytes is currently unsupported" }
+                check(actualPayloadLength < Int.MAX_VALUE.toULong()) {
+                    "Payloads larger than ${Int.MAX_VALUE} " +
+                        "bytes is currently unsupported"
+                }
                 val buffer = inputStream.readBuffer(actualPayloadLength.toInt())
                 buffer.position(buffer.position() + actualPayloadLength.toInt())
                 buffer
@@ -374,7 +378,7 @@ class DefaultWebSocketClient(
         }
         for (s in 0..n - m) {
             var match = true
-            for (i in 0..<m) {
+            for (i in 0 until m) {
                 if (buffer[s + i + bufferPos] != pattern[patternPos + i]) {
                     match = false
                     break
@@ -388,8 +392,8 @@ class DefaultWebSocketClient(
     }
 
     private fun isValidServerCloseCode(code: UShort): Boolean =
-                code in 1000u..1003u ||
-                code in 1007u..1015u ||
-                code in 3000u .. 3999u ||
-                code in 4000u .. 4999u
+        code in 1000u..1003u ||
+            code in 1007u..1015u ||
+            code in 3000u..3999u ||
+            code in 4000u..4999u
 }

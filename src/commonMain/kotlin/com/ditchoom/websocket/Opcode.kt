@@ -26,12 +26,12 @@ enum class Opcode(val value: Byte) {
         this == Close || this == Ping || this == Pong
 
     fun isValid(): Boolean =
-        this == Close
-                || this == Ping
-                || this == Pong
-                || this == Binary
-                || this == Text
-                || this == Continuation
+        this == Close ||
+            this == Ping ||
+            this == Pong ||
+            this == Binary ||
+            this == Text ||
+            this == Continuation
 
     companion object {
         fun from(byte: Byte) =

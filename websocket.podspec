@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
     spec.name                     = 'websocket'
-    spec.version                  = '10.0.0-SNAPSHOT'
+    spec.version                  = '1.0..0-SNAPSHOT'
     spec.homepage                 = ''
     spec.source                   = { :http=> ''}
     spec.authors                  = ''
@@ -13,6 +13,17 @@ Pod::Spec.new do |spec|
     spec.tvos.deployment_target = '13.0'
     spec.watchos.deployment_target = '6.0'
     spec.dependency 'SocketWrapper'
+                
+    if !Dir.exist?('build/cocoapods/framework/websocket.framework') || Dir.empty?('build/cocoapods/framework/websocket.framework')
+        raise "
+
+        Kotlin framework 'websocket' doesn't exist yet, so a proper Xcode project can't be generated.
+        'pod install' should be executed after running ':generateDummyFramework' Gradle task:
+
+            ./gradlew :generateDummyFramework
+
+        Alternatively, proper pod installation is performed during Gradle sync in the IDE (if Podfile location is set)"
+    end
                 
     spec.pod_target_xcconfig = {
         'KOTLIN_PROJECT_PATH' => '',
@@ -31,7 +42,7 @@ Pod::Spec.new do |spec|
                 fi
                 set -ev
                 REPO_ROOT="$PODS_TARGET_SRCROOT"
-                "$REPO_ROOT/../../../../private/var/folders/pf/yv2h4kt547v0wlfdlclcwt300000gn/T/wrap5loc/gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
+                "$REPO_ROOT/../../../../private/var/folders/pf/yv2h4kt547v0wlfdlclcwt300000gn/T/wrap9263loc/gradlew" -p "$REPO_ROOT" $KOTLIN_PROJECT_PATH:syncFramework \
                     -Pkotlin.native.cocoapods.platform=$PLATFORM_NAME \
                     -Pkotlin.native.cocoapods.archs="$ARCHS" \
                     -Pkotlin.native.cocoapods.configuration="$CONFIGURATION"

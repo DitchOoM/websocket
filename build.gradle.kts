@@ -1,14 +1,14 @@
 import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
 
 plugins {
-    kotlin("multiplatform") version "1.9.10"
-    kotlin("native.cocoapods") version "1.9.10"
+    kotlin("multiplatform") version "1.9.20"
+    kotlin("native.cocoapods") version "1.9.20"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.5.1"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.5.1"
+    id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.6.1"
 }
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
@@ -67,6 +67,7 @@ kotlin {
             source = git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
                 tag = "0.1.3"
             }
+            extraOpts += listOf("-compiler-option", "-fmodules")
 //            source = path(project.file("./../SocketWrapper/"))
         }
     }

@@ -39,5 +39,4 @@ class SuspendingSocketInputStreamWithPreBuffer(
         returnBuffer.resetForRead()
         return returnBuffer
     }
-
 }
