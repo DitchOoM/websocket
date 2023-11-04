@@ -64,7 +64,8 @@ class DefaultWebSocketClient(
                     ""
                 }
                 val hostline =
-                    if ((connectionOptions.tls && connectionOptions.port == 443) || (!connectionOptions.tls && connectionOptions.port == 80)) {
+                    if ((connectionOptions.tls && connectionOptions.port == 443)
+                        || (!connectionOptions.tls && connectionOptions.port == 80)) {
                         connectionOptions.name
                     } else {
                         "${connectionOptions.name}:${connectionOptions.port}"
@@ -101,7 +102,8 @@ class DefaultWebSocketClient(
                                     response.contains("Sec-WebSocket-Accept", ignoreCase = true)
                             )
                 ) {
-                    throw IllegalStateException("Invalid response from server when reading the result from websockets. Response:\r\n$response")
+                    throw IllegalStateException("Invalid response from server when reading the result from " +
+                            "websockets. Response:\r\n$response")
                 }
                 _connectionStateFlow.value = ConnectionState.Connected
                 processIncomingMessages()
@@ -294,7 +296,8 @@ class DefaultWebSocketClient(
             val payload = if (actualPayloadLength == 0uL) {
                 EMPTY_BUFFER
             } else {
-                check(actualPayloadLength < Int.MAX_VALUE.toULong()) { "Payloads larger than ${Int.MAX_VALUE} bytes is currently unsupported" }
+                check(actualPayloadLength < Int.MAX_VALUE.toULong()) { "Payloads larger than ${Int.MAX_VALUE} " +
+                        "bytes is currently unsupported" }
                 val buffer = inputStream.readBuffer(actualPayloadLength.toInt())
                 buffer.position(buffer.position() + actualPayloadLength.toInt())
                 buffer

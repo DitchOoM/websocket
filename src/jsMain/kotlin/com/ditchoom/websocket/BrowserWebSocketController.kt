@@ -5,32 +5,18 @@ import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.mapNotNull
-import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Uint8Array
 import org.w3c.dom.ARRAYBUFFER
 import org.w3c.dom.BinaryType
 import org.w3c.dom.CloseEvent
 import org.w3c.dom.WebSocket
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.time.Duration
 
 class BrowserWebSocketController(
     connectionOptions: WebSocketConnectionOptions,
@@ -49,7 +35,6 @@ class BrowserWebSocketController(
     override val incomingMessages = _incomingMessageSharedFlow.asSharedFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
-
 
     init {
         webSocket.binaryType = BinaryType.ARRAYBUFFER
@@ -83,9 +68,9 @@ class BrowserWebSocketController(
                         if (zone == AllocationZone.SharedMemory && !crossOriginIsolated) {
                             console.warn(
                                 "Failed to allocate shared buffer in BrowserWebSocketController.kt. " +
-                                        "Please check and validate the appropriate headers are set on the http request as " +
-                                        "defined in the SharedArrayBuffer MDN docs. see: " +
-                                        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements"
+                                    "Please check and validate the appropriate headers are set on the http request as " +
+                                    "defined in the SharedArrayBuffer MDN docs. see: " +
+                                    "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements"
                             )
                         }
                         val array = Uint8Array(data)
