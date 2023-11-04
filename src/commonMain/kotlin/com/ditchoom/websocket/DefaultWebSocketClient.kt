@@ -190,7 +190,7 @@ class DefaultWebSocketClient(
                         FragmentedReadBuffer(readPayload, frame.payloadData).slice()
                     }
                 }
-            } while (!frame!!.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
+            } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
 
             val firstFrame = frames.first()
             val payload = checkNotNull(readPayload)
