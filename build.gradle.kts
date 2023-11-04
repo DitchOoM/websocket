@@ -21,7 +21,6 @@ val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
 repositories {
     google()
     mavenCentral()
-    mavenLocal()
 }
 
 kotlin {
