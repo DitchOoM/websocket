@@ -15,12 +15,15 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 
@@ -28,7 +31,9 @@ class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     allocationZone: AllocationZone
 ) : WebSocketClient {
-    private var runningJob: Job? = null
+    override val scope = CoroutineScope(Dispatchers.Default +
+            CoroutineName("Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                    ": ${connectionOptions.name}:${connectionOptions.port}"))
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
     private val inputStream = SuspendingSocketInputStreamWithPreBuffer(connectionOptions.readTimeout, socket)
@@ -43,90 +48,92 @@ class DefaultWebSocketClient(
     override suspend fun localPort(): Int = socket.localPort()
     override suspend fun remotePort(): Int = socket.remotePort()
 
-    override fun connect(scope: CoroutineScope, tag: String) {
-        scope.launch(Dispatchers.Default + CoroutineName("Websocket Connection: $tag")) {
-            if (connectionState.value == ConnectionState.Connecting ||
-                connectionState.value is ConnectionState.Connected
-            ) {
-                return@launch
-            }
-            _connectionStateFlow.value = ConnectionState.Connecting
-            try {
-                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
-                val protocolString = if (connectionOptions.protocols.isNotEmpty()) {
-                    val sb = StringBuilder()
-                    connectionOptions.protocols.forEach {
-                        sb.append("Sec-WebSocket-Protocol: $it\r\n")
-                    }
-                    sb
-                } else {
-                    ""
+    override suspend fun connect(): WebSocketClient {
+        if (connectionState.value == ConnectionState.Connecting ||
+            connectionState.value is ConnectionState.Connected
+        ) {
+            return this
+        }
+        _connectionStateFlow.value = ConnectionState.Connecting
+        try {
+            socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+            val protocolString = if (connectionOptions.protocols.isNotEmpty()) {
+                val sb = StringBuilder()
+                connectionOptions.protocols.forEach {
+                    sb.append("Sec-WebSocket-Protocol: $it\r\n")
                 }
-                val hostline =
-                    if ((connectionOptions.tls && connectionOptions.port == 443) ||
-                        (!connectionOptions.tls && connectionOptions.port == 80)
-                    ) {
-                        connectionOptions.name
-                    } else {
-                        "${connectionOptions.name}:${connectionOptions.port}"
-                    }
-                val request =
-                    "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
+                sb
+            } else {
+                ""
+            }
+            val hostline =
+                if ((connectionOptions.tls && connectionOptions.port == 443) ||
+                    (!connectionOptions.tls && connectionOptions.port == 80)
+                ) {
+                    connectionOptions.name
+                } else {
+                    "${connectionOptions.name}:${connectionOptions.port}"
+                }
+            val request =
+                "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
                         "Host: $hostline\r\n" +
-                        "Upgrade: websocket\r\n" +
                         "Connection: Upgrade\r\n" +
-                        "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
+                        "Pragma: no-cache\r\n" +
+                        "Cache-Control: no-cache\r\n" +
+                        "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36\r\n" +
+                        "Upgrade: websocket\r\n" +
                         protocolString +
                         "Sec-WebSocket-Version: 13\r\n" +
+                        "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
                         "\r\n"
-                socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
-                val readBuffer = socket.read(connectionOptions.readTimeout)
-                readBuffer.resetForRead()
-                val endOfStartBuffer = "\r\n\r\n".toReadBuffer(Charset.UTF8)
-                val websocketFrameIndex = indexOfBuffer(readBuffer, endOfStartBuffer)
-                val response = readBuffer.readString(websocketFrameIndex)
-                val frameData = readBuffer.readBytes(readBuffer.remaining())
-                if (frameData.hasRemaining()) {
-                    frameData.position(endOfStartBuffer.limit())
-                }
-                val preBuffer = if (frameData.hasRemaining()) {
-                    frameData
-                } else {
-                    null
-                }
-                inputStream.preBuffer = preBuffer?.slice()
-                if (!(
-                    response.contains("101 Switching Protocols", ignoreCase = true) &&
-                        response.contains("Upgrade: websocket", ignoreCase = true) &&
-                        response.contains("Connection: Upgrade", ignoreCase = true) &&
-                        response.contains("Sec-WebSocket-Accept", ignoreCase = true)
-                    )
-                ) {
-                    throw IllegalStateException(
-                        "Invalid response from server when reading the result from " +
+            socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
+            val readBuffer = socket.read(connectionOptions.readTimeout)
+            readBuffer.resetForRead()
+            val endOfStartBuffer = "\r\n\r\n".toReadBuffer(Charset.UTF8)
+            val websocketFrameIndex = indexOfBuffer(readBuffer, endOfStartBuffer)
+            val response = readBuffer.readString(websocketFrameIndex)
+            val frameData = readBuffer.readBytes(readBuffer.remaining())
+            if (frameData.hasRemaining()) {
+                frameData.position(endOfStartBuffer.limit())
+            }
+            val preBuffer = if (frameData.hasRemaining()) {
+                frameData
+            } else {
+                null
+            }
+            inputStream.preBuffer = preBuffer?.slice()
+            if (!(
+                        response.contains("101 Switching Protocols", ignoreCase = true) &&
+                                response.contains("Upgrade: websocket", ignoreCase = true) &&
+                                response.contains("Connection: Upgrade", ignoreCase = true) &&
+                                response.contains("Sec-WebSocket-Accept", ignoreCase = true)
+                        )
+            ) {
+                throw IllegalStateException(
+                    "Invalid response from server when reading the result from " +
                             "websockets. Response:\r\n$response"
-                    )
-                }
-                _connectionStateFlow.value = ConnectionState.Connected
-                processIncomingMessages()
-                launch {
-                    outgoingMessages.consumeAsFlow().collect {
-                        when (it) {
-                            is WebSocketMessage.Binary -> writeWebsocketFrame(Opcode.Binary, it.value)
-                            is WebSocketMessage.Close -> sendCloseFrame(it.code, it.reason)
-                            is WebSocketMessage.Ping -> writeWebsocketFrame(Opcode.Ping, it.value)
-                            is WebSocketMessage.Pong -> writeWebsocketFrame(Opcode.Pong, it.value)
-                            is WebSocketMessage.Text -> writeWebsocketFrame(
-                                Opcode.Text,
-                                it.value.toReadBuffer(Charset.UTF8)
-                            )
-                        }
+                )
+            }
+            _connectionStateFlow.value = ConnectionState.Connected
+            processIncomingMessages()
+            scope.launch {
+                outgoingMessages.consumeAsFlow().collect {
+                    when (it) {
+                        is WebSocketMessage.Binary -> writeWebsocketFrame(Opcode.Binary, it.value)
+                        is WebSocketMessage.Close -> sendCloseFrame(it.code, it.reason)
+                        is WebSocketMessage.Ping -> writeWebsocketFrame(Opcode.Ping, it.value)
+                        is WebSocketMessage.Pong -> writeWebsocketFrame(Opcode.Pong, it.value)
+                        is WebSocketMessage.Text -> writeWebsocketFrame(
+                            Opcode.Text,
+                            it.value.toReadBuffer(Charset.UTF8)
+                        )
                     }
                 }
-            } catch (e: Exception) {
-                _connectionStateFlow.value = ConnectionState.Disconnected(e)
             }
+        } catch (e: Exception) {
+            _connectionStateFlow.value = ConnectionState.Disconnected(e)
         }
+        return this
     }
 
     override suspend fun write(string: String) {
@@ -168,7 +175,7 @@ class DefaultWebSocketClient(
         }
     }
 
-    private fun CoroutineScope.processIncomingMessages() = launch {
+    private fun processIncomingMessages() = scope.launch {
         readLoop@while (isOpen()) {
             val frames = mutableListOf<Frame>()
             var readPayload: ReadBuffer? = null
@@ -220,9 +227,11 @@ class DefaultWebSocketClient(
     ): Boolean {
         when (frame.opcode) {
             Opcode.Ping -> {
+                frame.payloadData.resetForRead()
                 _incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payloadData))
             }
             Opcode.Pong -> {
+                frame.payloadData.resetForRead()
                 _incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payloadData))
             }
             Opcode.Close -> {
@@ -364,8 +373,7 @@ class DefaultWebSocketClient(
     suspend fun cleanupResources() {
         outgoingMessages.close()
         socket.close()
-        runningJob?.cancel()
-        runningJob = null
+        scope.cancel()
     }
 
     private fun indexOfBuffer(buffer: ReadBuffer, pattern: ReadBuffer): Int {
@@ -396,4 +404,20 @@ class DefaultWebSocketClient(
             code in 1007u..1015u ||
             code in 3000u..3999u ||
             code in 4000u..4999u
+
+    companion object {
+        private val countMap = mutableMapOf<String, Int>()
+        private fun getCountForConnection(connectionOptions: WebSocketConnectionOptions): Int {
+            val key = "${connectionOptions.name}:${connectionOptions.port}"
+            val value = countMap[key]
+            return if (value == null) {
+                countMap[key] = 1
+                1
+            } else {
+                val newCount = value + 1
+                countMap[key] = newCount
+                newCount
+            }
+        }
+    }
 }

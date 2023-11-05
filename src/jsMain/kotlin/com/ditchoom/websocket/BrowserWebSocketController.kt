@@ -4,7 +4,10 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import js.buffer.SharedArrayBuffer
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -22,6 +25,11 @@ class BrowserWebSocketController(
     connectionOptions: WebSocketConnectionOptions,
     private val zone: AllocationZone
 ) : WebSocketClient {
+    override val scope = CoroutineScope(
+        Dispatchers.Default +
+            CoroutineName("Websocket Connection: ${connectionOptions.name}:${connectionOptions.port}")
+    )
+
     private val url = connectionOptions.buildUrl()
     private val webSocket: WebSocket = if (connectionOptions.protocols.isNotEmpty()) {
         WebSocket(url, connectionOptions.protocols.first())
@@ -43,7 +51,7 @@ class BrowserWebSocketController(
     override suspend fun localPort(): Int = throw UnsupportedOperationException("Unavailable on browser")
     override suspend fun remotePort(): Int = throw UnsupportedOperationException("Unavailable on browser")
 
-    override fun connect(scope: CoroutineScope, tag: String) {
+    override suspend fun connect(): WebSocketClient {
         webSocket.onclose = {
             val closeEvent = it as CloseEvent
             _connectionStateFlow.value = ConnectionState.Disconnected(
@@ -94,6 +102,7 @@ class BrowserWebSocketController(
             _connectionStateFlow.value = ConnectionState.Connected
             Unit
         }
+        return this
     }
 
     override suspend fun write(string: String) {
@@ -122,5 +131,6 @@ class BrowserWebSocketController(
 
     private fun closeInternal() {
         webSocket.close()
+        scope.cancel()
     }
 }
