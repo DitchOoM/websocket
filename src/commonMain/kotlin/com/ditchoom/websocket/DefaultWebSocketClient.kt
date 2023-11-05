@@ -14,14 +14,12 @@ import com.ditchoom.socket.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -31,9 +29,13 @@ class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     allocationZone: AllocationZone
 ) : WebSocketClient {
-    override val scope = CoroutineScope(Dispatchers.Default +
-            CoroutineName("Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                    ": ${connectionOptions.name}:${connectionOptions.port}"))
+    override val scope = CoroutineScope(
+        Dispatchers.Default +
+            CoroutineName(
+                "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                    ": ${connectionOptions.name}:${connectionOptions.port}"
+            )
+    )
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
     private val inputStream = SuspendingSocketInputStreamWithPreBuffer(connectionOptions.readTimeout, socket)
@@ -76,16 +78,16 @@ class DefaultWebSocketClient(
                 }
             val request =
                 "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
-                        "Host: $hostline\r\n" +
-                        "Connection: Upgrade\r\n" +
-                        "Pragma: no-cache\r\n" +
-                        "Cache-Control: no-cache\r\n" +
-                        "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36\r\n" +
-                        "Upgrade: websocket\r\n" +
-                        protocolString +
-                        "Sec-WebSocket-Version: 13\r\n" +
-                        "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
-                        "\r\n"
+                    "Host: $hostline\r\n" +
+                    "Connection: Upgrade\r\n" +
+                    "Pragma: no-cache\r\n" +
+                    "Cache-Control: no-cache\r\n" +
+                    "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36\r\n" +
+                    "Upgrade: websocket\r\n" +
+                    protocolString +
+                    "Sec-WebSocket-Version: 13\r\n" +
+                    "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
+                    "\r\n"
             socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
             val readBuffer = socket.read(connectionOptions.readTimeout)
             readBuffer.resetForRead()
@@ -103,15 +105,15 @@ class DefaultWebSocketClient(
             }
             inputStream.preBuffer = preBuffer?.slice()
             if (!(
-                        response.contains("101 Switching Protocols", ignoreCase = true) &&
-                                response.contains("Upgrade: websocket", ignoreCase = true) &&
-                                response.contains("Connection: Upgrade", ignoreCase = true) &&
-                                response.contains("Sec-WebSocket-Accept", ignoreCase = true)
-                        )
+                response.contains("101 Switching Protocols", ignoreCase = true) &&
+                    response.contains("Upgrade: websocket", ignoreCase = true) &&
+                    response.contains("Connection: Upgrade", ignoreCase = true) &&
+                    response.contains("Sec-WebSocket-Accept", ignoreCase = true)
+                )
             ) {
                 throw IllegalStateException(
                     "Invalid response from server when reading the result from " +
-                            "websockets. Response:\r\n$response"
+                        "websockets. Response:\r\n$response"
                 )
             }
             _connectionStateFlow.value = ConnectionState.Connected

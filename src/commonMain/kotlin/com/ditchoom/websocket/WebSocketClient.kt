@@ -6,7 +6,6 @@ import com.ditchoom.socket.EMPTY_BUFFER
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 interface WebSocketClient : SuspendCloseable {
