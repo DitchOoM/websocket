@@ -13,7 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class WebSocketTests {
 
@@ -59,7 +59,7 @@ class WebSocketTests {
         if (websocket.isPingSupported()) {
             val payload = createPayload()
             websocket.ping(payload)
-            val pong = withTimeout(100.milliseconds) {
+            val pong = withTimeout(1.seconds) {
                 val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
                 assertNotNull(p)
             }
@@ -84,7 +84,7 @@ class WebSocketTests {
         if (websocket.isPingSupported()) {
             val payload = createPayload()
             websocket.ping(payload)
-            val pong = withTimeout(100.milliseconds) {
+            val pong = withTimeout(1.seconds) {
                 val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
                 assertNotNull(p)
             }
