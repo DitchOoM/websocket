@@ -23,19 +23,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlin.time.Duration
 
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
-    allocationZone: AllocationZone
+    allocationZone: AllocationZone,
+    parentScope: CoroutineScope?
 ) : WebSocketClient {
-    override val scope = CoroutineScope(
-        Dispatchers.Default +
-            CoroutineName(
+    override val scope = if (parentScope == null) {
+        CoroutineScope(
+            Dispatchers.Default + CoroutineName(
                 "Websocket Connection #${getCountForConnection(connectionOptions)}" +
                     ": ${connectionOptions.name}:${connectionOptions.port}"
             )
-    )
+        )
+    } else {
+        parentScope + Dispatchers.Default + CoroutineName(
+            "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                ": ${connectionOptions.name}:${connectionOptions.port}"
+        )
+    }
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
     private val inputStream = SuspendingSocketInputStreamWithPreBuffer(connectionOptions.readTimeout, socket)

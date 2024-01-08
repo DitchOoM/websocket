@@ -18,7 +18,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.todo
 
-class WebSocketAutobahnTests {
+class AutobahnTests {
 //    @get:Rule
 //    public val timeout = CoroutinesTimeout.seconds(1)
 
@@ -27,7 +27,7 @@ class WebSocketAutobahnTests {
         if (shouldRun) {
             block(lambda)
         } else {
-            todo { 
+            todo {
                 GlobalScope.launch {
                     lambda()
                 }
@@ -69,7 +69,7 @@ class WebSocketAutobahnTests {
             closeConnection(webSocket5Client)
             println("close test case 5")
 
-            //65535
+            // 65535
             println("test case 1.1.6")
             val webSocket6Client = prepareConnection(6)
             sendMessageWithPayloadLengthOf(webSocket6Client, 65535)
@@ -124,7 +124,7 @@ class WebSocketAutobahnTests {
             closeConnection(webSocket5Client)
             println("close test case 5")
 
-            //65535
+            // 65535
             println("test case 1.2.6")
             val webSocket6Client = prepareConnection(14)
             sendBinaryWithPayloadLengthOf(webSocket6Client, 65535)
@@ -413,7 +413,6 @@ class WebSocketAutobahnTests {
             println("test case 6.2.4")
             echoMessageAndClose(71)
             println("close test case 6.2.4")
-
         } finally {
             updateReports()
         }
@@ -610,7 +609,6 @@ class WebSocketAutobahnTests {
             println("test case 6.10.3")
             prepareConnection(106)
             println("close test case 6.10.3")
-
         } finally {
             updateReports()
         }
@@ -1069,16 +1067,13 @@ class WebSocketAutobahnTests {
             echoMessageAndClose(199)
             println("close test case 6.22.31")
 
-
             println("test case 6.22.32")
             echoMessageAndClose(200)
             println("close test case 6.22.32")
 
-
             println("test case 6.22.33")
             echoMessageAndClose(201)
             println("close test case 6.22.33")
-
 
             println("test case 6.22.34")
             echoMessageAndClose(202)
@@ -1293,7 +1288,6 @@ class WebSocketAutobahnTests {
             println("test case 7.9.9")
             prepareConnection(244)
             println("close test case 7.9.9")
-
         } finally {
             updateReports()
         }
@@ -1409,7 +1403,6 @@ class WebSocketAutobahnTests {
         }
     }
 
-
     @Test
     fun case9_3_4() = maybeRun {
         try {
@@ -1508,7 +1501,6 @@ class WebSocketAutobahnTests {
             updateReports()
         }
     }
-
 
     @Test
     fun case9_4_4() = maybeRun {
@@ -1840,7 +1832,6 @@ class WebSocketAutobahnTests {
         }
     }
 
-
     @Test
     fun case10_1_1() = maybeRun {
         try {
@@ -1854,17 +1845,17 @@ class WebSocketAutobahnTests {
 
     private suspend fun CoroutineScope.prepareConnection(case: Int): WebSocketClient {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 9001, websocketEndpoint = "/runCase?case=$case&agent=${agentName()}")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
-        websocket.connect(this + CoroutineName(case.toString()))
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this + CoroutineName(case.toString()))
+        websocket.connect()
         websocket.connectionState.first { it is ConnectionState.Connected }
         return websocket
     }
 
     private suspend fun CoroutineScope.echoMessageAndClose(case: Int, count: Int = 1) {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 9001, websocketEndpoint = "/runCase?case=$case&agent=${agentName()}")
-        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
-        launch {
-            ws.connect(this + CoroutineName(case.toString()))
+        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this + CoroutineName(case.toString()))
+        ws.scope.launch {
+            ws.connect()
             ws.connectionState.first { it is ConnectionState.Connected }
         }
         ws.incomingMessages.take(count).collect {
@@ -1876,9 +1867,9 @@ class WebSocketAutobahnTests {
 
     private suspend fun CoroutineScope.echoMessageWhenFoundText(case: Int) {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 9001, websocketEndpoint = "/runCase?case=$case&agent=${agentName()}")
-        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
-        launch {
-            ws.connect(this + CoroutineName(case.toString()))
+        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this + CoroutineName(case.toString()))
+        ws.scope.launch {
+            ws.connect()
             ws.connectionState.first { it is ConnectionState.Connected }
         }
         val msg = ws.incomingMessages.first { it is WebSocketMessage.Text } as WebSocketMessage.Text
@@ -1888,9 +1879,9 @@ class WebSocketAutobahnTests {
 
     private suspend fun CoroutineScope.echoBinaryMessageAndClose(case: Int, count: Int = 1) {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 9001, websocketEndpoint = "/runCase?case=$case&agent=${agentName()}")
-        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory) as DefaultWebSocketClient
-        launch {
-            ws.connect(this + CoroutineName(case.toString()))
+        val ws = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this + CoroutineName(case.toString())) as DefaultWebSocketClient
+        ws.scope.launch {
+            ws.connect()
             ws.connectionState.first { it is ConnectionState.Connected }
         }
         ws.incomingMessages.take(count).collect {
@@ -1929,13 +1920,13 @@ class WebSocketAutobahnTests {
     fun updateReports() = maybeRun {
         println("** UPDATE REPORTS **")
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 9001, websocketEndpoint = "/updateReports?agent=${agentName()}")
-        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory) as DefaultWebSocketClient
-        websocket.connect(this)
+        val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this) as DefaultWebSocketClient
+        websocket.connect()
         websocket.connectionState.first { it is ConnectionState.Connected }
         websocket.close()
     }
 
-    private val charPool : List<Char> = listOf('*')//('a'..'z') + ('A'..'Z') + ('0'..'9')
+    private val charPool: List<Char> = listOf('*') // ('a'..'z') + ('A'..'Z') + ('0'..'9')
     fun randomStringByKotlinRandom(len: Int) = (1..len)
         .map { Random.nextInt(0, charPool.size).let { charPool[it] } }
         .joinToString("")

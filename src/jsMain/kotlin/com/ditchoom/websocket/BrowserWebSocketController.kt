@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Uint8Array
@@ -25,12 +26,22 @@ import org.w3c.dom.WebSocket
 
 class BrowserWebSocketController(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val zone: AllocationZone
+    private val zone: AllocationZone,
+    parentScope: CoroutineScope?
 ) : WebSocketClient {
-    override val scope = CoroutineScope(
-        Dispatchers.Default +
-            CoroutineName("Websocket Connection: ${connectionOptions.name}:${connectionOptions.port}")
-    )
+    override val scope = if (parentScope == null) {
+        CoroutineScope(
+            Dispatchers.Default + CoroutineName(
+                "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                    ": ${connectionOptions.name}:${connectionOptions.port}"
+            )
+        )
+    } else {
+        parentScope + Dispatchers.Default + CoroutineName(
+            "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                ": ${connectionOptions.name}:${connectionOptions.port}"
+        )
+    }
 
     private val url = connectionOptions.buildUrl()
     private val webSocket: WebSocket = if (connectionOptions.protocols.isNotEmpty()) {
@@ -149,5 +160,21 @@ class BrowserWebSocketController(
     private fun closeInternal() {
         webSocket.close()
         scope.cancel()
+    }
+
+    companion object {
+        private val countMap = mutableMapOf<String, Int>()
+        private fun getCountForConnection(connectionOptions: WebSocketConnectionOptions): Int {
+            val key = "${connectionOptions.name}:${connectionOptions.port}"
+            val value = countMap[key]
+            return if (value == null) {
+                countMap[key] = 1
+                1
+            } else {
+                val newCount = value + 1
+                countMap[key] = newCount
+                newCount
+            }
+        }
     }
 }
