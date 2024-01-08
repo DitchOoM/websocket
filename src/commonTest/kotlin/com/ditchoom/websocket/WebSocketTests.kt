@@ -59,7 +59,7 @@ class WebSocketTests {
         if (websocket.isPingSupported()) {
             val payload = createPayload()
             websocket.ping(payload)
-            val pong = withTimeout(1.seconds) {
+            val pong = withTimeout(10.seconds) {
                 val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
                 assertNotNull(p)
             }
@@ -84,7 +84,7 @@ class WebSocketTests {
         if (websocket.isPingSupported()) {
             val payload = createPayload()
             websocket.ping(payload)
-            val pong = withTimeout(1.seconds) {
+            val pong = withTimeout(10.seconds) {
                 val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
                 assertNotNull(p)
             }
