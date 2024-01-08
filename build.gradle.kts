@@ -1,8 +1,6 @@
-import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
-
 plugins {
-    kotlin("multiplatform") version "1.9.20"
-    kotlin("native.cocoapods") version "1.9.20"
+    kotlin("multiplatform") version "1.9.22"
+    kotlin("native.cocoapods") version "1.9.22"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
@@ -50,12 +48,8 @@ kotlin {
     watchos()
     watchosSimulatorArm64()
     tvos()
-    tvosSimulatorArm64()
     ios()
     iosSimulatorArm64()
-    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        device.set("iPhone 14")
-    }
 
     cocoapods {
         ios.deploymentTarget = "13.0"
@@ -67,14 +61,13 @@ kotlin {
                 tag = "0.1.3"
             }
             extraOpts += listOf("-compiler-option", "-fmodules")
-//            source = path(project.file("./../SocketWrapper/"))
         }
     }
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation("com.ditchoom:buffer:1.3.7")
-                implementation("com.ditchoom:socket:1.1.16")
+                implementation("com.ditchoom:buffer:1.3.36")
+                implementation("com.ditchoom:socket:1.1.17")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
@@ -95,8 +88,8 @@ kotlin {
         }
         val jsMain by getting {
             dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.615")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.615")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.682")
+                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.682")
             }
         }
         val jsTest by getting
@@ -114,8 +107,6 @@ kotlin {
         val watchosSimulatorArm64Test by getting
         val tvosMain by getting
         val tvosTest by getting
-        val tvosSimulatorArm64Main by getting
-        val tvosSimulatorArm64Test by getting
 
         val appleMain by sourceSets.creating {
             dependsOn(commonMain)
@@ -125,7 +116,6 @@ kotlin {
             iosMain.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
             tvosMain.dependsOn(this)
-            tvosSimulatorArm64Main.dependsOn(this)
             watchosMain.dependsOn(this)
             watchosSimulatorArm64Main.dependsOn(this)
         }
@@ -138,7 +128,6 @@ kotlin {
             iosTest.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
             tvosTest.dependsOn(this)
-            tvosSimulatorArm64Test.dependsOn(this)
             watchosTest.dependsOn(this)
             watchosSimulatorArm64Test.dependsOn(this)
         }
