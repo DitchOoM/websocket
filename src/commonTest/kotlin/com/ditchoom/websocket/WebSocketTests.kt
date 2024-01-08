@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -70,7 +69,6 @@ class WebSocketTests {
     }
 
     @Test
-    @Ignore
     fun allTypesWork() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
         val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)

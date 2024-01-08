@@ -8,7 +8,6 @@ import com.ditchoom.buffer.allocate
 import com.ditchoom.socket.EMPTY_BUFFER
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
@@ -17,14 +16,12 @@ import kotlinx.coroutines.plus
 import kotlin.random.Random
 import kotlin.test.BeforeTest
 import kotlin.test.Test
-import kotlin.test.todo
 
 class AutobahnTests {
     private var shouldRun = false
 
     @BeforeTest
     fun checkAutobahnDockerImage() {
-
     }
 
     fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) {
