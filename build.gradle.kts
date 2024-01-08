@@ -1,3 +1,5 @@
+import org.apache.tools.ant.taskdefs.condition.Os
+
 plugins {
     kotlin("multiplatform") version "1.9.22"
     kotlin("native.cocoapods") version "1.9.22"
@@ -8,6 +10,16 @@ plugins {
     id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
     id("org.jlleitschuh.gradle.ktlint-idea") version "11.6.1"
 }
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+val isMacOS = Os.isFamily(Os.FAMILY_MAC)
+val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
+
+println(
+    "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
+        "Load All Platforms: $loadAllPlatforms"
+)
+
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
@@ -25,20 +37,22 @@ kotlin {
     androidTarget {
         publishLibraryVariants("release")
     }
-    jvm {
-        compilations.all {
-            kotlinOptions.jvmTarget = "1.8"
+    if (loadAllPlatforms) {
+        jvm {
+            compilations.all {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            testRuns["test"].executionTask.configure {
+                useJUnit()
+            }
         }
-        testRuns["test"].executionTask.configure {
-            useJUnit()
-        }
-    }
-    js {
-        browser()
-        nodejs {
-            testTask {
-                useMocha {
-                    timeout = "120s"
+        js {
+            browser()
+            nodejs {
+                testTask {
+                    useMocha {
+                        timeout = "120s"
+                    }
                 }
             }
         }
@@ -76,23 +90,25 @@ kotlin {
                 implementation(kotlin("test"))
             }
         }
-        val jvmMain by getting {
-            kotlin.srcDir("src/commonJvmMain/kotlin")
-        }
-        val jvmTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-            dependencies {
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.7.3")
-                implementation("junit:junit:4.13.2")
+        if (loadAllPlatforms) {
+            val jvmMain by getting {
+                kotlin.srcDir("src/commonJvmMain/kotlin")
             }
-        }
-        val jsMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.682")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.682")
+            val jvmTest by getting {
+                kotlin.srcDir("src/commonJvmTest/kotlin")
+                dependencies {
+                    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.7.3")
+                    implementation("junit:junit:4.13.2")
+                }
             }
+            val jsMain by getting {
+                dependencies {
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.682")
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.682")
+                }
+            }
+            val jsTest by getting
         }
-        val jsTest by getting
         val macosX64Main by getting
         val macosX64Test by getting
         val macosArm64Main by getting
@@ -139,7 +155,6 @@ kotlin {
         val androidUnitTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
             dependsOn(commonTest)
-            dependsOn(jvmTest)
         }
         val androidInstrumentedTest by getting {
             dependsOn(commonTest)
@@ -165,8 +180,8 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-System.getenv("GITHUB_REPOSITORY")?.let {
-    if (System.getenv("GITHUB_REF") == "refs/heads/main") {
+if (isRunningOnGithub) {
+    if (isMainBranchGithub) {
         signing {
             useInMemoryPgpKeys(
                 "56F1A973",
@@ -232,7 +247,8 @@ System.getenv("GITHUB_REPOSITORY")?.let {
         }
 
         repositories {
-            maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
+            maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/$repositoryId/") {
                 name = "sonatype"
                 credentials {
                     username = ossUser
@@ -247,6 +263,11 @@ System.getenv("GITHUB_REPOSITORY")?.let {
         password = ossPassword
         packageGroup = publishedGroupId
     }
+}
+
+ktlint {
+    verbose.set(true)
+    outputToConsole.set(true)
 }
 
 val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {

@@ -3,6 +3,7 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.socket.SocketClosedException
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.khronos.webgl.ArrayBuffer
 import org.khronos.webgl.Uint8Array
 import org.w3c.dom.ARRAYBUFFER
@@ -22,7 +24,7 @@ import org.w3c.dom.CloseEvent
 import org.w3c.dom.WebSocket
 
 class BrowserWebSocketController(
-    connectionOptions: WebSocketConnectionOptions,
+    private val connectionOptions: WebSocketConnectionOptions,
     private val zone: AllocationZone
 ) : WebSocketClient {
     override val scope = CoroutineScope(
@@ -84,8 +86,8 @@ class BrowserWebSocketController(
                         val array = Uint8Array(data)
                         val buffer = JsBuffer(array)
                         buffer.setLimit(array.length)
-                        buffer.setPosition(array.length)
-                        buffer
+                        buffer.setPosition(0)
+                        buffer.slice()
                     }
                     scope.launch {
                         _incomingMessageSharedFlow.emit(WebSocketMessage.Binary(buffer))
@@ -101,6 +103,21 @@ class BrowserWebSocketController(
         webSocket.onopen = { _ ->
             _connectionStateFlow.value = ConnectionState.Connected
             Unit
+        }
+        withTimeout(connectionOptions.connectionTimeout) {
+            val connectionStateValue = connectionState.value
+            when (connectionStateValue) {
+                ConnectionState.Initialized, ConnectionState.Connecting -> {
+                    connectionState.first { it is ConnectionState.Connected }
+                }
+                is ConnectionState.Disconnected ->
+                    throw SocketClosedException(
+                        "Failed to connect. Reason: ${connectionStateValue.reason}," +
+                            " Code: ${connectionStateValue.code}",
+                        connectionStateValue.t
+                    )
+                ConnectionState.Connected -> {} // nothing to wait for
+            }
         }
         return this
     }
