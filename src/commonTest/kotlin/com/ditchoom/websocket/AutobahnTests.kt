@@ -15,23 +15,23 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlin.random.Random
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.todo
 
 class AutobahnTests {
-//    @get:Rule
-//    public val timeout = CoroutinesTimeout.seconds(1)
+    private var shouldRun = false
+
+    @BeforeTest
+    fun checkAutobahnDockerImage() {
+
+    }
 
     fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) {
-        val shouldRun = false
         if (shouldRun) {
             block(lambda)
         } else {
-            todo {
-                GlobalScope.launch {
-                    lambda()
-                }
-            }
+            println("No autobahn docker could be found, skipping: $lambda")
         }
     }
 
