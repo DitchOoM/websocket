@@ -20,8 +20,17 @@ jobs:
           distribution: 'zulu'
           java-version: '19'
           cache: gradle
+      - name: create AVD and generate snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
       - name: run tests
-        uses: reactivecircus/android-emulator-runner@main
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 29
           force-avd-creation: false
