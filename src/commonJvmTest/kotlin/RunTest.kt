@@ -1,8 +1,12 @@
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 actual fun <T> block(body: suspend CoroutineScope.() -> T) {
-    runBlocking(block = body)
+    runBlocking {
+        withTimeout(120.seconds, body)
+    }
 }
 
 actual fun agentName(): String {
