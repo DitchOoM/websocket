@@ -276,18 +276,18 @@ val validateAutobahnResults = task("validateAutobahnResults") {
         // [AgentName, [Version, Props]]
         val cases = ArrayList<TestResult>()
 
-            obj.keys.forEach { agentName ->
-                val props = obj[agentName] as Map<String, Map<String, Any>>
-                props.keys.forEach { version ->
-                    val keyValue = props[version]!!
-                    try {
-                        cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
-                    } catch (e: Exception) {
-                        println("FAIL $e")
-                        println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
-                    }
+        obj.keys.forEach { agentName ->
+            val props = obj[agentName] as Map<String, Map<String, Any>>
+            props.keys.forEach { version ->
+                val keyValue = props[version]!!
+                try {
+                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
+                } catch (e: Exception) {
+                    println("FAIL $e")
+                    println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
                 }
             }
+        }
 
         val failedCases = cases.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
         if (failedCases.isNotEmpty()) {

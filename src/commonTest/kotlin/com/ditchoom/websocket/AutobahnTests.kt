@@ -10,7 +10,6 @@ import com.ditchoom.socket.EMPTY_BUFFER
 import com.ditchoom.socket.connect
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
