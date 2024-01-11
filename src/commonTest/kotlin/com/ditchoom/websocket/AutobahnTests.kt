@@ -47,13 +47,13 @@ class AutobahnTests {
             AutobahnConnectivityState.AVAILABLE -> {
                 try {
                     block(lambda)
-                } catch (e: TimeoutCancellationException) {
+                } catch (e: Exception) {
                     // try again
-                    println("Trying again!")
+                    println("Trying again!, Exception $e")
                     try {
                         block(lambda)
-                    } catch (e: TimeoutCancellationException) {
-                        println("Try one last time!")
+                    } catch (ex: Exception) {
+                        println("Try one last time! $ex")
                         block(lambda)
                     }
                 }
