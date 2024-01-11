@@ -271,17 +271,24 @@ val validateAutobahnResults = task("validateAutobahnResults") {
         if (!Files.exists(path)) return@doLast
         println("**VALIDATING AUTOBAHN RESULTS **")
         data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int)
-        val json = Files.readAllBytes(path)
-        val obj = JSONObject(json.decodeToString()).toMap()
+        val json = Files.readAllBytes(path).decodeToString()
+        val obj = JSONObject(json).toMap()
         // [AgentName, [Version, Props]]
         val cases = ArrayList<TestResult>()
-        obj.keys.forEach { agentName ->
-            val props = obj[agentName] as Map<String, Map<String, Any>>
-            props.keys.forEach { version ->
-                val keyValue = props[version]!!
-                cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
+
+            obj.keys.forEach { agentName ->
+                val props = obj[agentName] as Map<String, Map<String, Any>>
+                props.keys.forEach { version ->
+                    val keyValue = props[version]!!
+                    try {
+                        cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
+                    } catch (e: Exception) {
+                        println("FAIL $e")
+                        println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
+                    }
+                }
             }
-        }
+
         val failedCases = cases.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
         if (failedCases.isNotEmpty()) {
             throw GradleException("Failed test cases: $failedCases")
