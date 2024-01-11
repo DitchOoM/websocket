@@ -67,7 +67,6 @@ class AutobahnTests {
 
     @Test
     fun case1_1() = maybeRun {
-
         val webSocketClient = prepareConnection(1)
         println("test case 1.1.1")
         sendMessageWithPayloadLengthOf(webSocketClient, 0)
@@ -117,12 +116,10 @@ class AutobahnTests {
         sendMessageWithPayloadLengthOf(webSocket8Client, 65536)
         closeConnection(webSocket8Client)
         println("close test case 8")
-
     }
 
     @Test
     fun case1_2() = maybeRun {
-
         println("test case 1.2.1")
         val webSocketClient = prepareConnection(9)
         sendBinaryWithPayloadLengthOf(webSocketClient, 0)
@@ -170,12 +167,10 @@ class AutobahnTests {
         sendBinaryWithPayloadLengthOf(webSocket8Client, 65536)
         closeConnection(webSocket8Client)
         println("close test case 8")
-
     }
 
     @Test
     fun case2_1() = maybeRun {
-
         println("test case 2.1")
         prepareConnection(17)
         println("close test case 2.1")
@@ -219,12 +214,10 @@ class AutobahnTests {
         println("test case 2.11")
         prepareConnection(27)
         println("close test case 2.11")
-
     }
 
     @Test
     fun case3_1() = maybeRun {
-
         println("test case 3.1")
         prepareConnection(28)
         println("close test case 3.1")
@@ -252,12 +245,10 @@ class AutobahnTests {
         println("test case 3.7")
         prepareConnection(34)
         println("close test case 3.7")
-
     }
 
     @Test
     fun case4_1() = maybeRun {
-
         println("test case 4.1.1")
         prepareConnection(35)
         println("close test case 4.1.1")
@@ -278,12 +269,10 @@ class AutobahnTests {
         prepareConnection(39)
         println("close test case 4.1.5")
         delay(100) // need to wait for the remote to close the connection
-
     }
 
     @Test
     fun case4_2() = maybeRun {
-
         println("test case 4.2.1")
         prepareConnection(40)
         println("close test case 4.2.1")
@@ -304,12 +293,10 @@ class AutobahnTests {
         prepareConnection(44)
         println("close test case 4.2.5")
         delay(100) // need to wait for the remote to close the connection
-
     }
 
     @Test
     fun case5() = maybeRun {
-
         println("test case 5.1")
         prepareConnection(45)
         println("close test case 5.1")
@@ -389,12 +376,10 @@ class AutobahnTests {
         println("test case 5.20")
         echoMessageWhenFoundText(64)
         println("close test case 5.20")
-
     }
 
     @Test
     fun case6_1() = maybeRun {
-
         println("test case 6.1.1")
         echoMessageAndClose(65)
         println("close test case 6.1.1")
@@ -406,12 +391,10 @@ class AutobahnTests {
         println("test case 6.1.3")
         echoMessageAndClose(67)
         println("close test case 6.1.3")
-
     }
 
     @Test
     fun case6_2() = maybeRun {
-
         println("test case 6.2.1")
         echoMessageAndClose(68)
         println("close test case 6.2.1")
@@ -427,12 +410,10 @@ class AutobahnTests {
         println("test case 6.2.4")
         echoMessageAndClose(71)
         println("close test case 6.2.4")
-
     }
 
     @Test
     fun case6_3() = maybeRun {
-
         println("test case 6.3.1")
         prepareConnection(72)
         println("close test case 6.3.1")
@@ -440,12 +421,10 @@ class AutobahnTests {
         println("test case 6.3.2")
         prepareConnection(73)
         println("close test case 6.3.2")
-
     }
 
     @Test
     fun case6_4() = maybeRun {
-
         println("test case 6.4.1")
         prepareConnection(74)
         println("close test case 6.4.1")
@@ -461,12 +440,10 @@ class AutobahnTests {
         println("test case 6.4.4")
         prepareConnection(77)
         println("close test case 6.4.4")
-
     }
 
     @Test
     fun case6_5() = maybeRun {
-
         println("test case 6.5.1")
         echoMessageAndClose(78)
         println("close test case 6.5.1")
@@ -486,12 +463,10 @@ class AutobahnTests {
         println("test case 6.5.5")
         echoMessageAndClose(82)
         println("close test case 6.5.5")
-
     }
 
     @Test
     fun case6_6() = maybeRun {
-
         println("test case 6.6.1")
         prepareConnection(83)
         println("close test case 6.6.1")
@@ -535,12 +510,10 @@ class AutobahnTests {
         println("test case 6.6.11")
         echoMessageAndClose(93)
         println("close test case 6.6.11")
-
     }
 
     @Test
     fun case6_7() = maybeRun {
-
         println("test case 6.7.1")
         echoMessageAndClose(94)
         println("close test case 6.7.1")
@@ -556,12 +529,10 @@ class AutobahnTests {
         println("test case 6.7.4")
         echoMessageAndClose(97)
         println("close test case 6.7.4")
-
     }
 
     @Test
     fun case6_8() = maybeRun {
-
         println("test case 6.8.1")
         prepareConnection(98)
         println("close test case 6.8.1")
@@ -569,12 +540,10 @@ class AutobahnTests {
         println("test case 6.8.2")
         prepareConnection(99)
         println("close test case 6.8.2")
-
     }
 
     @Test
     fun case6_9() = maybeRun {
-
         println("test case 6.9.1")
         echoMessageAndClose(100)
         println("close test case 6.9.1")
@@ -590,12 +559,10 @@ class AutobahnTests {
         println("test case 6.9.4")
         echoMessageAndClose(103)
         println("close test case 6.9.4")
-
     }
 
     @Test
     fun case6_10() = maybeRun {
-
         println("test case 6.10.1")
         prepareConnection(104)
         println("close test case 6.10.1")
@@ -607,12 +574,10 @@ class AutobahnTests {
         println("test case 6.10.3")
         prepareConnection(106)
         println("close test case 6.10.3")
-
     }
 
     @Test
     fun case6_11() = maybeRun {
-
         println("test case 6.11.1")
         echoMessageAndClose(107)
         println("close test case 6.11.1")
@@ -632,12 +597,10 @@ class AutobahnTests {
         println("test case 6.11.5")
         prepareConnection(111)
         println("close test case 6.10.5")
-
     }
 
     @Test
     fun case6_12() = maybeRun {
-
         println("test case 6.12.1")
         prepareConnection(112)
         println("close test case 6.12.1")
@@ -669,12 +632,10 @@ class AutobahnTests {
         println("test case 6.12.8")
         prepareConnection(119)
         println("close test case 6.12.8")
-
     }
 
     @Test
     fun case6_13() = maybeRun {
-
         println("test case 6.13.1")
         prepareConnection(120)
         println("close test case 6.13.1")
@@ -694,12 +655,10 @@ class AutobahnTests {
         println("test case 6.13.5")
         prepareConnection(124)
         println("close test case 6.13.5")
-
     }
 
     @Test
     fun case6_14() = maybeRun {
-
         println("test case 6.14.1")
         prepareConnection(125)
         println("close test case 6.14.1")
@@ -739,21 +698,17 @@ class AutobahnTests {
         println("test case 6.14.10")
         prepareConnection(134)
         println("close test case 6.14.10")
-
     }
 
     @Test
     fun case6_15() = maybeRun {
-
         println("test case 6.15.1")
         prepareConnection(135)
         println("close test case 6.15.1")
-
     }
 
     @Test
     fun case6_16() = maybeRun {
-
         println("test case 6.16.1")
         prepareConnection(136)
         println("close test case 6.16.1")
@@ -765,12 +720,10 @@ class AutobahnTests {
         println("test case 6.16.3")
         prepareConnection(138)
         println("close test case 6.16.3")
-
     }
 
     @Test
     fun case6_17() = maybeRun {
-
         println("test case 6.17.1")
         prepareConnection(139)
         println("close test case 6.17.1")
@@ -790,12 +743,10 @@ class AutobahnTests {
         println("test case 6.17.5")
         prepareConnection(143)
         println("close test case 6.17.5")
-
     }
 
     @Test
     fun case6_18() = maybeRun {
-
         println("test case 6.18.1")
         prepareConnection(144)
         println("close test case 6.18.1")
@@ -815,12 +766,10 @@ class AutobahnTests {
         println("test case 6.18.5")
         prepareConnection(148)
         println("close test case 6.18.5")
-
     }
 
     @Test
     fun case6_19() = maybeRun {
-
         println("test case 6.18.1")
         prepareConnection(149)
         println("close test case 6.18.1")
@@ -840,12 +789,10 @@ class AutobahnTests {
         println("test case 6.18.5")
         prepareConnection(153)
         println("close test case 6.18.5")
-
     }
 
     @Test
     fun case6_20() = maybeRun {
-
         println("test case 6.20.1")
         prepareConnection(154)
         println("close test case 6.20.1")
@@ -877,7 +824,6 @@ class AutobahnTests {
 
     @Test
     fun case6_21() = maybeRun {
-
         println("test case 6.21.1")
         prepareConnection(161)
         println("close test case 6.21.1")
@@ -909,12 +855,10 @@ class AutobahnTests {
         println("test case 6.21.8")
         prepareConnection(168)
         println("close test case 6.21.8")
-
     }
 
     @Test
     fun case6_22() = maybeRun {
-
         println("test case 6.22.1")
         echoMessageAndClose(169)
         println("close test case 6.22.1")
@@ -1050,12 +994,10 @@ class AutobahnTests {
         println("test case 6.22.34")
         echoMessageAndClose(202)
         println("close test case 6.22.34")
-
     }
 
     @Test
     fun case6_23() = maybeRun {
-
         println("test case 6.23.1")
         echoMessageAndClose(203)
         println("close test case 6.23.1")
@@ -1083,12 +1025,10 @@ class AutobahnTests {
         println("test case 6.23.7")
         echoMessageAndClose(209)
         println("close test case 6.23.7")
-
     }
 
     @Test
     fun case7_1() = maybeRun {
-
         println("test case 7.1.1")
         echoMessageAndClose(210)
         println("close test case 7.1.1")
@@ -1112,12 +1052,10 @@ class AutobahnTests {
         println("test case 7.1.6")
         prepareConnection(215)
         println("close test case 7.1.6")
-
     }
 
     @Test
     fun case7_3() = maybeRun {
-
         println("test case 7.3.1")
         closeConnection(prepareConnection(216))
         println("close test case 7.3.1")
@@ -1141,21 +1079,17 @@ class AutobahnTests {
         println("test case 7.3.6")
         prepareConnection(221)
         println("close test case 7.3.6")
-
     }
 
     @Test
     fun case7_5() = maybeRun {
-
         println("test case 7.5.1")
         prepareConnection(222)
         println("close test case 7.5.1")
-
     }
 
     @Test
     fun case7_7() = maybeRun {
-
         println("test case 7.7.1")
         prepareConnection(223)
         println("close test case 7.7.1")
@@ -1207,12 +1141,10 @@ class AutobahnTests {
         println("test case 7.7.13")
         prepareConnection(235)
         println("close test case 7.7.13")
-
     }
 
     @Test
     fun case7_9() = maybeRun {
-
         println("test case 7.9.1")
         prepareConnection(236)
         println("close test case 7.9.1")
@@ -1248,12 +1180,10 @@ class AutobahnTests {
         println("test case 7.9.9")
         prepareConnection(244)
         println("close test case 7.9.9")
-
     }
 
     @Test
     fun case7_13() = maybeRun {
-
         println("test case 7.13.1")
         prepareConnection(245)
         println("close test case 7.13.1")
@@ -1261,12 +1191,10 @@ class AutobahnTests {
         println("test case 7.13.2")
         prepareConnection(246)
         println("close test case 7.13.2")
-
     }
 
     @Test
     fun case9_1() = maybeRun {
-
         println("test case 9.1.1")
         echoMessageAndClose(247)
         println("close test case 9.1.1")
@@ -1290,12 +1218,10 @@ class AutobahnTests {
         println("test case 9.1.6")
         echoMessageAndClose(252)
         println("close test case 9.1.6")
-
     }
 
     @Test
     fun case9_2() = maybeRun {
-
         println("test case 9.2.1")
         echoBinaryMessageAndClose(253)
         println("close test case 9.2.1")
@@ -1319,214 +1245,167 @@ class AutobahnTests {
         println("test case 9.2.6")
         echoBinaryMessageAndClose(258)
         println("close test case 9.2.6")
-
     }
 
     @Test
     fun case9_3_1() = maybeRun {
-
         println("test case 9.3.1")
         echoMessageAndClose(259)
         println("close test case 9.3.1")
-
     }
 
     @Test
     fun case9_3_2() = maybeRun {
-
         println("test case 9.3.2")
         echoMessageAndClose(260)
         println("close test case 9.3.2")
-
     }
 
     @Test
     fun case9_3_3() = maybeRun {
-
         println("test case 9.3.3")
         echoMessageAndClose(261)
         println("close test case 9.3.3")
-
     }
 
     @Test
     fun case9_3_4() = maybeRun {
-
         println("test case 9.3.4")
         echoMessageAndClose(262)
         println("close test case 9.3.4")
-
     }
 
     @Test
     fun case9_3_5() = maybeRun {
-
         println("test case 9.3.5")
         echoMessageAndClose(263)
         println("close test case 9.3.5")
-
     }
 
     @Test
     fun case9_3_6() = maybeRun {
-
         println("test case 9.3.6")
         echoMessageAndClose(264)
         println("close test case 9.3.6")
-
     }
 
     @Test
     fun case9_3_7() = maybeRun {
-
         println("test case 9.3.7")
         echoMessageAndClose(265)
         println("close test case 9.3.7")
-
     }
 
     @Test
     fun case9_3_8() = maybeRun {
-
         println("test case 9.3.8")
         echoMessageAndClose(266)
         println("close test case 9.3.8")
-
     }
 
     @Test
     fun case9_3_9() = maybeRun {
-
         println("test case 9.3.9")
         echoMessageAndClose(267)
         println("close test case 9.3.9")
-
     }
 
     @Test
     fun case9_4_1() = maybeRun {
-
         println("test case 9.4.1")
         echoBinaryMessageAndClose(268)
         println("close test case 9.4.1")
-
     }
 
     @Test
     fun case9_4_2() = maybeRun {
-
         println("test case 9.4.2")
         echoBinaryMessageAndClose(269)
         println("close test case 9.4.2")
-
     }
 
     @Test
     fun case9_4_3() = maybeRun {
-
         println("test case 9.4.3")
         echoBinaryMessageAndClose(270)
         println("close test case 9.4.3")
-
     }
 
     @Test
     fun case9_4_4() = maybeRun {
-
         println("test case 9.4.4")
         echoBinaryMessageAndClose(271)
         println("close test case 9.4.4")
-
     }
 
     @Test
     fun case9_4_5() = maybeRun {
-
         println("test case 9.4.5")
         echoBinaryMessageAndClose(272)
         println("close test case 9.4.5")
-
     }
 
     @Test
     fun case9_4_6() = maybeRun {
-
         println("test case 9.4.6")
         echoBinaryMessageAndClose(273)
         println("close test case 9.4.6")
-
     }
 
     @Test
     fun case9_4_7() = maybeRun {
-
         println("test case 9.4.7")
         echoBinaryMessageAndClose(274)
         println("close test case 9.4.7")
-
     }
 
     @Test
     fun case9_4_8() = maybeRun {
-
         println("test case 9.4.8")
         echoBinaryMessageAndClose(275)
         println("close test case 9.4.8")
-
     }
 
     @Test
     fun case9_4_9() = maybeRun {
-
         println("test case 9.4.9")
         echoBinaryMessageAndClose(276)
         println("close test case 9.4.9")
-
     }
 
     @Test
     fun case9_5_1() = maybeRun {
-
         println("test case 9.5.1")
         echoMessageAndClose(277)
         println("close test case 9.5.1")
-
     }
 
     @Test
     fun case9_5_2() = maybeRun {
-
         println("test case 9.5.2")
         echoMessageAndClose(278)
         println("close test case 9.5.2")
-
     }
 
     @Test
     fun case9_5_3() = maybeRun {
-
         println("test case 9.5.3")
         echoMessageAndClose(279)
         println("close test case 9.5.3")
-
     }
 
     @Test
     fun case9_5_4() = maybeRun {
-
         println("test case 9.5.4")
         echoMessageAndClose(280)
         println("close test case 9.5.4")
-
     }
 
     @Test
     fun case9_5_5() = maybeRun {
-
         println("test case 9.5.5")
         echoMessageAndClose(281)
         println("close test case 9.5.5")
-
     }
 
     @Test

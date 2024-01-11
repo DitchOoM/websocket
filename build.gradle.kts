@@ -1,7 +1,6 @@
-import com.gradle.enterprise.gradleplugin.testretry.retry
+
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.json.JSONObject
-import java.io.FileReader
 import java.nio.file.Files
 import java.nio.file.Paths
 
@@ -268,15 +267,17 @@ val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
 val validateAutobahnResults = task("validateAutobahnResults") {
     doLast {
+        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
+        if (!Files.exists(path)) return@doLast
         println("**VALIDATING AUTOBAHN RESULTS **")
         data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int)
-        val json = Files.readAllBytes(Paths.get("${project.projectDir}/.docker/reports/clients/index.json"))
+        val json = Files.readAllBytes(path)
         val obj = JSONObject(json.decodeToString()).toMap()
         // [AgentName, [Version, Props]]
         val cases = ArrayList<TestResult>()
-        obj.keys.forEach {  agentName ->
+        obj.keys.forEach { agentName ->
             val props = obj[agentName] as Map<String, Map<String, Any>>
-            props.keys.forEach {  version ->
+            props.keys.forEach { version ->
                 val keyValue = props[version]!!
                 cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
             }
