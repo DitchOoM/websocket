@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 
 class DefaultWebSocketClient(
@@ -66,7 +67,9 @@ class DefaultWebSocketClient(
         }
         _connectionStateFlow.value = ConnectionState.Connecting
         try {
-            socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+            withTimeout(connectionOptions.connectionTimeout) {
+                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+            }
             val protocolString = if (connectionOptions.protocols.isNotEmpty()) {
                 val sb = StringBuilder()
                 connectionOptions.protocols.forEach {
@@ -383,7 +386,7 @@ class DefaultWebSocketClient(
     suspend fun cleanupResources() {
         outgoingMessages.close()
         socket.close()
-        scope.cancel()
+//        scope.cancel()
     }
 
     private fun indexOfBuffer(buffer: ReadBuffer, pattern: ReadBuffer): Int {

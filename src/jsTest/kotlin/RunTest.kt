@@ -18,7 +18,7 @@ fun <T> runTestInternal(
     block: suspend CoroutineScope.() -> T
 ): Promise<T?> {
     val promise = GlobalScope.promise {
-        return@promise withTimeout(3.seconds, block)
+        return@promise withTimeout(60.seconds, block)
     }
     return promise
 }

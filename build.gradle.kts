@@ -1,4 +1,9 @@
+import com.gradle.enterprise.gradleplugin.testretry.retry
 import org.apache.tools.ant.taskdefs.condition.Os
+import org.json.JSONObject
+import java.io.FileReader
+import java.nio.file.Files
+import java.nio.file.Paths
 
 plugins {
     kotlin("multiplatform") version "1.9.22"
@@ -9,6 +14,7 @@ plugins {
     signing
     id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
     id("org.jlleitschuh.gradle.ktlint-idea") version "11.6.1"
+    kotlin("plugin.serialization") version "1.9.22"
 }
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
@@ -59,9 +65,6 @@ kotlin {
     }
     macosArm64()
     macosX64()
-    watchos()
-    watchosSimulatorArm64()
-    tvos()
     ios()
     iosSimulatorArm64()
 
@@ -88,6 +91,7 @@ kotlin {
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
             }
         }
         if (loadAllPlatforms) {
@@ -117,12 +121,6 @@ kotlin {
         val iosTest by getting
         val iosSimulatorArm64Main by getting
         val iosSimulatorArm64Test by getting
-        val watchosMain by getting
-        val watchosTest by getting
-        val watchosSimulatorArm64Main by getting
-        val watchosSimulatorArm64Test by getting
-        val tvosMain by getting
-        val tvosTest by getting
 
         val appleMain by sourceSets.creating {
             dependsOn(commonMain)
@@ -131,9 +129,6 @@ kotlin {
             macosArm64Main.dependsOn(this)
             iosMain.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
-            tvosMain.dependsOn(this)
-            watchosMain.dependsOn(this)
-            watchosSimulatorArm64Main.dependsOn(this)
         }
 
         val appleTest by sourceSets.creating {
@@ -143,9 +138,6 @@ kotlin {
             macosArm64Test.dependsOn(this)
             iosTest.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
-            tvosTest.dependsOn(this)
-            watchosTest.dependsOn(this)
-            watchosSimulatorArm64Test.dependsOn(this)
         }
 
         val androidMain by getting {
@@ -273,12 +265,35 @@ ktlint {
 val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {
     port.set(8081)
 }
-
+val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
+val validateAutobahnResults = task("validateAutobahnResults") {
+    doLast {
+        println("**VALIDATING AUTOBAHN RESULTS **")
+        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int)
+        val json = Files.readAllBytes(Paths.get("${project.projectDir}/.docker/reports/clients/index.json"))
+        val obj = JSONObject(json.decodeToString()).toMap()
+        // [AgentName, [Version, Props]]
+        val cases = ArrayList<TestResult>()
+        obj.keys.forEach {  agentName ->
+            val props = obj[agentName] as Map<String, Map<String, Any>>
+            props.keys.forEach {  version ->
+                val keyValue = props[version]!!
+                cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
+            }
+        }
+        val failedCases = cases.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
+        if (failedCases.isNotEmpty()) {
+            throw GradleException("Failed test cases: $failedCases")
+        }
+    }
+}
 tasks.forEach { task ->
     val taskName = task.name
     if ((taskName.contains("test", ignoreCase = true) && !taskName.contains("clean", ignoreCase = true)) ||
         taskName == "check"
     ) {
         task.dependsOn(echoWebsocket)
+        task.dependsOn(autobahnContainer)
+        task.finalizedBy(validateAutobahnResults)
     }
 }
