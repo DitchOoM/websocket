@@ -1,3 +1,4 @@
+
 import com.ditchoom.socket.isNodeJs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.GlobalScope
@@ -11,7 +12,7 @@ actual fun <T> block(body: suspend CoroutineScope.() -> T): dynamic = runTestInt
 actual fun agentName(): String = if (isNodeJs) {
     "NodeJS"
 } else {
-    "BroswerJS"
+    "BrowserJS"
 }
 
 fun <T> runTestInternal(

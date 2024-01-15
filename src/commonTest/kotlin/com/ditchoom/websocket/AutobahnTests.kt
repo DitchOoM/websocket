@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -29,38 +30,40 @@ class AutobahnTests {
 
     private var autobahnState = AutobahnConnectivityState.UNTESTED
 
-    fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) {
+    fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) = block {
+        var shouldRun = false
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
-                block {
-                    autobahnState = try {
-                        ClientSocket.connect(9001, "localhost", tls = false, 3.seconds)
-                        AutobahnConnectivityState.AVAILABLE
-                    } catch (e: Exception) {
-                        AutobahnConnectivityState.UNAVAILABLE
-                    }
-                    maybeRun(lambda)
+                autobahnState = try {
+                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds)
+                    AutobahnConnectivityState.AVAILABLE
+                } catch (e: Exception) {
+                    AutobahnConnectivityState.UNAVAILABLE
                 }
+                shouldRun = true
             }
 
             AutobahnConnectivityState.AVAILABLE -> {
-                try {
-                    block(lambda)
-                } catch (e: Exception) {
-                    // try again
-                    println("Trying again!, Exception $e")
-                    try {
-                        block(lambda)
-                    } catch (ex: Exception) {
-                        println("Try one last time! $ex")
-                        block(lambda)
-                    }
-                }
+                shouldRun = true
             }
 
             AutobahnConnectivityState.UNAVAILABLE -> {
                 println("Autobahn Docker Image Unavailable, ignoring test.")
             } // Do nothing
+        }
+        if (shouldRun) {
+            try {
+                withTimeout(60.seconds, lambda)
+            } catch (e: Exception) {
+                // try again
+                println("Trying again!, Exception $e")
+                try {
+                    withTimeout(60.seconds, lambda)
+                } catch (ex: Exception) {
+                    println("Try one last time! $ex")
+                    withTimeout(60.seconds, lambda)
+                }
+            }
         }
     }
 
