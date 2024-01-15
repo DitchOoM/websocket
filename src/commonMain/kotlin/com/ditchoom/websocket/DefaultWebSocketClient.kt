@@ -344,7 +344,7 @@ class DefaultWebSocketClient(
                     } else if (payload.hasRemaining()) {
                         val decoded = try {
                             payload.readString(payload.remaining())
-                        } catch (e: Exception) {
+                        } catch (t: Throwable) {
                             code = 1002u
                             "Invalid UTF-8 Message in payload"
                         }
