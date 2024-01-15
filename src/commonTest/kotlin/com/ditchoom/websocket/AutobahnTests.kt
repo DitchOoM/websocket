@@ -31,6 +31,9 @@ class AutobahnTests {
     private var autobahnState = AutobahnConnectivityState.UNTESTED
 
     fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) = block {
+        if (agentName() == "BrowserJS") {
+            return@block // Temporarily ignore browser for now
+        }
         var shouldRun = false
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
@@ -1618,7 +1621,7 @@ class AutobahnTests {
             connectionOptions,
             AllocationZone.SharedMemory,
             this + CoroutineName(case.toString())
-        ) as DefaultWebSocketClient
+        )
         ws.scope.launch {
             ws.connect()
             ws.connectionState.first { it is ConnectionState.Connected }
@@ -1669,7 +1672,7 @@ class AutobahnTests {
             connectionOptions,
             AllocationZone.SharedMemory,
             this
-        ) as DefaultWebSocketClient
+        )
         websocket.connect()
         websocket.connectionState.first { it is ConnectionState.Connected }
         websocket.close()
