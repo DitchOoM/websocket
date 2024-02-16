@@ -3,12 +3,12 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.TransformedReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.allocate
 import com.ditchoom.data.get
 import com.ditchoom.data.toByte
-import com.ditchoom.socket.EMPTY_BUFFER
 import kotlin.experimental.xor
 
 /**

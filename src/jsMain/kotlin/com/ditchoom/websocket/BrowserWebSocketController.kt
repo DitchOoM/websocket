@@ -159,7 +159,6 @@ class BrowserWebSocketController(
 
     private fun closeInternal() {
         webSocket.close()
-        scope.cancel()
     }
 
     companion object {

@@ -27,7 +27,6 @@ class WebSocketTests {
         launch { websocket.write(string1) }
         println("wrote")
         val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
-        println("$dataRead")
         assertEquals(string1, dataRead.value)
         val string2 = "yolo"
         launch { websocket.write(string2) }

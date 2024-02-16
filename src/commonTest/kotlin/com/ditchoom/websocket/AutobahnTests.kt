@@ -4,9 +4,9 @@ import agentName
 import block
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
 import com.ditchoom.socket.ClientSocket
-import com.ditchoom.socket.EMPTY_BUFFER
 import com.ditchoom.socket.connect
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -31,9 +31,6 @@ class AutobahnTests {
     private var autobahnState = AutobahnConnectivityState.UNTESTED
 
     fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) = block {
-        if (agentName() == "BrowserJS") {
-            return@block // Temporarily ignore browser for now
-        }
         var shouldRun = false
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
@@ -55,18 +52,7 @@ class AutobahnTests {
             } // Do nothing
         }
         if (shouldRun) {
-            try {
-                withTimeout(60.seconds, lambda)
-            } catch (e: Exception) {
-                // try again
-                println("Trying again!, Exception $e")
-                try {
-                    withTimeout(60.seconds, lambda)
-                } catch (ex: Exception) {
-                    println("Try one last time! $ex")
-                    withTimeout(60.seconds, lambda)
-                }
-            }
+            withTimeout(40.seconds, lambda)
         }
     }
 
@@ -273,7 +259,6 @@ class AutobahnTests {
         println("test case 4.1.5")
         prepareConnection(39)
         println("close test case 4.1.5")
-        delay(100) // need to wait for the remote to close the connection
     }
 
     @Test
@@ -1559,7 +1544,7 @@ class AutobahnTests {
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
         )
-        val websocket = WebSocketClient.Companion.allocate(
+        val websocket = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this + CoroutineName(case.toString())
@@ -1575,7 +1560,7 @@ class AutobahnTests {
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
         )
-        val ws = WebSocketClient.Companion.allocate(
+        val ws = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this + CoroutineName(case.toString())
@@ -1597,7 +1582,7 @@ class AutobahnTests {
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
         )
-        val ws = WebSocketClient.Companion.allocate(
+        val ws = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this + CoroutineName(case.toString())
@@ -1617,7 +1602,7 @@ class AutobahnTests {
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
         )
-        val ws = WebSocketClient.Companion.allocate(
+        val ws = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this + CoroutineName(case.toString())
@@ -1662,16 +1647,13 @@ class AutobahnTests {
 
     @AfterTest
     fun validateResponse() = block {
-        if (agentName() == "BrowserJS") {
-            return@block // Temporarily ignore browser for now
-        }
         println("** UPDATE REPORTS **")
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
             websocketEndpoint = "/updateReports?agent=${agentName()}"
         )
-        val websocket = WebSocketClient.Companion.allocate(
+        val websocket = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this
@@ -1682,7 +1664,7 @@ class AutobahnTests {
     }
 
     private val charPool: List<Char> = listOf('*') // ('a'..'z') + ('A'..'Z') + ('0'..'9')
-    fun randomStringByKotlinRandom(len: Int) = (1..len)
+    private fun randomStringByKotlinRandom(len: Int) = (1..len)
         .map { Random.nextInt(0, charPool.size).let { charPool[it] } }
         .joinToString("")
 }

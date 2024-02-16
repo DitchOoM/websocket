@@ -1,8 +1,8 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.SuspendCloseable
-import com.ditchoom.socket.EMPTY_BUFFER
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow

@@ -33,6 +33,8 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
             "-v", "${parameters.projectDir.absolutePath}/.docker/config:/config",
             "-v", "${parameters.projectDir.absolutePath}/.docker/reports:/reports",
             "-p", "9001:9001", "--name", "fuzzingserver", "crossbario/autobahn-testsuite")
+            .redirectErrorStream(true)
+            .inheritIO()
             .start()
     }
 }

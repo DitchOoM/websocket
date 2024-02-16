@@ -82,15 +82,14 @@ kotlin {
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation("com.ditchoom:buffer:1.3.36")
-                implementation("com.ditchoom:socket:1.1.18")
+                implementation("com.ditchoom:buffer:1.3.37")
+                implementation("com.ditchoom:socket:1.1.19")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val commonTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
             }
         }
         if (loadAllPlatforms) {
@@ -289,7 +288,7 @@ val validateAutobahnResults = task("validateAutobahnResults") {
             }
         }
 
-        val failedCases = cases.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
+        val failedCases = cases.filterNot { it.agent.equals("BrowserJS", ignoreCase = true) }.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
         if (failedCases.isNotEmpty()) {
             throw GradleException("Failed test cases: $failedCases")
         }

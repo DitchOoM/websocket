@@ -5,11 +5,13 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.FragmentedReadBuffer
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.toComposableBuffer
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.data.get
 import com.ditchoom.socket.ClientSocket
-import com.ditchoom.socket.EMPTY_BUFFER
+import com.ditchoom.socket.SuspendingSocketInputStream
 import com.ditchoom.socket.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -20,7 +22,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
@@ -46,7 +47,7 @@ class DefaultWebSocketClient(
     }
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
-    private val inputStream = SuspendingSocketInputStreamWithPreBuffer(connectionOptions.readTimeout, socket)
+    internal val inputStream = SuspendingSocketInputStream(connectionOptions.readTimeout, socket)
     private val _connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = _connectionStateFlow.asStateFlow()
     private val _incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
@@ -66,9 +67,6 @@ class DefaultWebSocketClient(
         }
         _connectionStateFlow.value = ConnectionState.Connecting
         try {
-            withTimeout(connectionOptions.connectionTimeout) {
-                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
-            }
             val protocolString = if (connectionOptions.protocols.isNotEmpty()) {
                 val sb = StringBuilder()
                 connectionOptions.protocols.forEach {
@@ -98,22 +96,15 @@ class DefaultWebSocketClient(
                     "Sec-WebSocket-Version: 13\r\n" +
                     "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
                     "\r\n"
+
+            withTimeout(connectionOptions.connectionTimeout) {
+                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+            }
             socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
-            val readBuffer = socket.read(connectionOptions.readTimeout)
-            readBuffer.resetForRead()
+            val readBuffer = inputStream.readBuffer()
             val endOfStartBuffer = "\r\n\r\n".toReadBuffer(Charset.UTF8)
-            val websocketFrameIndex = indexOfBuffer(readBuffer, endOfStartBuffer)
+            val websocketFrameIndex = indexOfBuffer(readBuffer, endOfStartBuffer) + endOfStartBuffer.remaining()
             val response = readBuffer.readString(websocketFrameIndex)
-            val frameData = readBuffer.readBytes(readBuffer.remaining())
-            if (frameData.hasRemaining()) {
-                frameData.position(endOfStartBuffer.limit())
-            }
-            val preBuffer = if (frameData.hasRemaining()) {
-                frameData
-            } else {
-                null
-            }
-            inputStream.preBuffer = preBuffer?.slice()
             if (!(
                 response.contains("101 Switching Protocols", ignoreCase = true) &&
                     response.contains("Upgrade: websocket", ignoreCase = true) &&
@@ -190,8 +181,8 @@ class DefaultWebSocketClient(
     private fun processIncomingMessages() = scope.launch {
         readLoop@while (isOpen()) {
             val frames = mutableListOf<Frame>()
-            var readPayload: ReadBuffer? = null
-            process@do {
+            val buffers = mutableListOf<ReadBuffer>()
+            process@ do {
                 val frame = readAndProcessWebSocketFrame() ?: return@launch
                 if (frame.opcode.isControlFrame()) {
                     if (!handleControlPacketFrameShouldContinue(frame)) {
@@ -203,16 +194,16 @@ class DefaultWebSocketClient(
                         frames += frame
                     }
                     frame.payloadData.resetForRead()
-                    readPayload = if (readPayload == null) {
-                        frame.payloadData
-                    } else {
-                        FragmentedReadBuffer(readPayload, frame.payloadData).slice()
-                    }
+                    buffers += frame.payloadData
                 }
             } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
-
+            val readPayload = buffers.toComposableBuffer()
             val firstFrame = frames.first()
-            val payload = checkNotNull(readPayload)
+            val payload = if (readPayload is FragmentedReadBuffer) {
+                readPayload.toSingleBuffer()
+            } else {
+                readPayload
+            }
             when (firstFrame.opcode) {
                 Opcode.Text -> {
                     try {
@@ -385,7 +376,6 @@ class DefaultWebSocketClient(
     suspend fun cleanupResources() {
         outgoingMessages.close()
         socket.close()
-//        scope.cancel()
     }
 
     private fun indexOfBuffer(buffer: ReadBuffer, pattern: ReadBuffer): Int {
