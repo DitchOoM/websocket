@@ -5,7 +5,7 @@ import kotlin.time.Duration.Companion.seconds
 
 actual fun <T> block(body: suspend CoroutineScope.() -> T) {
     runBlocking {
-        withTimeout(180.seconds, body)
+        withTimeout(40.seconds, body)
     }
 }
 
