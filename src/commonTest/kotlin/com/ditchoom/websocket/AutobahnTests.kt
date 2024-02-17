@@ -1335,9 +1335,7 @@ class AutobahnTests {
 
     @Test
     fun case9_1_4() = maybeRun {
-        println("test case 9.1.4")
         echoMessageAndClose(250)
-        println("close test case 9.1.4")
     }
 
     @Test
