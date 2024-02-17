@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
-import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -52,1490 +51,1548 @@ class AutobahnTests {
             } // Do nothing
         }
         if (shouldRun) {
-            withTimeout(40.seconds, lambda)
+            lambda()
         }
     }
 
     @Test
-    fun case1_1() = maybeRun {
+    fun case1_1_1() = maybeRun {
         val webSocketClient = prepareConnection(1)
-        println("test case 1.1.1")
         sendMessageWithPayloadLengthOf(webSocketClient, 0)
-        println("close connection")
         closeConnection(webSocketClient)
-        println("done test case 1.1.1")
-
-        println("test case 1.1.2")
-        val webSocket1Client = prepareConnection(2)
-        sendMessageWithPayloadLengthOf(webSocket1Client, 125)
-        closeConnection(webSocket1Client)
-        println("close test case 2")
-
-        println("test case 1.1.3")
-        val webSocket3Client = prepareConnection(3)
-        sendMessageWithPayloadLengthOf(webSocket3Client, 126)
-        closeConnection(webSocket3Client)
-        println("close test case 3")
-
-        println("test case 1.1.4")
-        val webSocket4Client = prepareConnection(4)
-        sendMessageWithPayloadLengthOf(webSocket4Client, 127)
-        closeConnection(webSocket4Client)
-        println("close test case 4")
-
-        println("test case 1.1.5")
-        val webSocket5Client = prepareConnection(5)
-        sendMessageWithPayloadLengthOf(webSocket5Client, 128)
-        closeConnection(webSocket5Client)
-        println("close test case 5")
-
-        // 65535
-        println("test case 1.1.6")
-        val webSocket6Client = prepareConnection(6)
-        sendMessageWithPayloadLengthOf(webSocket6Client, 65535)
-        closeConnection(webSocket6Client)
-        println("close test case 6")
-
-        println("test case 1.1.7")
-        val webSocket7Client = prepareConnection(7)
-        sendMessageWithPayloadLengthOf(webSocket7Client, 65536)
-        closeConnection(webSocket7Client)
-        println("close test case 7")
-
-        println("test case 1.1.8")
-        val webSocket8Client = prepareConnection(8)
-        sendMessageWithPayloadLengthOf(webSocket8Client, 65536)
-        closeConnection(webSocket8Client)
-        println("close test case 8")
     }
 
     @Test
-    fun case1_2() = maybeRun {
-        println("test case 1.2.1")
+    fun case1_1_2() = maybeRun {
+        val webSocket1Client = prepareConnection(2)
+        sendMessageWithPayloadLengthOf(webSocket1Client, 125)
+        closeConnection(webSocket1Client)
+    }
+
+    @Test
+    fun case1_1_3() = maybeRun {
+        val webSocket3Client = prepareConnection(3)
+        sendMessageWithPayloadLengthOf(webSocket3Client, 126)
+        closeConnection(webSocket3Client)
+    }
+
+    @Test
+    fun case1_1_4() = maybeRun {
+        val webSocket4Client = prepareConnection(4)
+        sendMessageWithPayloadLengthOf(webSocket4Client, 127)
+        closeConnection(webSocket4Client)
+    }
+
+    @Test
+    fun case1_1_5() = maybeRun {
+        val webSocket5Client = prepareConnection(5)
+        sendMessageWithPayloadLengthOf(webSocket5Client, 128)
+        closeConnection(webSocket5Client)
+    }
+
+    @Test
+    fun case1_1_6() = maybeRun {
+        val webSocket6Client = prepareConnection(6)
+        sendMessageWithPayloadLengthOf(webSocket6Client, 65535)
+        closeConnection(webSocket6Client)
+    }
+
+    @Test
+    fun case1_1_7() = maybeRun {
+        val webSocket7Client = prepareConnection(7)
+        sendMessageWithPayloadLengthOf(webSocket7Client, 65536)
+        closeConnection(webSocket7Client)
+    }
+
+    @Test
+    fun case1_1_8() = maybeRun {
+        val webSocket8Client = prepareConnection(8)
+        sendMessageWithPayloadLengthOf(webSocket8Client, 65536)
+        closeConnection(webSocket8Client)
+    }
+
+    @Test
+    fun case1_2_1() = maybeRun {
         val webSocketClient = prepareConnection(9)
         sendBinaryWithPayloadLengthOf(webSocketClient, 0)
         closeConnection(webSocketClient)
+    }
 
-        println("test case 1.2.2")
+    @Test
+    fun case1_2_2() = maybeRun {
         val webSocket1Client = prepareConnection(10)
         sendBinaryWithPayloadLengthOf(webSocket1Client, 125)
         closeConnection(webSocket1Client)
-        println("close test case 2")
+    }
 
-        println("test case 1.2.3")
+    @Test
+    fun case1_2_3() = maybeRun {
         val webSocket3Client = prepareConnection(11)
         sendBinaryWithPayloadLengthOf(webSocket3Client, 126)
         closeConnection(webSocket3Client)
-        println("close test case 3")
+    }
 
-        println("test case 1.2.4")
+    @Test
+    fun case1_2_4() = maybeRun {
         val webSocket4Client = prepareConnection(12)
         sendBinaryWithPayloadLengthOf(webSocket4Client, 127)
         closeConnection(webSocket4Client)
-        println("close test case 4")
+    }
 
-        println("test case 1.2.5")
+    @Test
+    fun case1_2_5() = maybeRun {
         val webSocket5Client = prepareConnection(13)
         sendBinaryWithPayloadLengthOf(webSocket5Client, 128)
         closeConnection(webSocket5Client)
-        println("close test case 5")
+    }
 
-        // 65535
-        println("test case 1.2.6")
+    @Test
+    fun case1_2_6() = maybeRun {
         val webSocket6Client = prepareConnection(14)
         sendBinaryWithPayloadLengthOf(webSocket6Client, 65535)
         closeConnection(webSocket6Client)
-        println("close test case 6")
+    }
 
-        println("test case 1.2.7")
+    @Test
+    fun case1_2_7() = maybeRun {
         val webSocket7Client = prepareConnection(15)
         sendBinaryWithPayloadLengthOf(webSocket7Client, 65536)
         closeConnection(webSocket7Client)
-        println("close test case 7")
+    }
 
-        println("test case 1.2.8")
+    @Test
+    fun case1_2_8() = maybeRun {
         val webSocket8Client = prepareConnection(16)
         sendBinaryWithPayloadLengthOf(webSocket8Client, 65536)
         closeConnection(webSocket8Client)
-        println("close test case 8")
     }
 
     @Test
     fun case2_1() = maybeRun {
-        println("test case 2.1")
         prepareConnection(17)
-        println("close test case 2.1")
+    }
 
-        println("test case 2.2")
+    @Test
+    fun case2_2() = maybeRun {
         prepareConnection(18)
-        println("close test case 2.2")
+    }
 
-        println("test case 2.3")
+    @Test
+    fun case2_3() = maybeRun {
         prepareConnection(19)
-        println("close test case 2.3")
+    }
 
-        println("test case 2.4")
+    @Test
+    fun case2_4() = maybeRun {
         prepareConnection(20)
-        println("close test case 2.4")
+    }
 
-        println("test case 2.5")
+    @Test
+    fun case2_5() = maybeRun {
         prepareConnection(21)
-        println("close test case 2.5")
+    }
 
-        println("test case 2.6")
+    @Test
+    fun case2_6() = maybeRun {
         prepareConnection(22)
-        println("close test case 2.6")
+    }
 
-        println("test case 2.7")
+    @Test
+    fun case2_7() = maybeRun {
         prepareConnection(23)
-        println("close test case 2.7")
+    }
 
-        println("test case 2.8")
+    @Test
+    fun case2_8() = maybeRun {
         prepareConnection(24)
-        println("close test case 2.8")
+    }
 
-        println("test case 2.9")
+    @Test
+    fun case2_9() = maybeRun {
         prepareConnection(25)
-        println("close test case 2.9")
+    }
 
-        println("test case 2.10")
+    @Test
+    fun case2_10() = maybeRun {
         prepareConnection(26)
-        println("close test case 2.10")
+    }
 
-        println("test case 2.11")
+    @Test
+    fun case2_11() = maybeRun {
         prepareConnection(27)
-        println("close test case 2.11")
     }
 
     @Test
     fun case3_1() = maybeRun {
-        println("test case 3.1")
         prepareConnection(28)
-        println("close test case 3.1")
+    }
 
-        println("test case 3.2")
+    @Test
+    fun case3_2() = maybeRun {
         prepareConnection(29)
-        println("close test case 3.2")
+    }
 
-        println("test case 3.3")
+    @Test
+    fun case3_3() = maybeRun {
         prepareConnection(30)
-        println("close test case 3.3")
+    }
 
-        println("test case 3.4")
+    @Test
+    fun case3_4() = maybeRun {
         prepareConnection(31)
-        println("close test case 3.4")
+    }
 
-        println("test case 3.5")
+    @Test
+    fun case3_5() = maybeRun {
         prepareConnection(32)
-        println("close test case 3.5")
+    }
 
-        println("test case 3.6")
+    @Test
+    fun case3_6() = maybeRun {
         prepareConnection(33)
-        println("close test case 3.6")
+    }
 
-        println("test case 3.7")
+    @Test
+    fun case3_7() = maybeRun {
         prepareConnection(34)
-        println("close test case 3.7")
     }
 
     @Test
-    fun case4_1() = maybeRun {
-        println("test case 4.1.1")
+    fun case4_1_1() = maybeRun {
         prepareConnection(35)
-        println("close test case 4.1.1")
-
-        println("test case 4.1.2")
-        prepareConnection(36)
-        println("close test case 4.1.2")
-
-        println("test case 4.1.3")
-        prepareConnection(37)
-        println("close test case 4.1.3")
-
-        println("test case 4.1.4")
-        prepareConnection(38)
-        println("close test case 4.1.4")
-
-        println("test case 4.1.5")
-        prepareConnection(39)
-        println("close test case 4.1.5")
     }
 
     @Test
-    fun case4_2() = maybeRun {
-        println("test case 4.2.1")
+    fun case4_1_2() = maybeRun {
+        prepareConnection(36)
+    }
+
+    @Test
+    fun case4_1_3() = maybeRun {
+        prepareConnection(37)
+    }
+
+    @Test
+    fun case4_1_4() = maybeRun {
+        prepareConnection(38)
+    }
+
+    @Test
+    fun case4_1_5() = maybeRun {
+        prepareConnection(39)
+    }
+
+    @Test
+    fun case4_2_1() = maybeRun {
         prepareConnection(40)
-        println("close test case 4.2.1")
+    }
 
-        println("test case 4.2.2")
+    @Test
+    fun case4_2_2() = maybeRun {
         prepareConnection(41)
-        println("close test case 4.2.2")
+    }
 
-        println("test case 4.2.3")
+    @Test
+    fun case4_2_3() = maybeRun {
         prepareConnection(42)
-        println("close test case 4.2.3")
+    }
 
-        println("test case 4.2.4")
+    @Test
+    fun case4_2_4() = maybeRun {
         prepareConnection(43)
-        println("close test case 4.2.4")
+    }
 
-        println("test case 4.2.5")
+    @Test
+    fun case4_2_5() = maybeRun {
         prepareConnection(44)
-        println("close test case 4.2.5")
         delay(100) // need to wait for the remote to close the connection
     }
 
     @Test
-    fun case5() = maybeRun {
-        println("test case 5.1")
+    fun case5_1() = maybeRun {
         prepareConnection(45)
-        println("close test case 5.1")
+    }
 
-        println("test case 5.2")
+    @Test
+    fun case5_2() = maybeRun {
         prepareConnection(46)
-        println("close test case 5.2")
+    }
 
-        println("test case 5.3")
+    @Test
+    fun case5_3() = maybeRun {
         echoMessageAndClose(47)
-        println("close test case 5.3")
+    }
 
-        println("test case 5.4")
+    @Test
+    fun case5_4() = maybeRun {
         echoMessageAndClose(48)
-        println("close test case 5.4")
+    }
 
-        println("test case 5.5")
+    @Test
+    fun case5_5() = maybeRun {
         echoMessageAndClose(49)
-        println("close test case 5.5")
+    }
 
-        println("test case 5.6")
+    @Test
+    fun case5_6() = maybeRun {
         echoMessageWhenFoundText(50)
-        println("close test case 5.6")
+    }
 
-        println("test case 5.7")
+    @Test
+    fun case5_7() = maybeRun {
         echoMessageWhenFoundText(51)
-        println("close test case 5.7")
+    }
 
-        println("test case 5.8")
+    @Test
+    fun case5_8() = maybeRun {
         echoMessageWhenFoundText(52)
-        println("close test case 5.8")
+    }
 
-        println("test case 5.9")
+    @Test
+    fun case5_9() = maybeRun {
         closeConnection(prepareConnection(53))
-        println("close test case 5.9")
+    }
 
-        println("test case 5.10")
+    @Test
+    fun case5_10() = maybeRun {
         closeConnection(prepareConnection(54))
-        println("close test case 5.10")
+    }
 
-        println("test case 5.11")
+    @Test
+    fun case5_11() = maybeRun {
         closeConnection(prepareConnection(55))
-        println("close test case 5.11")
+    }
 
-        println("test case 5.12")
+    @Test
+    fun case5_12() = maybeRun {
         closeConnection(prepareConnection(56))
-        println("close test case 5.12")
+    }
 
-        println("test case 5.13")
+    @Test
+    fun case5_13() = maybeRun {
         closeConnection(prepareConnection(57))
-        println("close test case 5.13")
+    }
 
-        println("test case 5.14")
+    @Test
+    fun case5_14() = maybeRun {
         closeConnection(prepareConnection(58))
-        println("close test case 5.14")
+    }
 
-        println("test case 5.15")
+    @Test
+    fun case5_15() = maybeRun {
         closeConnection(prepareConnection(59))
-        println("close test case 5.15")
+    }
 
-        println("test case 5.16")
+    @Test
+    fun case5_16() = maybeRun {
         closeConnection(prepareConnection(60))
-        println("close test case 5.16")
+    }
 
-        println("test case 5.17")
+    @Test
+    fun case5_17() = maybeRun {
         closeConnection(prepareConnection(61))
-        println("close test case 5.17")
+    }
 
-        println("test case 5.18")
+    @Test
+    fun case5_18() = maybeRun {
         closeConnection(prepareConnection(62))
-        println("close test case 5.18")
+    }
 
-        println("test case 5.19")
+    @Test
+    fun case5_19() = maybeRun {
         echoMessageWhenFoundText(63)
-        println("close test case 5.19")
+    }
 
-        println("test case 5.20")
+    @Test
+    fun case5_20() = maybeRun {
         echoMessageWhenFoundText(64)
-        println("close test case 5.20")
     }
 
     @Test
-    fun case6_1() = maybeRun {
-        println("test case 6.1.1")
+    fun case6_1_1() = maybeRun {
         echoMessageAndClose(65)
-        println("close test case 6.1.1")
+    }
 
-        println("test case 6.1.2")
+    @Test
+    fun case6_1_2() = maybeRun {
         echoMessageAndClose(66)
-        println("close test case 6.1.2")
+    }
 
-        println("test case 6.1.3")
+    @Test
+    fun case6_1_3() = maybeRun {
         echoMessageAndClose(67)
-        println("close test case 6.1.3")
     }
 
     @Test
-    fun case6_2() = maybeRun {
-        println("test case 6.2.1")
+    fun case6_2_1() = maybeRun {
         echoMessageAndClose(68)
-        println("close test case 6.2.1")
+    }
 
-        println("test case 6.2.2")
+    @Test
+    fun case6_2_2() = maybeRun {
         echoMessageAndClose(69)
-        println("close test case 6.2.2")
+    }
 
-        println("test case 6.2.3")
+    @Test
+    fun case6_2_3() = maybeRun {
         echoMessageAndClose(70)
-        println("close test case 6.2.3")
+    }
 
-        println("test case 6.2.4")
+    @Test
+    fun case6_2_4() = maybeRun {
         echoMessageAndClose(71)
-        println("close test case 6.2.4")
     }
 
     @Test
-    fun case6_3() = maybeRun {
-        println("test case 6.3.1")
+    fun case6_3_1() = maybeRun {
         prepareConnection(72)
-        println("close test case 6.3.1")
+    }
 
-        println("test case 6.3.2")
+    @Test
+    fun case6_3_2() = maybeRun {
         prepareConnection(73)
-        println("close test case 6.3.2")
     }
 
     @Test
-    fun case6_4() = maybeRun {
-        println("test case 6.4.1")
+    fun case6_4_1() = maybeRun {
         prepareConnection(74)
-        println("close test case 6.4.1")
+    }
 
-        println("test case 6.4.2")
+    @Test
+    fun case6_4_2() = maybeRun {
         prepareConnection(75)
-        println("close test case 6.4.2")
+    }
 
-        println("test case 6.4.3")
+    @Test
+    fun case6_4_3() = maybeRun {
         prepareConnection(76)
-        println("close test case 6.4.3")
+    }
 
-        println("test case 6.4.4")
+    @Test
+    fun case6_4_4() = maybeRun {
         prepareConnection(77)
-        println("close test case 6.4.4")
     }
 
     @Test
-    fun case6_5() = maybeRun {
-        println("test case 6.5.1")
+    fun case6_5_1() = maybeRun {
         echoMessageAndClose(78)
-        println("close test case 6.5.1")
+    }
 
-        println("test case 6.5.2")
+    @Test
+    fun case6_5_2() = maybeRun {
         echoMessageAndClose(79)
-        println("close test case 6.5.2")
+    }
 
-        println("test case 6.5.3")
+    @Test
+    fun case6_5_3() = maybeRun {
         echoMessageAndClose(80)
-        println("close test case 6.5.3")
+    }
 
-        println("test case 6.5.4")
+    @Test
+    fun case6_5_4() = maybeRun {
         echoMessageAndClose(81)
-        println("close test case 6.5.4")
+    }
 
-        println("test case 6.5.5")
+    @Test
+    fun case6_5_5() = maybeRun {
         echoMessageAndClose(82)
-        println("close test case 6.5.5")
     }
 
     @Test
-    fun case6_6() = maybeRun {
-        println("test case 6.6.1")
+    fun case6_6_1() = maybeRun {
         prepareConnection(83)
-        println("close test case 6.6.1")
+    }
 
-        println("test case 6.6.2")
+    @Test
+    fun case6_6_2() = maybeRun {
         echoMessageAndClose(84)
-        println("close test case 6.6.2")
+    }
 
-        println("test case 6.6.3")
+    @Test
+    fun case6_6_3() = maybeRun {
         prepareConnection(85)
-        println("close test case 6.6.3")
+    }
 
-        println("test case 6.6.4")
+    @Test
+    fun case6_6_4() = maybeRun {
         prepareConnection(86)
-        println("close test case 6.6.4")
+    }
 
-        println("test case 6.6.5")
+    @Test
+    fun case6_6_5() = maybeRun {
         echoMessageAndClose(87)
-        println("close test case 6.6.5")
+    }
 
-        println("test case 6.6.6")
+    @Test
+    fun case6_6_6() = maybeRun {
         prepareConnection(88)
-        println("close test case 6.6.6")
+    }
 
-        println("test case 6.6.7")
+    @Test
+    fun case6_6_7() = maybeRun {
         echoMessageAndClose(89)
-        println("close test case 6.6.7")
+    }
 
-        println("test case 6.6.8")
+    @Test
+    fun case6_6_8() = maybeRun {
         prepareConnection(90)
-        println("close test case 6.6.8")
+    }
 
-        println("test case 6.6.9")
+    @Test
+    fun case6_6_9() = maybeRun {
         echoMessageAndClose(91)
-        println("close test case 6.6.9")
+    }
 
-        println("test case 6.6.10")
+    @Test
+    fun case6_6_10() = maybeRun {
         prepareConnection(92)
-        println("close test case 6.6.10")
+    }
 
-        println("test case 6.6.11")
+    @Test
+    fun case6_6_11() = maybeRun {
         echoMessageAndClose(93)
-        println("close test case 6.6.11")
     }
 
     @Test
-    fun case6_7() = maybeRun {
-        println("test case 6.7.1")
+    fun case6_7_1() = maybeRun {
         echoMessageAndClose(94)
-        println("close test case 6.7.1")
+    }
 
-        println("test case 6.7.2")
+    @Test
+    fun case6_7_2() = maybeRun {
         echoMessageAndClose(95)
-        println("close test case 6.7.2")
+    }
 
-        println("test case 6.7.3")
+    @Test
+    fun case6_7_3() = maybeRun {
         echoMessageAndClose(96)
-        println("close test case 6.7.3")
+    }
 
-        println("test case 6.7.4")
+    @Test
+    fun case6_7_4() = maybeRun {
         echoMessageAndClose(97)
-        println("close test case 6.7.4")
     }
 
     @Test
-    fun case6_8() = maybeRun {
-        println("test case 6.8.1")
+    fun case6_8_1() = maybeRun {
         prepareConnection(98)
-        println("close test case 6.8.1")
+    }
 
-        println("test case 6.8.2")
+    @Test
+    fun case6_8_2() = maybeRun {
         prepareConnection(99)
-        println("close test case 6.8.2")
     }
 
     @Test
-    fun case6_9() = maybeRun {
-        println("test case 6.9.1")
+    fun case6_9_1() = maybeRun {
         echoMessageAndClose(100)
-        println("close test case 6.9.1")
+    }
 
-        println("test case 6.9.2")
+    @Test
+    fun case6_9_2() = maybeRun {
         echoMessageAndClose(101)
-        println("close test case 6.9.2")
+    }
 
-        println("test case 6.9.3")
+    @Test
+    fun case6_9_3() = maybeRun {
         echoMessageAndClose(102)
-        println("close test case 6.9.3")
+    }
 
-        println("test case 6.9.4")
+    @Test
+    fun case6_9_4() = maybeRun {
         echoMessageAndClose(103)
-        println("close test case 6.9.4")
     }
 
     @Test
-    fun case6_10() = maybeRun {
-        println("test case 6.10.1")
+    fun case6_10_1() = maybeRun {
         prepareConnection(104)
-        println("close test case 6.10.1")
+    }
 
-        println("test case 6.10.2")
+    @Test
+    fun case6_10_2() = maybeRun {
         prepareConnection(105)
-        println("close test case 6.10.2")
+    }
 
-        println("test case 6.10.3")
+    @Test
+    fun case6_10_3() = maybeRun {
         prepareConnection(106)
-        println("close test case 6.10.3")
     }
 
     @Test
-    fun case6_11() = maybeRun {
-        println("test case 6.11.1")
+    fun case6_11_1() = maybeRun {
         echoMessageAndClose(107)
-        println("close test case 6.11.1")
+    }
 
-        println("test case 6.11.2")
+    @Test
+    fun case6_11_2() = maybeRun {
         echoMessageAndClose(108)
-        println("close test case 6.11.2")
+    }
 
-        println("test case 6.11.3")
+    @Test
+    fun case6_11_3() = maybeRun {
         echoMessageAndClose(109)
-        println("close test case 6.10.3")
+    }
 
-        println("test case 6.11.4")
+    @Test
+    fun case6_11_4() = maybeRun {
         echoMessageAndClose(110)
-        println("close test case 6.10.4")
+    }
 
-        println("test case 6.11.5")
+    @Test
+    fun case6_11_5() = maybeRun {
         prepareConnection(111)
-        println("close test case 6.10.5")
     }
 
     @Test
-    fun case6_12() = maybeRun {
-        println("test case 6.12.1")
+    fun case6_12_1() = maybeRun {
         prepareConnection(112)
-        println("close test case 6.12.1")
+    }
 
-        println("test case 6.12.2")
+    @Test
+    fun case6_12_2() = maybeRun {
         prepareConnection(113)
-        println("close test case 6.12.2")
+    }
 
-        println("test case 6.12.3")
+    @Test
+    fun case6_12_3() = maybeRun {
         prepareConnection(114)
-        println("close test case 6.12.3")
+    }
 
-        println("test case 6.12.4")
+    @Test
+    fun case6_12_4() = maybeRun {
         prepareConnection(115)
-        println("close test case 6.12.4")
+    }
 
-        println("test case 6.12.5")
+    @Test
+    fun case6_12_5() = maybeRun {
         prepareConnection(116)
-        println("close test case 6.12.5")
+    }
 
-        println("test case 6.12.6")
+    @Test
+    fun case6_12_6() = maybeRun {
         prepareConnection(117)
-        println("close test case 6.12.6")
+    }
 
-        println("test case 6.12.7")
+    @Test
+    fun case6_12_7() = maybeRun {
         prepareConnection(118)
-        println("close test case 6.12.7")
+    }
 
-        println("test case 6.12.8")
+    @Test
+    fun case6_12_8() = maybeRun {
         prepareConnection(119)
-        println("close test case 6.12.8")
     }
 
     @Test
-    fun case6_13() = maybeRun {
-        println("test case 6.13.1")
+    fun case6_13_1() = maybeRun {
         prepareConnection(120)
-        println("close test case 6.13.1")
+    }
 
-        println("test case 6.13.2")
+    @Test
+    fun case6_13_2() = maybeRun {
         prepareConnection(121)
-        println("close test case 6.13.2")
+    }
 
-        println("test case 6.13.3")
+    @Test
+    fun case6_13_3() = maybeRun {
         prepareConnection(122)
-        println("close test case 6.13.3")
+    }
 
-        println("test case 6.13.4")
+    @Test
+    fun case6_13_4() = maybeRun {
         prepareConnection(123)
-        println("close test case 6.13.4")
+    }
 
-        println("test case 6.13.5")
+    @Test
+    fun case6_13_5() = maybeRun {
         prepareConnection(124)
-        println("close test case 6.13.5")
     }
 
     @Test
-    fun case6_14() = maybeRun {
-        println("test case 6.14.1")
+    fun case6_14_1() = maybeRun {
         prepareConnection(125)
-        println("close test case 6.14.1")
+    }
 
-        println("test case 6.14.2")
+    @Test
+    fun case6_14_2() = maybeRun {
         prepareConnection(126)
-        println("close test case 6.14.2")
+    }
 
-        println("test case 6.14.3")
+    @Test
+    fun case6_14_3() = maybeRun {
         prepareConnection(127)
-        println("close test case 6.14.3")
+    }
 
-        println("test case 6.14.4")
+    @Test
+    fun case6_14_4() = maybeRun {
         prepareConnection(128)
-        println("close test case 6.14.4")
+    }
 
-        println("test case 6.14.5")
+    @Test
+    fun case6_14_5() = maybeRun {
         prepareConnection(129)
-        println("close test case 6.14.5")
+    }
 
-        println("test case 6.14.6")
+    @Test
+    fun case6_14_6() = maybeRun {
         prepareConnection(130)
-        println("close test case 6.14.6")
+    }
 
-        println("test case 6.14.7")
+    @Test
+    fun case6_14_7() = maybeRun {
         prepareConnection(131)
-        println("close test case 6.14.7")
+    }
 
-        println("test case 6.14.8")
+    @Test
+    fun case6_14_8() = maybeRun {
         prepareConnection(132)
-        println("close test case 6.14.8")
+    }
 
-        println("test case 6.14.9")
+    @Test
+    fun case6_14_9() = maybeRun {
         prepareConnection(133)
-        println("close test case 6.14.9")
+    }
 
-        println("test case 6.14.10")
+    @Test
+    fun case6_14_10() = maybeRun {
         prepareConnection(134)
-        println("close test case 6.14.10")
     }
 
     @Test
-    fun case6_15() = maybeRun {
-        println("test case 6.15.1")
+    fun case6_15_1() = maybeRun {
         prepareConnection(135)
-        println("close test case 6.15.1")
     }
 
     @Test
-    fun case6_16() = maybeRun {
-        println("test case 6.16.1")
+    fun case6_16_1() = maybeRun {
         prepareConnection(136)
-        println("close test case 6.16.1")
+    }
 
-        println("test case 6.16.2")
+    @Test
+    fun case6_16_2() = maybeRun {
         prepareConnection(137)
-        println("close test case 6.16.2")
+    }
 
-        println("test case 6.16.3")
+    @Test
+    fun case6_16_3() = maybeRun {
         prepareConnection(138)
-        println("close test case 6.16.3")
     }
 
     @Test
-    fun case6_17() = maybeRun {
-        println("test case 6.17.1")
+    fun case6_17_1() = maybeRun {
         prepareConnection(139)
-        println("close test case 6.17.1")
+    }
 
-        println("test case 6.17.2")
+    @Test
+    fun case6_17_2() = maybeRun {
         prepareConnection(140)
-        println("close test case 6.17.2")
+    }
 
-        println("test case 6.17.3")
+    @Test
+    fun case6_17_3() = maybeRun {
         prepareConnection(141)
-        println("close test case 6.17.3")
+    }
 
-        println("test case 6.17.4")
+    @Test
+    fun case6_17_4() = maybeRun {
         prepareConnection(142)
-        println("close test case 6.17.4")
+    }
 
-        println("test case 6.17.5")
+    @Test
+    fun case6_17_5() = maybeRun {
         prepareConnection(143)
-        println("close test case 6.17.5")
     }
 
     @Test
-    fun case6_18() = maybeRun {
-        println("test case 6.18.1")
+    fun case6_18_1() = maybeRun {
         prepareConnection(144)
-        println("close test case 6.18.1")
+    }
 
-        println("test case 6.18.2")
+    @Test
+    fun case6_18_2() = maybeRun {
         prepareConnection(145)
-        println("close test case 6.18.2")
+    }
 
-        println("test case 6.18.3")
+    @Test
+    fun case6_18_3() = maybeRun {
         prepareConnection(146)
-        println("close test case 6.18.3")
+    }
 
-        println("test case 6.18.4")
+    @Test
+    fun case6_18_4() = maybeRun {
         prepareConnection(147)
-        println("close test case 6.18.4")
+    }
 
-        println("test case 6.18.5")
+    @Test
+    fun case6_18_5() = maybeRun {
         prepareConnection(148)
-        println("close test case 6.18.5")
     }
 
     @Test
-    fun case6_19() = maybeRun {
-        println("test case 6.18.1")
+    fun case6_19_1() = maybeRun {
         prepareConnection(149)
-        println("close test case 6.18.1")
+    }
 
-        println("test case 6.18.2")
+    @Test
+    fun case6_19_2() = maybeRun {
         prepareConnection(150)
-        println("close test case 6.18.2")
+    }
 
-        println("test case 6.18.3")
+    @Test
+    fun case6_19_3() = maybeRun {
         prepareConnection(151)
-        println("close test case 6.18.3")
+    }
 
-        println("test case 6.18.4")
+    @Test
+    fun case6_19_4() = maybeRun {
         prepareConnection(152)
-        println("close test case 6.18.4")
+    }
 
-        println("test case 6.18.5")
+    @Test
+    fun case6_19_5() = maybeRun {
         prepareConnection(153)
-        println("close test case 6.18.5")
     }
 
     @Test
-    fun case6_20() = maybeRun {
-        println("test case 6.20.1")
+    fun case6_20_1() = maybeRun {
         prepareConnection(154)
-        println("close test case 6.20.1")
+    }
 
-        println("test case 6.20.2")
+    @Test
+    fun case6_20_2() = maybeRun {
         prepareConnection(155)
-        println("close test case 6.20.2")
+    }
 
-        println("test case 6.20.3")
+    @Test
+    fun case6_20_3() = maybeRun {
         prepareConnection(156)
-        println("close test case 6.20.3")
+    }
 
-        println("test case 6.20.4")
+    @Test
+    fun case6_20_4() = maybeRun {
         prepareConnection(157)
-        println("close test case 6.20.4")
+    }
 
-        println("test case 6.20.5")
+    @Test
+    fun case6_20_5() = maybeRun {
         prepareConnection(158)
-        println("close test case 6.20.5")
+    }
 
-        println("test case 6.20.6")
+    @Test
+    fun case6_20_6() = maybeRun {
         prepareConnection(159)
-        println("close test case 6.20.6")
+    }
 
-        println("test case 6.20.7")
+    @Test
+    fun case6_20_7() = maybeRun {
         prepareConnection(160)
-        println("close test case 6.20.7")
     }
 
     @Test
-    fun case6_21() = maybeRun {
-        println("test case 6.21.1")
+    fun case6_21_1() = maybeRun {
         prepareConnection(161)
-        println("close test case 6.21.1")
+    }
 
-        println("test case 6.21.2")
+    @Test
+    fun case6_21_2() = maybeRun {
         prepareConnection(162)
-        println("close test case 6.21.2")
+    }
 
-        println("test case 6.21.3")
+    @Test
+    fun case6_21_3() = maybeRun {
         prepareConnection(163)
-        println("close test case 6.21.3")
+    }
 
-        println("test case 6.21.4")
+    @Test
+    fun case6_21_4() = maybeRun {
         prepareConnection(164)
-        println("close test case 6.21.4")
+    }
 
-        println("test case 6.21.5")
+    @Test
+    fun case6_21_5() = maybeRun {
         prepareConnection(165)
-        println("close test case 6.21.5")
+    }
 
-        println("test case 6.21.6")
+    @Test
+    fun case6_21_6() = maybeRun {
         prepareConnection(166)
-        println("close test case 6.21.6")
+    }
 
-        println("test case 6.21.7")
+    @Test
+    fun case6_21_7() = maybeRun {
         prepareConnection(167)
-        println("close test case 6.21.7")
+    }
 
-        println("test case 6.21.8")
+    @Test
+    fun case6_21_8() = maybeRun {
         prepareConnection(168)
-        println("close test case 6.21.8")
     }
 
     @Test
-    fun case6_22() = maybeRun {
-        println("test case 6.22.1")
+    fun case6_22_1() = maybeRun {
         echoMessageAndClose(169)
-        println("close test case 6.22.1")
+    }
 
-        println("test case 6.22.2")
+    @Test
+    fun case6_22_2() = maybeRun {
         echoMessageAndClose(170)
-        println("close test case 6.22.2")
+    }
 
-        println("test case 6.22.3")
+    @Test
+    fun case6_22_3() = maybeRun {
         echoMessageAndClose(171)
-        println("close test case 6.22.3")
+    }
 
-        println("test case 6.22.4")
+    @Test
+    fun case6_22_4() = maybeRun {
         echoMessageAndClose(172)
-        println("close test case 6.22.4")
+    }
 
-        println("test case 6.22.5")
+    @Test
+    fun case6_22_5() = maybeRun {
         echoMessageAndClose(173)
-        println("close test case 6.22.5")
+    }
 
-        println("test case 6.22.6")
+    @Test
+    fun case6_22_6() = maybeRun {
         echoMessageAndClose(174)
-        println("close test case 6.22.6")
+    }
 
-        println("test case 6.22.7")
+    @Test
+    fun case6_22_7() = maybeRun {
         echoMessageAndClose(175)
-        println("close test case 6.22.7")
+    }
 
-        println("test case 6.22.8")
+    @Test
+    fun case6_22_8() = maybeRun {
         echoMessageAndClose(176)
-        println("close test case 6.22.8")
+    }
 
-        println("test case 6.22.9")
+    @Test
+    fun case6_22_9() = maybeRun {
         echoMessageAndClose(177)
-        println("close test case 6.22.9")
+    }
 
-        println("test case 6.22.10")
+    @Test
+    fun case6_22_10() = maybeRun {
         echoMessageAndClose(178)
-        println("close test case 6.22.10")
+    }
 
-        println("test case 6.22.11")
+    @Test
+    fun case6_22_11() = maybeRun {
         echoMessageAndClose(179)
-        println("close test case 6.22.11")
+    }
 
-        println("test case 6.22.12")
+    @Test
+    fun case6_22_12() = maybeRun {
         echoMessageAndClose(180)
-        println("close test case 6.22.12")
+    }
 
-        println("test case 6.22.13")
+    @Test
+    fun case6_22_13() = maybeRun {
         echoMessageAndClose(181)
-        println("close test case 6.22.13")
+    }
 
-        println("test case 6.22.14")
+    @Test
+    fun case6_22_14() = maybeRun {
         echoMessageAndClose(182)
-        println("close test case 6.22.14")
+    }
 
-        println("test case 6.22.15")
+    @Test
+    fun case6_22_15() = maybeRun {
         echoMessageAndClose(183)
-        println("close test case 6.22.15")
+    }
 
-        println("test case 6.22.16")
+    @Test
+    fun case6_22_16() = maybeRun {
         echoMessageAndClose(184)
-        println("close test case 6.22.16")
+    }
 
-        println("test case 6.22.17")
+    @Test
+    fun case6_22_17() = maybeRun {
         echoMessageAndClose(185)
-        println("close test case 6.22.17")
+    }
 
-        println("test case 6.22.18")
+    @Test
+    fun case6_22_18() = maybeRun {
         echoMessageAndClose(186)
-        println("close test case 6.22.18")
+    }
 
-        println("test case 6.22.19")
+    @Test
+    fun case6_22_19() = maybeRun {
         echoMessageAndClose(187)
-        println("close test case 6.22.19")
+    }
 
-        println("test case 6.22.20")
+    @Test
+    fun case6_22_20() = maybeRun {
         echoMessageAndClose(188)
-        println("close test case 6.22.20")
+    }
 
-        println("test case 6.22.21")
+    @Test
+    fun case6_22_21() = maybeRun {
         echoMessageAndClose(189)
-        println("close test case 6.22.21")
+    }
 
-        println("test case 6.22.22")
+    @Test
+    fun case6_22_22() = maybeRun {
         echoMessageAndClose(190)
-        println("close test case 6.22.22")
+    }
 
-        println("test case 6.22.23")
+    @Test
+    fun case6_22_23() = maybeRun {
         echoMessageAndClose(191)
-        println("close test case 6.22.23")
+    }
 
-        println("test case 6.22.24")
+    @Test
+    fun case6_22_24() = maybeRun {
         echoMessageAndClose(192)
-        println("close test case 6.22.24")
+    }
 
-        println("test case 6.22.25")
+    @Test
+    fun case6_22_25() = maybeRun {
         echoMessageAndClose(193)
-        println("close test case 6.22.25")
+    }
 
-        println("test case 6.22.26")
+    @Test
+    fun case6_22_26() = maybeRun {
         echoMessageAndClose(194)
-        println("close test case 6.22.26")
+    }
 
-        println("test case 6.22.27")
+    @Test
+    fun case6_22_27() = maybeRun {
         echoMessageAndClose(195)
-        println("close test case 6.22.27")
+    }
 
-        println("test case 6.22.28")
+    @Test
+    fun case6_22_28() = maybeRun {
         echoMessageAndClose(196)
-        println("close test case 6.22.28")
+    }
 
-        println("test case 6.22.29")
+    @Test
+    fun case6_22_29() = maybeRun {
         echoMessageAndClose(197)
-        println("close test case 6.22.29")
+    }
 
-        println("test case 6.22.30")
+    @Test
+    fun case6_22_30() = maybeRun {
         echoMessageAndClose(198)
-        println("close test case 6.22.30")
+    }
 
-        println("test case 6.22.31")
+    @Test
+    fun case6_22_31() = maybeRun {
         echoMessageAndClose(199)
-        println("close test case 6.22.31")
+    }
 
-        println("test case 6.22.32")
+    @Test
+    fun case6_22_32() = maybeRun {
         echoMessageAndClose(200)
-        println("close test case 6.22.32")
+    }
 
-        println("test case 6.22.33")
+    @Test
+    fun case6_22_33() = maybeRun {
         echoMessageAndClose(201)
-        println("close test case 6.22.33")
+    }
 
-        println("test case 6.22.34")
+    @Test
+    fun case6_22_34() = maybeRun {
         echoMessageAndClose(202)
-        println("close test case 6.22.34")
     }
 
     @Test
-    fun case6_23() = maybeRun {
-        println("test case 6.23.1")
+    fun case6_23_1() = maybeRun {
         echoMessageAndClose(203)
-        println("close test case 6.23.1")
+    }
 
-        println("test case 6.23.2")
+    @Test
+    fun case6_23_2() = maybeRun {
         echoMessageAndClose(204)
-        println("close test case 6.23.2")
+    }
 
-        println("test case 6.23.3")
+    @Test
+    fun case6_23_3() = maybeRun {
         echoMessageAndClose(205)
-        println("close test case 6.23.3")
+    }
 
-        println("test case 6.23.4")
+    @Test
+    fun case6_23_4() = maybeRun {
         echoMessageAndClose(206)
-        println("close test case 6.23.4")
+    }
 
-        println("test case 6.23.5")
+    @Test
+    fun case6_23_5() = maybeRun {
         echoMessageAndClose(207)
-        println("close test case 6.23.5")
+    }
 
-        println("test case 6.23.6")
+    @Test
+    fun case6_23_6() = maybeRun {
         echoMessageAndClose(208)
-        println("close test case 6.23.6")
+    }
 
-        println("test case 6.23.7")
+    @Test
+    fun case6_23_7() = maybeRun {
         echoMessageAndClose(209)
-        println("close test case 6.23.7")
     }
 
     @Test
-    fun case7_1() = maybeRun {
-        println("test case 7.1.1")
+    fun case7_1_1() = maybeRun {
         echoMessageAndClose(210)
-        println("close test case 7.1.1")
-
-        println("test case 7.1.2")
-        prepareConnection(211)
-        println("close test case 7.1.2")
-
-        println("test case 7.1.3")
-        prepareConnection(212)
-        println("close test case 7.1.3")
-
-        println("test case 7.1.4")
-        prepareConnection(213)
-        println("close test case 7.1.4")
-
-        println("test case 7.1.5")
-        prepareConnection(214)
-        println("close test case 7.1.5")
-
-        println("test case 7.1.6")
-        prepareConnection(215)
-        println("close test case 7.1.6")
     }
 
     @Test
-    fun case7_3() = maybeRun {
-        println("test case 7.3.1")
+    fun case7_1_2() = maybeRun {
+        prepareConnection(211)
+    }
+
+    @Test
+    fun case7_1_3() = maybeRun {
+        prepareConnection(212)
+    }
+
+    @Test
+    fun case7_1_4() = maybeRun {
+        prepareConnection(213)
+    }
+
+    @Test
+    fun case7_1_5() = maybeRun {
+        prepareConnection(214)
+    }
+
+    @Test
+    fun case7_1_6() = maybeRun {
+        prepareConnection(215)
+    }
+
+    @Test
+    fun case7_3_1() = maybeRun {
         closeConnection(prepareConnection(216))
-        println("close test case 7.3.1")
+    }
 
-        println("test case 7.3.2")
+    @Test
+    fun case7_3_2() = maybeRun {
         prepareConnection(217)
-        println("close test case 7.3.2")
+    }
 
-        println("test case 7.3.3")
+    @Test
+    fun case7_3_3() = maybeRun {
         closeConnection(prepareConnection(218))
-        println("close test case 7.3.3")
+    }
 
-        println("test case 7.3.4")
+    @Test
+    fun case7_3_4() = maybeRun {
         closeConnection(prepareConnection(219))
-        println("close test case 7.3.4")
+    }
 
-        println("test case 7.3.5")
+    @Test
+    fun case7_3_5() = maybeRun {
         closeConnection(prepareConnection(220))
-        println("close test case 7.3.5")
+    }
 
-        println("test case 7.3.6")
+    @Test
+    fun case7_3_6() = maybeRun {
         prepareConnection(221)
-        println("close test case 7.3.6")
     }
 
     @Test
     fun case7_5() = maybeRun {
-        println("test case 7.5.1")
         prepareConnection(222)
-        println("close test case 7.5.1")
     }
 
     @Test
-    fun case7_7() = maybeRun {
-        println("test case 7.7.1")
+    fun case7_7_1() = maybeRun {
         prepareConnection(223)
-        println("close test case 7.7.1")
+    }
 
-        println("test case 7.7.2")
+    @Test
+    fun case7_7_2() = maybeRun {
         prepareConnection(224)
-        println("close test case 7.7.2")
+    }
 
-        println("test case 7.7.3")
+    @Test
+    fun case7_7_3() = maybeRun {
         prepareConnection(225)
-        println("close test case 7.7.3")
+    }
 
-        println("test case 7.7.4")
+    @Test
+    fun case7_7_4() = maybeRun {
         prepareConnection(226)
-        println("close test case 7.7.4")
+    }
 
-        println("test case 7.7.5")
+    @Test
+    fun case7_7_5() = maybeRun {
         prepareConnection(227)
-        println("close test case 7.7.5")
+    }
 
-        println("test case 7.7.6")
+    @Test
+    fun case7_7_6() = maybeRun {
         prepareConnection(228)
-        println("close test case 7.7.6")
+    }
 
-        println("test case 7.7.7")
+    @Test
+    fun case7_7_7() = maybeRun {
         prepareConnection(229)
-        println("close test case 7.7.7")
+    }
 
-        println("test case 7.7.8")
+    @Test
+    fun case7_7_8() = maybeRun {
         prepareConnection(230)
-        println("close test case 7.7.8")
+    }
 
-        println("test case 7.7.9")
+    @Test
+    fun case7_7_9() = maybeRun {
         prepareConnection(231)
-        println("close test case 7.7.9")
+    }
 
-        println("test case 7.7.10")
+    @Test
+    fun case7_7_10() = maybeRun {
         prepareConnection(232)
-        println("close test case 7.7.10")
+    }
 
-        println("test case 7.7.11")
+    @Test
+    fun case7_7_11() = maybeRun {
         prepareConnection(233)
-        println("close test case 7.7.11")
+    }
 
-        println("test case 7.7.12")
+    @Test
+    fun case7_7_12() = maybeRun {
         prepareConnection(234)
-        println("close test case 7.7.12")
+    }
 
-        println("test case 7.7.13")
+    @Test
+    fun case7_7_13() = maybeRun {
         prepareConnection(235)
-        println("close test case 7.7.13")
     }
 
     @Test
-    fun case7_9() = maybeRun {
-        println("test case 7.9.1")
+    fun case7_9_1() = maybeRun {
         prepareConnection(236)
-        println("close test case 7.9.1")
+    }
 
-        println("test case 7.9.2")
+    @Test
+    fun case7_9_2() = maybeRun {
         prepareConnection(237)
-        println("close test case 7.9.2")
+    }
 
-        println("test case 7.9.3")
+    @Test
+    fun case7_9_3() = maybeRun {
         prepareConnection(238)
-        println("close test case 7.9.3")
+    }
 
-        println("test case 7.9.4")
+    @Test
+    fun case7_9_4() = maybeRun {
         prepareConnection(239)
-        println("close test case 7.9.4")
+    }
 
-        println("test case 7.9.5")
+    @Test
+    fun case7_9_5() = maybeRun {
         prepareConnection(240)
-        println("close test case 7.9.5")
+    }
 
-        println("test case 7.9.6")
+    @Test
+    fun case7_9_6() = maybeRun {
         prepareConnection(241)
-        println("close test case 7.9.6")
+    }
 
-        println("test case 7.9.7")
+    @Test
+    fun case7_9_7() = maybeRun {
         prepareConnection(242)
-        println("close test case 7.9.7")
+    }
 
-        println("test case 7.9.8")
+    @Test
+    fun case7_9_8() = maybeRun {
         prepareConnection(243)
-        println("close test case 7.9.8")
+    }
 
-        println("test case 7.9.9")
+    @Test
+    fun case7_9_9() = maybeRun {
         prepareConnection(244)
-        println("close test case 7.9.9")
     }
 
     @Test
-    fun case7_13() = maybeRun {
-        println("test case 7.13.1")
+    fun case7_13_1() = maybeRun {
         prepareConnection(245)
-        println("close test case 7.13.1")
-
-        println("test case 7.13.2")
-        prepareConnection(246)
-        println("close test case 7.13.2")
     }
 
     @Test
-    fun case9_1() = maybeRun {
-        println("test case 9.1.1")
+    fun case7_13_2() = maybeRun {
+        prepareConnection(246)
+    }
+
+    @Test
+    fun case9_1_1() = maybeRun {
         echoMessageAndClose(247)
-        println("close test case 9.1.1")
+    }
 
-        println("test case 9.1.2")
+    @Test
+    fun case9_1_2() = maybeRun {
         echoMessageAndClose(248)
-        println("close test case 9.1.2")
+    }
 
-        println("test case 9.1.3")
+    @Test
+    fun case9_1_3() = maybeRun {
         echoMessageAndClose(249)
-        println("close test case 9.1.3")
+    }
 
+    @Test
+    fun case9_1_4() = maybeRun {
         println("test case 9.1.4")
         echoMessageAndClose(250)
         println("close test case 9.1.4")
-
-        println("test case 9.1.5")
-        echoMessageAndClose(251)
-        println("close test case 9.1.5")
-
-        println("test case 9.1.6")
-        echoMessageAndClose(252)
-        println("close test case 9.1.6")
     }
 
     @Test
-    fun case9_2() = maybeRun {
-        println("test case 9.2.1")
+    fun case9_1_5() = maybeRun {
+        echoMessageAndClose(251)
+    }
+
+    @Test
+    fun case9_1_6() = maybeRun {
+        echoMessageAndClose(252)
+    }
+
+    @Test
+    fun case9_2_1() = maybeRun {
         echoBinaryMessageAndClose(253)
-        println("close test case 9.2.1")
+    }
 
-        println("test case 9.2.2")
+    @Test
+    fun case9_2_2() = maybeRun {
         echoBinaryMessageAndClose(254)
-        println("close test case 9.2.2")
+    }
 
-        println("test case 9.2.3")
+    @Test
+    fun case9_2_3() = maybeRun {
         echoBinaryMessageAndClose(255)
-        println("close test case 9.2.3")
+    }
 
-        println("test case 9.2.4")
+    @Test
+    fun case9_2_4() = maybeRun {
         echoBinaryMessageAndClose(256)
-        println("close test case 9.2.4")
+    }
 
-        println("test case 9.2.5")
+    @Test
+    fun case9_2_5() = maybeRun {
         echoBinaryMessageAndClose(257)
-        println("close test case 9.2.5")
+    }
 
-        println("test case 9.2.6")
+    @Test
+    fun case9_2_6() = maybeRun {
         echoBinaryMessageAndClose(258)
-        println("close test case 9.2.6")
     }
 
     @Test
     fun case9_3_1() = maybeRun {
-        println("test case 9.3.1")
         echoMessageAndClose(259)
-        println("close test case 9.3.1")
     }
 
     @Test
     fun case9_3_2() = maybeRun {
-        println("test case 9.3.2")
         echoMessageAndClose(260)
-        println("close test case 9.3.2")
     }
 
     @Test
     fun case9_3_3() = maybeRun {
-        println("test case 9.3.3")
         echoMessageAndClose(261)
-        println("close test case 9.3.3")
     }
 
     @Test
     fun case9_3_4() = maybeRun {
-        println("test case 9.3.4")
         echoMessageAndClose(262)
-        println("close test case 9.3.4")
     }
 
     @Test
     fun case9_3_5() = maybeRun {
-        println("test case 9.3.5")
         echoMessageAndClose(263)
-        println("close test case 9.3.5")
     }
 
     @Test
     fun case9_3_6() = maybeRun {
-        println("test case 9.3.6")
         echoMessageAndClose(264)
-        println("close test case 9.3.6")
     }
 
     @Test
     fun case9_3_7() = maybeRun {
-        println("test case 9.3.7")
         echoMessageAndClose(265)
-        println("close test case 9.3.7")
     }
 
     @Test
     fun case9_3_8() = maybeRun {
-        println("test case 9.3.8")
         echoMessageAndClose(266)
-        println("close test case 9.3.8")
     }
 
     @Test
     fun case9_3_9() = maybeRun {
-        println("test case 9.3.9")
         echoMessageAndClose(267)
-        println("close test case 9.3.9")
     }
 
     @Test
     fun case9_4_1() = maybeRun {
-        println("test case 9.4.1")
         echoBinaryMessageAndClose(268)
-        println("close test case 9.4.1")
     }
 
     @Test
     fun case9_4_2() = maybeRun {
-        println("test case 9.4.2")
         echoBinaryMessageAndClose(269)
-        println("close test case 9.4.2")
     }
 
     @Test
     fun case9_4_3() = maybeRun {
-        println("test case 9.4.3")
         echoBinaryMessageAndClose(270)
-        println("close test case 9.4.3")
     }
 
     @Test
     fun case9_4_4() = maybeRun {
-        println("test case 9.4.4")
         echoBinaryMessageAndClose(271)
-        println("close test case 9.4.4")
     }
 
     @Test
     fun case9_4_5() = maybeRun {
-        println("test case 9.4.5")
         echoBinaryMessageAndClose(272)
-        println("close test case 9.4.5")
     }
 
     @Test
     fun case9_4_6() = maybeRun {
-        println("test case 9.4.6")
         echoBinaryMessageAndClose(273)
-        println("close test case 9.4.6")
     }
 
     @Test
     fun case9_4_7() = maybeRun {
-        println("test case 9.4.7")
         echoBinaryMessageAndClose(274)
-        println("close test case 9.4.7")
     }
 
     @Test
     fun case9_4_8() = maybeRun {
-        println("test case 9.4.8")
         echoBinaryMessageAndClose(275)
-        println("close test case 9.4.8")
     }
 
     @Test
     fun case9_4_9() = maybeRun {
-        println("test case 9.4.9")
         echoBinaryMessageAndClose(276)
-        println("close test case 9.4.9")
     }
 
     @Test
     fun case9_5_1() = maybeRun {
-        println("test case 9.5.1")
         echoMessageAndClose(277)
-        println("close test case 9.5.1")
     }
 
     @Test
     fun case9_5_2() = maybeRun {
-        println("test case 9.5.2")
         echoMessageAndClose(278)
-        println("close test case 9.5.2")
     }
 
     @Test
     fun case9_5_3() = maybeRun {
-        println("test case 9.5.3")
         echoMessageAndClose(279)
-        println("close test case 9.5.3")
     }
 
     @Test
     fun case9_5_4() = maybeRun {
-        println("test case 9.5.4")
         echoMessageAndClose(280)
-        println("close test case 9.5.4")
     }
 
     @Test
     fun case9_5_5() = maybeRun {
-        println("test case 9.5.5")
         echoMessageAndClose(281)
-        println("close test case 9.5.5")
     }
 
     @Test
     fun case9_5_6() = maybeRun {
-        println("test case 9.5.6")
         echoMessageAndClose(282)
-        println("close test case 9.5.6")
     }
 
     @Test
     fun case9_6_1() = maybeRun {
-        println("test case 9.6.1")
         echoBinaryMessageAndClose(283)
-        println("close test case 9.6.1")
     }
 
     @Test
     fun case9_6_2() = maybeRun {
-        println("test case 9.6.2")
         echoBinaryMessageAndClose(284)
-        println("close test case 9.6.2")
     }
 
     @Test
     fun case9_6_3() = maybeRun {
-        println("test case 9.6.3")
         echoBinaryMessageAndClose(285)
-        println("close test case 9.6.3")
     }
 
     @Test
     fun case9_6_4() = maybeRun {
-        println("test case 9.6.4")
         echoBinaryMessageAndClose(286)
-        println("close test case 9.6.4")
     }
 
     @Test
     fun case9_6_5() = maybeRun {
-        println("test case 9.6.5")
         echoBinaryMessageAndClose(287)
-        println("close test case 9.6.5")
     }
 
     @Test
     fun case9_6_6() = maybeRun {
-        println("test case 9.6.6")
         echoBinaryMessageAndClose(288)
-        println("close test case 9.6.6")
     }
 
     @Test
     fun case9_7_1() = maybeRun {
-        println("test case 9.7.1")
         echoMessageAndClose(289, 1000)
-        println("close test case 9.7.1")
     }
 
     @Test
     fun case9_7_2() = maybeRun {
-        println("test case 9.7.2")
         echoMessageAndClose(290, 1000)
-        println("close test case 9.7.2")
     }
 
     @Test
     fun case9_7_3() = maybeRun {
-        println("test case 9.7.3")
         echoMessageAndClose(291, 1000)
-        println("close test case 9.7.3")
     }
 
     @Test
     fun case9_7_4() = maybeRun {
-        println("test case 9.7.4")
         echoMessageAndClose(292, 1000)
-        println("close test case 9.7.4")
     }
 
     @Test
     fun case9_7_5() = maybeRun {
-        println("test case 9.7.5")
         echoMessageAndClose(293, 1000)
-        println("close test case 9.7.5")
     }
 
     @Test
     fun case9_7_6() = maybeRun {
-        println("test case 9.7.6")
         echoMessageAndClose(294, 1000)
-        println("close test case 9.7.6")
     }
 
     @Test
     fun case9_8_1() = maybeRun {
-        println("test case 9.8.1")
         echoBinaryMessageAndClose(295, 1000)
-        println("close test case 9.8.1")
     }
 
     @Test
     fun case9_8_2() = maybeRun {
-        println("test case 9.8.2")
         echoBinaryMessageAndClose(296, 1000)
-        println("close test case 9.8.2")
     }
 
     @Test
     fun case9_8_3() = maybeRun {
-        println("test case 9.8.3")
         echoBinaryMessageAndClose(297, 1000)
-        println("close test case 9.8.3")
     }
 
     @Test
     fun case9_8_4() = maybeRun {
-        println("test case 9.8.4")
         echoBinaryMessageAndClose(298, 1000)
-        println("close test case 9.8.4")
     }
 
     @Test
     fun case9_8_5() = maybeRun {
-        println("test case 9.8.5")
         echoBinaryMessageAndClose(299, 1000)
-        println("close test case 9.8.5")
     }
 
     @Test
     fun case9_8_6() = maybeRun {
-        println("test case 9.8.6")
         echoBinaryMessageAndClose(300, 1000)
-        println("close test case 9.8.6")
     }
 
     @Test
     fun case10_1_1() = maybeRun {
-        println("test case 10.1.1")
         echoMessageAndClose(301)
-        println("close test case 10.1.1")
     }
 
     private suspend fun CoroutineScope.prepareConnection(case: Int): WebSocketClient {
@@ -1647,7 +1704,6 @@ class AutobahnTests {
 
     @AfterTest
     fun validateResponse() = block {
-        println("** UPDATE REPORTS **")
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
