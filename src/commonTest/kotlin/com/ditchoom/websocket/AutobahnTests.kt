@@ -48,7 +48,6 @@ class AutobahnTests {
                     shouldRun = true
                     AutobahnConnectivityState.AVAILABLE
                 } catch (e: Exception) {
-                    e.printStackTrace()
                     AutobahnConnectivityState.UNAVAILABLE
                 }
             }
