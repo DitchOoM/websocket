@@ -6,8 +6,6 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
-import com.ditchoom.socket.ClientSocket
-import com.ditchoom.socket.connect
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -15,6 +13,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -34,7 +33,18 @@ class AutobahnTests {
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
                 autobahnState = try {
-                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds)
+                    val websocket = WebSocketClient.allocate(
+                        WebSocketConnectionOptions(
+                            "localhost",
+                            9001,
+                            connectionTimeout = 1.seconds
+                        )
+                    )
+                    withTimeout(1.seconds) {
+                        websocket.connect()
+                        websocket.connectionState.first { it is ConnectionState.Connected }
+                    }
+                    websocket.close()
                     shouldRun = true
                     AutobahnConnectivityState.AVAILABLE
                 } catch (e: Exception) {
@@ -1602,7 +1612,7 @@ class AutobahnTests {
         )
         val websocket = WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.SharedMemory,
+            AllocationZone.Direct,
             this + CoroutineName(case.toString())
         )
         websocket.connect()
@@ -1618,7 +1628,7 @@ class AutobahnTests {
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.SharedMemory,
+            AllocationZone.Direct,
             this
         )
         ws.scope.launch {
@@ -1640,7 +1650,7 @@ class AutobahnTests {
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.SharedMemory,
+            AllocationZone.Direct,
             this + CoroutineName(case.toString())
         )
         ws.scope.launch {
@@ -1660,7 +1670,7 @@ class AutobahnTests {
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.SharedMemory,
+            AllocationZone.Direct,
             this + CoroutineName(case.toString())
         )
         ws.scope.launch {
@@ -1702,10 +1712,7 @@ class AutobahnTests {
     }
 
     @AfterTest
-    fun validateResponse() = block {
-        if (autobahnState != AutobahnConnectivityState.AVAILABLE) {
-            return@block
-        }
+    fun validateResponse() = maybeRun {
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
@@ -1713,7 +1720,7 @@ class AutobahnTests {
         )
         val websocket = WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.SharedMemory,
+            AllocationZone.Direct,
             this
         )
         websocket.connect()

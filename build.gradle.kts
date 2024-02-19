@@ -269,10 +269,9 @@ val validateAutobahnResults = task("validateAutobahnResults") {
         val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
         if (!Files.exists(path)) return@doLast
         println("**VALIDATING AUTOBAHN RESULTS **")
-        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int)
+        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int?)
         val json = Files.readAllBytes(path).decodeToString()
         val obj = JSONObject(json).toMap()
-        // [AgentName, [Version, Props]]
         val cases = ArrayList<TestResult>()
 
         obj.keys.forEach { agentName ->
@@ -280,7 +279,7 @@ val validateAutobahnResults = task("validateAutobahnResults") {
             props.keys.forEach { version ->
                 val keyValue = props[version]!!
                 try {
-                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"].toString().toInt())
+                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"]?.toString()?.toInt())
                 } catch (e: Exception) {
                     println("FAIL $e")
                     println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
