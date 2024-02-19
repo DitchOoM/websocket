@@ -21,11 +21,9 @@ class WebSocketTests {
     fun clientEchoString() = block {
         val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
         val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
-        println("connecting")
         websocket.connect()
         val string1 = "test"
         launch { websocket.write(string1) }
-        println("wrote")
         val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
         assertEquals(string1, dataRead.value)
         val string2 = "yolo"
@@ -33,7 +31,6 @@ class WebSocketTests {
         val dataRead2 = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
         assertEquals(string2, dataRead2.value)
         websocket.close()
-        println("done")
     }
 
     @Test
