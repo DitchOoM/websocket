@@ -1614,7 +1614,7 @@ class AutobahnTests {
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
@@ -1709,7 +1709,7 @@ class AutobahnTests {
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
-            websocketEndpoint = "/updateReports?agent=${agentName()}",
+            websocketEndpoint = "/updateReports?agent=${agentName()}"
         )
         val websocket = WebSocketClient.allocate(
             connectionOptions,
