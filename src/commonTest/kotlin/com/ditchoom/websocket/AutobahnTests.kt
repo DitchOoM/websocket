@@ -34,12 +34,13 @@ class AutobahnTests {
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
                 autobahnState = try {
-                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds)
+                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds).close()
+                    shouldRun = true
                     AutobahnConnectivityState.AVAILABLE
                 } catch (e: Exception) {
+                    e.printStackTrace()
                     AutobahnConnectivityState.UNAVAILABLE
                 }
-                shouldRun = true
             }
 
             AutobahnConnectivityState.AVAILABLE -> {
@@ -1613,17 +1614,16 @@ class AutobahnTests {
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}"
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            connectionTimeout = 5.seconds
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
-            this + CoroutineName(case.toString())
+            this
         )
-        ws.scope.launch {
-            ws.connect()
-            ws.connectionState.first { it is ConnectionState.Connected }
-        }
+        ws.connect()
+        ws.connectionState.first { it is ConnectionState.Connected }
         ws.incomingMessages.take(count).collect {
             val m = it as WebSocketMessage.Text
             ws.write(m.value)
@@ -1702,10 +1702,14 @@ class AutobahnTests {
 
     @AfterTest
     fun validateResponse() = block {
+        if (autobahnState != AutobahnConnectivityState.AVAILABLE) {
+            return@block
+        }
         val connectionOptions = WebSocketConnectionOptions(
             name = "localhost",
             port = 9001,
-            websocketEndpoint = "/updateReports?agent=${agentName()}"
+            websocketEndpoint = "/updateReports?agent=${agentName()}",
+            connectionTimeout = 5.seconds
         )
         val websocket = WebSocketClient.allocate(
             connectionOptions,
