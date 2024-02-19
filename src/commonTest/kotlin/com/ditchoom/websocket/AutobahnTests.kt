@@ -34,7 +34,7 @@ class AutobahnTests {
         when (autobahnState) {
             AutobahnConnectivityState.UNTESTED -> {
                 autobahnState = try {
-                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds).close()
+                    ClientSocket.connect(9001, "localhost", tls = false, 3.seconds)
                     shouldRun = true
                     AutobahnConnectivityState.AVAILABLE
                 } catch (e: Exception) {
@@ -1615,15 +1615,16 @@ class AutobahnTests {
             name = "localhost",
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
-            connectionTimeout = 5.seconds
         )
         val ws = WebSocketClient.allocate(
             connectionOptions,
             AllocationZone.SharedMemory,
             this
         )
-        ws.connect()
-        ws.connectionState.first { it is ConnectionState.Connected }
+        ws.scope.launch {
+            ws.connect()
+            ws.connectionState.first { it is ConnectionState.Connected }
+        }
         ws.incomingMessages.take(count).collect {
             val m = it as WebSocketMessage.Text
             ws.write(m.value)
@@ -1709,7 +1710,6 @@ class AutobahnTests {
             name = "localhost",
             port = 9001,
             websocketEndpoint = "/updateReports?agent=${agentName()}",
-            connectionTimeout = 5.seconds
         )
         val websocket = WebSocketClient.allocate(
             connectionOptions,
