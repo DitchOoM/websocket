@@ -20,7 +20,7 @@ jobs:
           distribution: 'zulu'
           java-version: '19'
           cache: gradle
-      - name: Setup docker (missing on MacOS)
+      - name: Setup docker (MacOS only)
         if: runner.os == 'macos'
         run: |
           brew install docker
@@ -29,6 +29,10 @@ jobs:
           # For testcontainers to find the Colima socket
           # https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#cannot-connect-to-the-docker-daemon-at-unixvarrundockersock-is-the-docker-daemon-running
           sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
+      - name: Launch Autobahn Test Suite Docker Image (MacOS only)
+        if: runner.os == 'macos'
+        run: |
+          docker run -it --rm -v "${PWD}/.docker/config:/config" -v "${PWD}/.docker/reports:/reports" -p 9001:9001 --name fuzzingserver crossbario/autobahn-testsuite
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
       - name: Tests with Gradle
