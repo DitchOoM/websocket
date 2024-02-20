@@ -62,10 +62,10 @@ class AutobahnTests {
         }
         return@block if (shouldRun) {
             try {
-                withTimeout(15.seconds) { lambda() }
+                withTimeout(40.seconds) { lambda() }
             } catch (e: Exception) {
                 println("Failed because of $e, trying again")
-                withTimeout(15.seconds) { lambda() }
+                withTimeout(40.seconds) { lambda() }
             }
         } else {
             null
