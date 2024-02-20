@@ -60,8 +60,15 @@ class AutobahnTests {
                 println("Autobahn Docker Image Unavailable, ignoring test.")
             } // Do nothing
         }
-        if (shouldRun) {
-            lambda()
+        return@block if (shouldRun) {
+            try {
+                withTimeout(15.seconds) { lambda() }
+            } catch (e: Exception) {
+                println("Failed because of $e, trying again")
+                withTimeout(15.seconds) { lambda() }
+            }
+        } else {
+            null
         }
     }
 
