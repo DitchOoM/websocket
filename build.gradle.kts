@@ -83,7 +83,7 @@ kotlin {
         val commonMain by getting {
             dependencies {
                 implementation("com.ditchoom:buffer:1.3.37")
-                implementation("com.ditchoom:socket:1.1.19")
+                implementation("com.ditchoom:socket:1.1.20")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }

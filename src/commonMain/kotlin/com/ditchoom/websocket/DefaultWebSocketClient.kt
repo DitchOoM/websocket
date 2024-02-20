@@ -164,11 +164,8 @@ class DefaultWebSocketClient(
             val frameBuffer = frame.toBuffer()
             frameBuffer.resetForRead()
             val remainingBytes = frameBuffer.remaining()
-            var bytesWritten = 0
-            // TODO: Figure out why the framebuffer doesn't have an up to date "hasRemaining"
-            while (frameBuffer.hasRemaining() && bytesWritten < remainingBytes) {
-                val b = socket.write(frameBuffer, timeout)
-                bytesWritten += b
+            while (frameBuffer.hasRemaining()) {
+                socket.write(frameBuffer, timeout)
             }
             remainingBytes
         } catch (e: Exception) {
