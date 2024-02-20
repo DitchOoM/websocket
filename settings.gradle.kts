@@ -15,7 +15,7 @@ pluginManagement {
 }
 rootProject.name = "websocket"
 plugins {
-    id("com.gradle.enterprise") version ("3.10.3")
+    id("com.gradle.enterprise") version ("3.15")
 }
 gradleEnterprise {
     buildScan {

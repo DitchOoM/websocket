@@ -11,7 +11,7 @@ data class WebSocketConnectionOptions(
     val readTimeout: Duration = connectionTimeout,
     val writeTimeout: Duration = connectionTimeout,
     val websocketEndpoint: String = "/",
-    val protocols: List<String> = emptyList(),
+    val protocols: List<String> = emptyList()
 ) {
     internal fun buildUrl(): String {
         val prefix = if (tls) {

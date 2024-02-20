@@ -13,3 +13,4 @@ kotlinx-io-native/repo/
 !.idea/codeStyles
 
 local.properties
+/.docker/reports/clients/

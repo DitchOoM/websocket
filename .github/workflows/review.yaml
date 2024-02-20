@@ -1,6 +1,8 @@
 name: "Build and Test"
 on:
   pull_request:
+    paths-ignore:
+      - '*.md'
     types:
       - synchronize
       - opened
@@ -9,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-latest ]
+        os: [ macos-latest, ubuntu-latest ]
     steps:
       - uses: actions/checkout@v3
       - name: Set up JDK 19
@@ -18,7 +20,16 @@ jobs:
           distribution: 'zulu'
           java-version: '19'
           cache: gradle
+      - name: Setup docker (MacOS only)
+        if: runner.os == 'macos'
+        run: |
+          brew install docker
+          colima start
+
+          # For testcontainers to find the Colima socket
+          # https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#cannot-connect-to-the-docker-daemon-at-unixvarrundockersock-is-the-docker-daemon-running
+          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
       - name: Tests with Gradle
-        run: ./gradlew ktlintCheck assemble build check allTests publishToMavenLocal
+        run: ./gradlew startAutobahnDockerContainer ktlintCheck assemble build check allTests publishToMavenLocal

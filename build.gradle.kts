@@ -1,15 +1,30 @@
-import org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeSimulatorTest
+
+import org.apache.tools.ant.taskdefs.condition.Os
+import org.json.JSONObject
+import java.nio.file.Files
+import java.nio.file.Paths
 
 plugins {
-    kotlin("multiplatform") version "1.8.10"
-    kotlin("native.cocoapods") version "1.8.10"
+    kotlin("multiplatform") version "1.9.22"
+    kotlin("native.cocoapods") version "1.9.22"
     id("com.android.library")
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.0.0"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.0.0"
+    id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
+    id("org.jlleitschuh.gradle.ktlint-idea") version "11.6.1"
+    kotlin("plugin.serialization") version "1.9.22"
 }
+val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
+val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
+val isMacOS = Os.isFamily(Os.FAMILY_MAC)
+val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
+
+println(
+    "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
+        "Load All Platforms: $loadAllPlatforms"
+)
+
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
 version = "$libraryVersionPrefix.0-SNAPSHOT"
@@ -24,32 +39,33 @@ repositories {
 }
 
 kotlin {
-    android {
+    androidTarget {
         publishLibraryVariants("release")
     }
-    jvm {
-        compilations.all {
-            kotlinOptions.jvmTarget = "1.8"
+    if (loadAllPlatforms) {
+        jvm {
+            compilations.all {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            testRuns["test"].executionTask.configure {
+                useJUnit()
+            }
         }
-        testRuns["test"].executionTask.configure {
-            useJUnit()
+        js {
+            browser()
+            nodejs {
+                testTask {
+                    useMocha {
+                        timeout = "182s"
+                    }
+                }
+            }
         }
-    }
-    js(BOTH) {
-        browser()
-        nodejs()
     }
     macosArm64()
     macosX64()
-    watchos()
-    watchosSimulatorArm64()
-    tvos()
-    tvosSimulatorArm64()
     ios()
     iosSimulatorArm64()
-    tasks.getByName<KotlinNativeSimulatorTest>("iosSimulatorArm64Test") {
-        deviceId = "iPhone 14"
-    }
 
     cocoapods {
         ios.deploymentTarget = "13.0"
@@ -60,14 +76,15 @@ kotlin {
             source = git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
                 tag = "0.1.3"
             }
+            extraOpts += listOf("-compiler-option", "-fmodules")
         }
     }
     sourceSets {
         val commonMain by getting {
             dependencies {
-                implementation("com.ditchoom:buffer:1.3.0")
-                implementation("com.ditchoom:socket:1.1.14")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+                implementation("com.ditchoom:buffer:1.3.37")
+                implementation("com.ditchoom:socket:1.1.20")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
             }
         }
         val commonTest by getting {
@@ -75,19 +92,25 @@ kotlin {
                 implementation(kotlin("test"))
             }
         }
-        val jvmMain by getting {
-            kotlin.srcDir("src/commonJvmMain/kotlin")
-        }
-        val jvmTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-        }
-        val jsMain by getting {
-            dependencies {
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.521")
-                implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.521")
+        if (loadAllPlatforms) {
+            val jvmMain by getting {
+                kotlin.srcDir("src/commonJvmMain/kotlin")
             }
+            val jvmTest by getting {
+                kotlin.srcDir("src/commonJvmTest/kotlin")
+                dependencies {
+                    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.7.3")
+                    implementation("junit:junit:4.13.2")
+                }
+            }
+            val jsMain by getting {
+                dependencies {
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.682")
+                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.682")
+                }
+            }
+            val jsTest by getting
         }
-        val jsTest by getting
         val macosX64Main by getting
         val macosX64Test by getting
         val macosArm64Main by getting
@@ -96,14 +119,6 @@ kotlin {
         val iosTest by getting
         val iosSimulatorArm64Main by getting
         val iosSimulatorArm64Test by getting
-        val watchosMain by getting
-        val watchosTest by getting
-        val watchosSimulatorArm64Main by getting
-        val watchosSimulatorArm64Test by getting
-        val tvosMain by getting
-        val tvosTest by getting
-        val tvosSimulatorArm64Main by getting
-        val tvosSimulatorArm64Test by getting
 
         val appleMain by sourceSets.creating {
             dependsOn(commonMain)
@@ -112,10 +127,6 @@ kotlin {
             macosArm64Main.dependsOn(this)
             iosMain.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
-            tvosMain.dependsOn(this)
-            tvosSimulatorArm64Main.dependsOn(this)
-            watchosMain.dependsOn(this)
-            watchosSimulatorArm64Main.dependsOn(this)
         }
 
         val appleTest by sourceSets.creating {
@@ -125,22 +136,17 @@ kotlin {
             macosArm64Test.dependsOn(this)
             iosTest.dependsOn(this)
             iosSimulatorArm64Test.dependsOn(this)
-            tvosTest.dependsOn(this)
-            tvosSimulatorArm64Test.dependsOn(this)
-            watchosTest.dependsOn(this)
-            watchosSimulatorArm64Test.dependsOn(this)
         }
 
         val androidMain by getting {
             kotlin.srcDir("src/commonJvmMain/kotlin")
             dependsOn(commonMain)
         }
-        val androidTest by getting {
+        val androidUnitTest by getting {
             kotlin.srcDir("src/commonJvmTest/kotlin")
             dependsOn(commonTest)
-            dependsOn(jvmTest)
         }
-        val androidAndroidTest by getting {
+        val androidInstrumentedTest by getting {
             dependsOn(commonTest)
             kotlin.srcDir("src/commonJvmTest/kotlin")
         }
@@ -148,11 +154,11 @@ kotlin {
 }
 
 android {
-    compileSdk = 33
+    compileSdk = 34
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
         minSdk = 18
-        targetSdk = 33
+        targetSdk = 34
     }
     lint {
         abortOnError = false
@@ -164,8 +170,8 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-System.getenv("GITHUB_REPOSITORY")?.let {
-    if (System.getenv("GITHUB_REF") == "refs/heads/main") {
+if (isRunningOnGithub) {
+    if (isMainBranchGithub) {
         signing {
             useInMemoryPgpKeys(
                 "56F1A973",
@@ -231,7 +237,8 @@ System.getenv("GITHUB_REPOSITORY")?.let {
         }
 
         repositories {
-            maven("https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
+            maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/$repositoryId/") {
                 name = "sonatype"
                 credentials {
                     username = ossUser
@@ -248,15 +255,51 @@ System.getenv("GITHUB_REPOSITORY")?.let {
     }
 }
 
+ktlint {
+    verbose.set(true)
+    outputToConsole.set(true)
+}
+
 val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {
     port.set(8081)
 }
+val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
+val validateAutobahnResults = task("validateAutobahnResults") {
+    doLast {
+        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
+        if (!Files.exists(path)) return@doLast
+        println("**VALIDATING AUTOBAHN RESULTS **")
+        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int?)
+        val json = Files.readAllBytes(path).decodeToString()
+        val obj = JSONObject(json).toMap()
+        val cases = ArrayList<TestResult>()
 
+        obj.keys.forEach { agentName ->
+            val props = obj[agentName] as Map<String, Map<String, Any>>
+            props.keys.forEach { version ->
+                val keyValue = props[version]!!
+                try {
+                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"]?.toString()?.toInt())
+                } catch (e: Exception) {
+                    println("FAIL $e")
+                    println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
+                }
+            }
+        }
+
+        val failedCases = cases.filterNot { it.agent.equals("BrowserJS", ignoreCase = true) }.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
+        if (failedCases.isNotEmpty()) {
+            throw GradleException("Failed test cases: $failedCases")
+        }
+    }
+}
 tasks.forEach { task ->
     val taskName = task.name
     if ((taskName.contains("test", ignoreCase = true) && !taskName.contains("clean", ignoreCase = true)) ||
         taskName == "check"
     ) {
         task.dependsOn(echoWebsocket)
+        task.dependsOn(autobahnContainer)
+        task.finalizedBy(validateAutobahnResults)
     }
 }
