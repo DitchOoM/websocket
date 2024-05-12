@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
 import org.khronos.webgl.ArrayBuffer
-import org.khronos.webgl.Uint8Array
+import org.khronos.webgl.Int8Array
 import org.w3c.dom.ARRAYBUFFER
 import org.w3c.dom.BinaryType
 import org.w3c.dom.CloseEvent
@@ -81,9 +81,9 @@ class BrowserWebSocketController(
                 is ArrayBuffer -> {
                     val buffer = if (zone == AllocationZone.SharedMemory && crossOriginIsolated) {
                         val sharedArrayBuffer = SharedArrayBuffer(data.byteLength)
-                        val array = Uint8Array(sharedArrayBuffer.unsafeCast<ArrayBuffer>())
-                        array.set(Uint8Array(it.data as ArrayBuffer), 0)
-                        JsBuffer(array, false, data.byteLength, data.byteLength, data.byteLength, sharedArrayBuffer)
+                        val array = Int8Array(sharedArrayBuffer.unsafeCast<ArrayBuffer>())
+                        array.set(Int8Array(it.data as ArrayBuffer), 0)
+                        JsBuffer(Int8Array(data), false, data.byteLength, data.byteLength, data.byteLength, sharedArrayBuffer)
                     } else {
                         if (zone == AllocationZone.SharedMemory && !crossOriginIsolated) {
                             console.warn(
@@ -93,7 +93,7 @@ class BrowserWebSocketController(
                                     "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer#security_requirements"
                             )
                         }
-                        val array = Uint8Array(data)
+                        val array = Int8Array(data)
                         val buffer = JsBuffer(array)
                         buffer.setLimit(array.length)
                         buffer.setPosition(0)
@@ -140,7 +140,7 @@ class BrowserWebSocketController(
         val jsBuffer = buffer as JsBuffer
         val arrayBufferView = if (jsBuffer.sharedArrayBuffer != null) {
             // shared buffers are not allowed with websocket
-            val copy = Uint8Array(buffer.capacity)
+            val copy = Int8Array(buffer.capacity)
             copy.set(jsBuffer.buffer)
             copy
         } else {

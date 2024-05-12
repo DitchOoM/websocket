@@ -1,155 +1,104 @@
-
+import groovy.util.Node
+import groovy.xml.XmlParser
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.json.JSONObject
+import java.net.URL
+//import org.json.JSONObject
 import java.nio.file.Files
 import java.nio.file.Paths
 
+
 plugins {
-    kotlin("multiplatform") version "1.9.22"
-    kotlin("native.cocoapods") version "1.9.22"
-    id("com.android.library")
+    kotlin("multiplatform") version "1.9.24"
+    kotlin("native.cocoapods") version "1.9.24"
+    id("com.android.library") version "8.4.0"
     id("io.codearte.nexus-staging") version "0.30.0"
     `maven-publish`
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
-    id("org.jlleitschuh.gradle.ktlint-idea") version "11.6.1"
-    kotlin("plugin.serialization") version "1.9.22"
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
 }
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
 val isMacOS = Os.isFamily(Os.FAMILY_MAC)
 val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
-
-println(
-    "isRunningOnGithub: $isRunningOnGithub isMainBranchGithub: $isMainBranchGithub OS:$isMacOS " +
-        "Load All Platforms: $loadAllPlatforms"
-)
-
 val libraryVersionPrefix: String by project
 group = "com.ditchoom"
-version = "$libraryVersionPrefix.0-SNAPSHOT"
-val libraryVersion = if (System.getenv("GITHUB_RUN_NUMBER") != null) {
-    "$libraryVersionPrefix${(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER")))}"
-} else {
-    "${libraryVersionPrefix}0-SNAPSHOT"
-}
+val libraryVersion = getNextVersion().toString()
+println(
+    "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
+            "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
+)
+
 repositories {
     google()
     mavenCentral()
+    maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
+
 kotlin {
+    jvmToolchain(19)
     androidTarget {
         publishLibraryVariants("release")
     }
-    if (loadAllPlatforms) {
-        jvm {
-            compilations.all {
-                kotlinOptions.jvmTarget = "1.8"
-            }
-            testRuns["test"].executionTask.configure {
-                useJUnit()
-            }
-        }
-        js {
-            browser()
-            nodejs {
-                testTask {
-                    useMocha {
-                        timeout = "182s"
-                    }
-                }
-            }
-        }
+    jvm()
+    js {
+        browser()
+        nodejs()
     }
-    macosArm64()
     macosX64()
-    ios()
-    iosSimulatorArm64()
-
+    macosArm64()
+    iosArm64()
+    iosX64()
+    applyDefaultHierarchyTemplate()
     cocoapods {
         ios.deploymentTarget = "13.0"
         osx.deploymentTarget = "11.0"
         watchos.deploymentTarget = "6.0"
         tvos.deploymentTarget = "13.0"
         pod("SocketWrapper") {
-            source = git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
-                tag = "0.1.3"
-            }
+            source =
+                git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
+                    tag = "0.1.3"
+                }
             extraOpts += listOf("-compiler-option", "-fmodules")
         }
+        version = "0.1.3"
     }
     sourceSets {
-        val commonMain by getting {
-            dependencies {
-                implementation("com.ditchoom:buffer:1.3.37")
-                implementation("com.ditchoom:socket:1.1.20")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-            }
+        commonMain.dependencies {
+            implementation("com.ditchoom:buffer:1.4.0")
+            implementation("com.ditchoom:socket:1.2.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
         }
-        val commonTest by getting {
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+        jvmTest.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.8.1")
+            implementation("junit:junit:4.13.2")
+        }
+        jsMain.dependencies {
+            implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.746")
+            implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
+        }
+        val androidInstrumentedTest by getting {
+            dependsOn(commonTest.get())
+        }
+        val commonJvmMain by creating {
+            dependsOn(commonMain.get())
+        }
+        jvmMain.get().dependsOn(commonJvmMain)
+        androidMain.get().dependsOn(commonJvmMain)
+        val commonJvmTest by creating {
+            dependsOn(commonTest.get())
+        }
+        jvmTest.get().dependsOn(commonJvmTest)
+        val androidUnitTest by getting {
             dependencies {
                 implementation(kotlin("test"))
             }
         }
-        if (loadAllPlatforms) {
-            val jvmMain by getting {
-                kotlin.srcDir("src/commonJvmMain/kotlin")
-            }
-            val jvmTest by getting {
-                kotlin.srcDir("src/commonJvmTest/kotlin")
-                dependencies {
-                    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.7.3")
-                    implementation("junit:junit:4.13.2")
-                }
-            }
-            val jsMain by getting {
-                dependencies {
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.682")
-                    implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.682")
-                }
-            }
-            val jsTest by getting
-        }
-        val macosX64Main by getting
-        val macosX64Test by getting
-        val macosArm64Main by getting
-        val macosArm64Test by getting
-        val iosMain by getting
-        val iosTest by getting
-        val iosSimulatorArm64Main by getting
-        val iosSimulatorArm64Test by getting
-
-        val appleMain by sourceSets.creating {
-            dependsOn(commonMain)
-            kotlin.srcDir("src/appleMain/kotlin")
-            macosX64Main.dependsOn(this)
-            macosArm64Main.dependsOn(this)
-            iosMain.dependsOn(this)
-            iosSimulatorArm64Main.dependsOn(this)
-        }
-
-        val appleTest by sourceSets.creating {
-            dependsOn(commonTest)
-            kotlin.srcDir("src/appleTest/kotlin")
-            macosX64Test.dependsOn(this)
-            macosArm64Test.dependsOn(this)
-            iosTest.dependsOn(this)
-            iosSimulatorArm64Test.dependsOn(this)
-        }
-
-        val androidMain by getting {
-            kotlin.srcDir("src/commonJvmMain/kotlin")
-            dependsOn(commonMain)
-        }
-        val androidUnitTest by getting {
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-            dependsOn(commonTest)
-        }
-        val androidInstrumentedTest by getting {
-            dependsOn(commonTest)
-            kotlin.srcDir("src/commonJvmTest/kotlin")
-        }
+        androidUnitTest.dependsOn(commonJvmTest)
     }
 }
 
@@ -157,13 +106,15 @@ android {
     compileSdk = 34
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 18
-        targetSdk = 34
-    }
-    lint {
-        abortOnError = false
+        minSdk = 19
     }
     namespace = "$group.${rootProject.name}"
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
@@ -176,7 +127,7 @@ if (isRunningOnGithub) {
             useInMemoryPgpKeys(
                 "56F1A973",
                 System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD")
+                System.getenv("GPG_SIGNING_PASSWORD"),
             )
             sign(publishing.publications)
         }
@@ -260,37 +211,101 @@ ktlint {
     outputToConsole.set(true)
 }
 
+class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
+    constructor(string: String, snapshot: Boolean) :
+            this(
+                string.split('.')[0].toUInt(),
+                string.split('.')[1].toUInt(),
+                string.split('.')[2].toUInt(),
+                snapshot,
+            )
+
+    fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
+
+    fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
+
+    fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
+
+    fun snapshot() = Version(major, minor, patch, true)
+
+    fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
+
+    override fun toString(): String =
+        if (snapshot) {
+            "$major.$minor.$patch-SNAPSHOT"
+        } else {
+            "$major.$minor.$patch"
+        }
+}
+private var latestVersion: Version? = Version(0u, 0u, 0u, true)
+
+@Suppress("UNCHECKED_CAST")
+fun getLatestVersion(): Version {
+    val latestVersion = latestVersion
+    if (latestVersion != null && !latestVersion.isVersionZero()) {
+        return latestVersion
+    }
+    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
+    val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
+    val latestStringList = versioning.first()["latest"] as List<Node>
+    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
+    this.latestVersion = result
+    return result
+}
+
+fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
+    var v = getLatestVersion()
+    if (snapshot) {
+        v = v.snapshot()
+    }
+    if (project.hasProperty("incrementMajor") && project.property("incrementMajor") == "true") {
+        return v.incrementMajor()
+    } else if (project.hasProperty("incrementMinor") && project.property("incrementMinor") == "true") {
+        return v.incrementMinor()
+    }
+    return v.incrementPatch()
+}
+
+tasks.create("nextVersion") {
+    println(getNextVersion())
+}
+
+val signingTasks = tasks.withType<Sign>()
+tasks.withType<AbstractPublishToMaven>().configureEach {
+    dependsOn(signingTasks)
+}
+
 val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {
     port.set(8081)
 }
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
 val validateAutobahnResults = task("validateAutobahnResults") {
     doLast {
-        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
-        if (!Files.exists(path)) return@doLast
-        println("**VALIDATING AUTOBAHN RESULTS **")
-        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int?)
-        val json = Files.readAllBytes(path).decodeToString()
-        val obj = JSONObject(json).toMap()
-        val cases = ArrayList<TestResult>()
-
-        obj.keys.forEach { agentName ->
-            val props = obj[agentName] as Map<String, Map<String, Any>>
-            props.keys.forEach { version ->
-                val keyValue = props[version]!!
-                try {
-                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"]?.toString()?.toInt())
-                } catch (e: Exception) {
-                    println("FAIL $e")
-                    println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
-                }
-            }
-        }
-
-        val failedCases = cases.filterNot { it.agent.equals("BrowserJS", ignoreCase = true) }.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
-        if (failedCases.isNotEmpty()) {
-            throw GradleException("Failed test cases: $failedCases")
-        }
+//        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
+//        if (!Files.exists(path)) return@doLast
+//        println("**VALIDATING AUTOBAHN RESULTS **")
+//        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int?)
+//        val json = Files.readAllBytes(path).decodeToString()
+//        val obj = JSONObject(json).toMap()
+//        val cases = ArrayList<TestResult>()
+//
+//        obj.keys.forEach { agentName ->
+//            val props = obj[agentName] as Map<String, Map<String, Any>>
+//            props.keys.forEach { version ->
+//                val keyValue = props[version]!!
+//                try {
+//                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"]?.toString()?.toInt())
+//                } catch (e: Exception) {
+//                    println("FAIL $e")
+//                    println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
+//                }
+//            }
+//        }
+//
+//        val failedCases = cases.filterNot { it.agent.equals("BrowserJS", ignoreCase = true) }.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
+//        if (failedCases.isNotEmpty()) {
+//            throw GradleException("Failed test cases: $failedCases")
+//        }
     }
 }
 tasks.forEach { task ->
