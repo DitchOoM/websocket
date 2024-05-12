@@ -9,6 +9,7 @@ import kotlin.random.Random
 
 internal sealed class MaskingKey {
     internal data object NoMaskingKey : MaskingKey()
+
     internal class FourByteMaskingKey(private val underlyingBuffer: ReadBuffer) : MaskingKey() {
         constructor() : this(PlatformBuffer.wrap(Random.nextBytes(4), ByteOrder.BIG_ENDIAN))
 

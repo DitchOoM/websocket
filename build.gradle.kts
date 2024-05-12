@@ -2,10 +2,7 @@ import groovy.util.Node
 import groovy.xml.XmlParser
 import org.apache.tools.ant.taskdefs.condition.Os
 import java.net.URL
-//import org.json.JSONObject
-import java.nio.file.Files
-import java.nio.file.Paths
-
+// import org.json.JSONObject
 
 plugins {
     kotlin("multiplatform") version "1.9.24"
@@ -25,7 +22,7 @@ group = "com.ditchoom"
 val libraryVersion = getNextVersion().toString()
 println(
     "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
-            "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
+        "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
 )
 
 repositories {
@@ -33,7 +30,6 @@ repositories {
     mavenCentral()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
-
 
 kotlin {
     jvmToolchain(19)
@@ -43,7 +39,13 @@ kotlin {
     jvm()
     js {
         browser()
-        nodejs()
+        nodejs {
+            testTask {
+                useMocha {
+                    timeout = "15s"
+                }
+            }
+        }
     }
     macosX64()
     macosArm64()
@@ -213,12 +215,12 @@ ktlint {
 
 class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
     constructor(string: String, snapshot: Boolean) :
-            this(
-                string.split('.')[0].toUInt(),
-                string.split('.')[1].toUInt(),
-                string.split('.')[2].toUInt(),
-                snapshot,
-            )
+        this(
+            string.split('.')[0].toUInt(),
+            string.split('.')[1].toUInt(),
+            string.split('.')[2].toUInt(),
+            snapshot,
+        )
 
     fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
 
@@ -275,12 +277,14 @@ tasks.withType<AbstractPublishToMaven>().configureEach {
     dependsOn(signingTasks)
 }
 
-val echoWebsocket = tasks.register<EchoWebsocketTask>("echoWebsocket") {
-    port.set(8081)
-}
+val echoWebsocket =
+    tasks.register<EchoWebsocketTask>("echoWebsocket") {
+        port.set(8081)
+    }
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
-val validateAutobahnResults = task("validateAutobahnResults") {
-    doLast {
+val validateAutobahnResults =
+    task("validateAutobahnResults") {
+        doLast {
 //        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
 //        if (!Files.exists(path)) return@doLast
 //        println("**VALIDATING AUTOBAHN RESULTS **")
@@ -306,8 +310,8 @@ val validateAutobahnResults = task("validateAutobahnResults") {
 //        if (failedCases.isNotEmpty()) {
 //            throw GradleException("Failed test cases: $failedCases")
 //        }
+        }
     }
-}
 tasks.forEach { task ->
     val taskName = task.name
     if ((taskName.contains("test", ignoreCase = true) && !taskName.contains("clean", ignoreCase = true)) ||

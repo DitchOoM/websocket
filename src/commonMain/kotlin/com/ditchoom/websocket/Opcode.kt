@@ -20,10 +20,10 @@ enum class Opcode(val value: Byte) {
     ReservedBitC(0xC),
     ReservedBitD(0xD),
     ReservedBitE(0xE),
-    ReservedBitF(0xF);
+    ReservedBitF(0xF),
+    ;
 
-    fun isControlFrame(): Boolean =
-        this == Close || this == Ping || this == Pong
+    fun isControlFrame(): Boolean = this == Close || this == Ping || this == Pong
 
     fun isValid(): Boolean =
         this == Close ||

@@ -30,33 +30,37 @@ import kotlin.time.Duration
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     allocationZone: AllocationZone,
-    parentScope: CoroutineScope?
+    parentScope: CoroutineScope?,
 ) : WebSocketClient {
-    override val scope = if (parentScope == null) {
-        CoroutineScope(
-            Dispatchers.Default + CoroutineName(
-                "Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                    ": ${connectionOptions.name}:${connectionOptions.port}"
+    override val scope =
+        if (parentScope == null) {
+            CoroutineScope(
+                Dispatchers.Default +
+                    CoroutineName(
+                        "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                            ": ${connectionOptions.name}:${connectionOptions.port}",
+                    ),
             )
-        )
-    } else {
-        parentScope + Dispatchers.Default + CoroutineName(
-            "Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                ": ${connectionOptions.name}:${connectionOptions.port}"
-        )
-    }
+        } else {
+            parentScope + Dispatchers.Default +
+                CoroutineName(
+                    "Websocket Connection #${getCountForConnection(connectionOptions)}" +
+                        ": ${connectionOptions.name}:${connectionOptions.port}",
+                )
+        }
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
     internal val inputStream = SuspendingSocketInputStream(connectionOptions.readTimeout, socket)
-    private val _connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
-    override val connectionState = _connectionStateFlow.asStateFlow()
-    private val _incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
-    override val incomingMessages = _incomingMessageSharedFlow.asSharedFlow()
+    private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
+    override val connectionState = connectionStateFlow.asStateFlow()
+    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
+    override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
     val outgoingMessages = Channel<WebSocketMessage>()
 
     fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
 
     override suspend fun localPort(): Int = socket.localPort()
+
     override suspend fun remotePort(): Int = socket.remotePort()
 
     override suspend fun connect(): WebSocketClient {
@@ -65,17 +69,18 @@ class DefaultWebSocketClient(
         ) {
             return this
         }
-        _connectionStateFlow.value = ConnectionState.Connecting
+        connectionStateFlow.value = ConnectionState.Connecting
         try {
-            val protocolString = if (connectionOptions.protocols.isNotEmpty()) {
-                val sb = StringBuilder()
-                connectionOptions.protocols.forEach {
-                    sb.append("Sec-WebSocket-Protocol: $it\r\n")
+            val protocolString =
+                if (connectionOptions.protocols.isNotEmpty()) {
+                    val sb = StringBuilder()
+                    connectionOptions.protocols.forEach {
+                        sb.append("Sec-WebSocket-Protocol: $it\r\n")
+                    }
+                    sb
+                } else {
+                    ""
                 }
-                sb
-            } else {
-                ""
-            }
             val hostline =
                 if ((connectionOptions.tls && connectionOptions.port == 443) ||
                     (!connectionOptions.tls && connectionOptions.port == 80)
@@ -90,7 +95,7 @@ class DefaultWebSocketClient(
                     "Connection: Upgrade\r\n" +
                     "Pragma: no-cache\r\n" +
                     "Cache-Control: no-cache\r\n" +
-                    "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36\r\n" +
+                    "User-Agent: Ditchoom/websockets\r\n" +
                     "Upgrade: websocket\r\n" +
                     protocolString +
                     "Sec-WebSocket-Version: 13\r\n" +
@@ -106,18 +111,18 @@ class DefaultWebSocketClient(
             val websocketFrameIndex = indexOfBuffer(readBuffer, endOfStartBuffer) + endOfStartBuffer.remaining()
             val response = readBuffer.readString(websocketFrameIndex)
             if (!(
-                response.contains("101 Switching Protocols", ignoreCase = true) &&
-                    response.contains("Upgrade: websocket", ignoreCase = true) &&
-                    response.contains("Connection: Upgrade", ignoreCase = true) &&
-                    response.contains("Sec-WebSocket-Accept", ignoreCase = true)
+                    response.contains("101 Switching Protocols", ignoreCase = true) &&
+                        response.contains("Upgrade: websocket", ignoreCase = true) &&
+                        response.contains("Connection: Upgrade", ignoreCase = true) &&
+                        response.contains("Sec-WebSocket-Accept", ignoreCase = true)
                 )
             ) {
                 throw IllegalStateException(
                     "Invalid response from server when reading the result from " +
-                        "websockets. Response:\r\n$response"
+                        "websockets. Response:\r\n$response",
                 )
             }
-            _connectionStateFlow.value = ConnectionState.Connected
+            connectionStateFlow.value = ConnectionState.Connected
             processIncomingMessages()
             scope.launch {
                 outgoingMessages.consumeAsFlow().collect {
@@ -126,15 +131,16 @@ class DefaultWebSocketClient(
                         is WebSocketMessage.Close -> sendCloseFrame(it.code, it.reason)
                         is WebSocketMessage.Ping -> writeWebsocketFrame(Opcode.Ping, it.value)
                         is WebSocketMessage.Pong -> writeWebsocketFrame(Opcode.Pong, it.value)
-                        is WebSocketMessage.Text -> writeWebsocketFrame(
-                            Opcode.Text,
-                            it.value.toReadBuffer(Charset.UTF8)
-                        )
+                        is WebSocketMessage.Text ->
+                            writeWebsocketFrame(
+                                Opcode.Text,
+                                it.value.toReadBuffer(Charset.UTF8),
+                            )
                     }
                 }
             }
         } catch (e: Exception) {
-            _connectionStateFlow.value = ConnectionState.Disconnected(e)
+            connectionStateFlow.value = ConnectionState.Disconnected(e)
         }
         return this
     }
@@ -147,8 +153,10 @@ class DefaultWebSocketClient(
         writeWebsocketFrame(Opcode.Binary, buffer, connectionOptions.writeTimeout)
     }
 
-    suspend fun write(buffer: ReadBuffer, timeout: Duration): Int =
-        writeWebsocketFrame(Opcode.Binary, buffer, timeout)
+    suspend fun write(
+        buffer: ReadBuffer,
+        timeout: Duration,
+    ): Int = writeWebsocketFrame(Opcode.Binary, buffer, timeout)
 
     override suspend fun ping(payloadData: ReadBuffer) {
         writeWebsocketFrame(Opcode.Ping, payloadData, connectionOptions.writeTimeout)
@@ -157,7 +165,7 @@ class DefaultWebSocketClient(
     private suspend fun writeWebsocketFrame(
         opcode: Opcode,
         payloadData: ReadBuffer = EMPTY_BUFFER,
-        timeout: Duration = connectionOptions.writeTimeout
+        timeout: Duration = connectionOptions.writeTimeout,
     ): Int {
         return try {
             val frame = Frame(true, opcode, MaskingKey.FourByteMaskingKey(), payloadData)
@@ -170,86 +178,89 @@ class DefaultWebSocketClient(
             remainingBytes
         } catch (e: Exception) {
             // probably disconnected
-            _connectionStateFlow.value = ConnectionState.Disconnected(e)
+            connectionStateFlow.value = ConnectionState.Disconnected(e)
             -1
         }
     }
 
-    private fun processIncomingMessages() = scope.launch {
-        readLoop@while (isOpen()) {
-            val frames = mutableListOf<Frame>()
-            val buffers = mutableListOf<ReadBuffer>()
-            process@ do {
-                val frame = readAndProcessWebSocketFrame() ?: return@launch
-                if (frame.opcode.isControlFrame()) {
-                    if (!handleControlPacketFrameShouldContinue(frame)) {
-                        // should throw and disconnect before we get to this
+    private fun processIncomingMessages() =
+        scope.launch {
+            readLoop@while (isOpen()) {
+                val frames = mutableListOf<Frame>()
+                val buffers = mutableListOf<ReadBuffer>()
+                process@ do {
+                    val frame = readAndProcessWebSocketFrame() ?: return@launch
+                    if (frame.opcode.isControlFrame()) {
+                        if (!handleControlPacketFrameShouldContinue(frame)) {
+                            // should throw and disconnect before we get to this
+                            return@launch
+                        }
+                    } else {
+                        if (frames.isEmpty()) {
+                            frames += frame
+                        }
+                        frame.payloadData.resetForRead()
+                        buffers += frame.payloadData
+                    }
+                } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
+                val readPayload = buffers.toComposableBuffer()
+                val firstFrame = frames.first()
+                val payload =
+                    if (readPayload is FragmentedReadBuffer) {
+                        readPayload.toSingleBuffer()
+                    } else {
+                        readPayload
+                    }
+                when (firstFrame.opcode) {
+                    Opcode.Text -> {
+                        try {
+                            val utf8StringRead = payload.readString(payload.remaining())
+                            incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
+                        } catch (e: Throwable) {
+                            // Failed to decode
+                            sendCloseFrame(1007u, "Invalid UTF-8 Message")
+                            return@launch
+                        }
+                    }
+                    Opcode.Binary -> {
+                        incomingMessageSharedFlow.emit(WebSocketMessage.Binary(payload))
+                    }
+                    else -> {
+                        sendCloseFrame(1002u, "Invalid opcode for frame")
                         return@launch
                     }
-                } else {
-                    if (frames.isEmpty()) {
-                        frames += frame
-                    }
-                    frame.payloadData.resetForRead()
-                    buffers += frame.payloadData
-                }
-            } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
-            val readPayload = buffers.toComposableBuffer()
-            val firstFrame = frames.first()
-            val payload = if (readPayload is FragmentedReadBuffer) {
-                readPayload.toSingleBuffer()
-            } else {
-                readPayload
-            }
-            when (firstFrame.opcode) {
-                Opcode.Text -> {
-                    try {
-                        val utf8StringRead = payload.readString(payload.remaining())
-                        _incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
-                    } catch (e: Throwable) { // Failed to decode
-                        sendCloseFrame(1007u, "Invalid UTF-8 Message")
-                        return@launch
-                    }
-                }
-                Opcode.Binary -> {
-                    _incomingMessageSharedFlow.emit(WebSocketMessage.Binary(payload))
-                }
-                else -> {
-                    sendCloseFrame(1002u, "Invalid opcode for frame")
-                    return@launch
                 }
             }
         }
-    }
 
-    private suspend fun handleControlPacketFrameShouldContinue(
-        frame: Frame
-    ): Boolean {
+    private suspend fun handleControlPacketFrameShouldContinue(frame: Frame): Boolean {
         when (frame.opcode) {
             Opcode.Ping -> {
                 frame.payloadData.resetForRead()
-                _incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payloadData))
+                incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payloadData))
             }
             Opcode.Pong -> {
                 frame.payloadData.resetForRead()
-                _incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payloadData))
+                incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payloadData))
             }
             Opcode.Close -> {
                 if (frame.payloadData.hasRemaining()) {
                     frame.payloadData.resetForRead()
-                    val code = if (frame.payloadLength == 1) {
-                        1002u
-                    } else {
-                        frame.payloadData.readUnsignedShort()
-                    }
-                    val reason = if (frame.payloadData.hasRemaining()) {
-                        frame.payloadData.readString(frame.payloadData.remaining())
-                    } else {
-                        ""
-                    }
-                    _incomingMessageSharedFlow.emit(WebSocketMessage.Close(code, reason))
+                    val code =
+                        if (frame.payloadLength == 1) {
+                            1002u
+                        } else {
+                            frame.payloadData.readUnsignedShort()
+                        }
+                    val reason =
+                        if (frame.payloadData.hasRemaining()) {
+                            frame.payloadData.readString(frame.payloadData.remaining())
+                        } else {
+                            ""
+                        }
+                    incomingMessageSharedFlow.emit(WebSocketMessage.Close(code, reason))
                 } else {
-                    _incomingMessageSharedFlow.emit(WebSocketMessage.Close(0u, "No Close Message"))
+                    incomingMessageSharedFlow.emit(WebSocketMessage.Close(0u, "No Close Message"))
                 }
                 return false
             }
@@ -281,40 +292,42 @@ class DefaultWebSocketClient(
             val mask = maskAndPayloadLengthByte[0]
             check(!mask) // websocket spec requires this to be a 0 or false
             val payloadLength = maskAndPayloadLengthByte.toInt().shl(1).shr(1)
-            val actualPayloadLength = if (payloadLength <= 125) {
-                payloadLength.toULong()
-            } else if (payloadLength == 126) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(
-                        1002u,
-                        "Control frames are only allowed to have payload up to and including 125 octets"
-                    )
-                    return null
+            val actualPayloadLength =
+                if (payloadLength <= 125) {
+                    payloadLength.toULong()
+                } else if (payloadLength == 126) {
+                    if (opcode == Opcode.Ping) {
+                        sendCloseFrame(
+                            1002u,
+                            "Control frames are only allowed to have payload up to and including 125 octets",
+                        )
+                        return null
+                    }
+                    inputStream.readBuffer(UShort.SIZE_BYTES).readUnsignedShort().toULong()
+                } else if (payloadLength == 127) {
+                    if (opcode == Opcode.Ping) {
+                        sendCloseFrame(
+                            1002u,
+                            "Control frames are only allowed to have payload up to and including 125 octets",
+                        )
+                        return null
+                    }
+                    inputStream.readBuffer(ULong.SIZE_BYTES).readUnsignedLong()
+                } else {
+                    throw IllegalStateException("Invalid payload length $payloadLength")
                 }
-                inputStream.readBuffer(UShort.SIZE_BYTES).readUnsignedShort().toULong()
-            } else if (payloadLength == 127) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(
-                        1002u,
-                        "Control frames are only allowed to have payload up to and including 125 octets"
-                    )
-                    return null
+            val payload =
+                if (actualPayloadLength == 0uL) {
+                    EMPTY_BUFFER
+                } else {
+                    check(actualPayloadLength < Int.MAX_VALUE.toULong()) {
+                        "Payloads larger than ${Int.MAX_VALUE} " +
+                            "bytes is currently unsupported"
+                    }
+                    val buffer = inputStream.readBuffer(actualPayloadLength.toInt())
+                    buffer.position(buffer.position() + actualPayloadLength.toInt())
+                    buffer
                 }
-                inputStream.readBuffer(ULong.SIZE_BYTES).readUnsignedLong()
-            } else {
-                throw IllegalStateException("Invalid payload length $payloadLength")
-            }
-            val payload = if (actualPayloadLength == 0uL) {
-                EMPTY_BUFFER
-            } else {
-                check(actualPayloadLength < Int.MAX_VALUE.toULong()) {
-                    "Payloads larger than ${Int.MAX_VALUE} " +
-                        "bytes is currently unsupported"
-                }
-                val buffer = inputStream.readBuffer(actualPayloadLength.toInt())
-                buffer.position(buffer.position() + actualPayloadLength.toInt())
-                buffer
-            }
             val frame = Frame(fin, rsv1, rsv2, rsv3, opcode, MaskingKey.NoMaskingKey, payload)
             if (frame.opcode == Opcode.Ping) {
                 writeWebsocketFrame(Opcode.Pong, frame.payloadData, connectionOptions.writeTimeout)
@@ -330,12 +343,13 @@ class DefaultWebSocketClient(
                     } else if (!isValidServerCloseCode(code)) {
                         sendCloseFrame(1002u, "Invalid Server close code $code")
                     } else if (payload.hasRemaining()) {
-                        val decoded = try {
-                            payload.readString(payload.remaining())
-                        } catch (t: Throwable) {
-                            code = 1002u
-                            "Invalid UTF-8 Message in payload"
-                        }
+                        val decoded =
+                            try {
+                                payload.readString(payload.remaining())
+                            } catch (t: Throwable) {
+                                code = 1002u
+                                "Invalid UTF-8 Message in payload"
+                            }
                         sendCloseFrame(code, decoded)
                     } else {
                         sendCloseFrame(code)
@@ -347,12 +361,15 @@ class DefaultWebSocketClient(
             }
             return frame
         } catch (e: Exception) {
-            _connectionStateFlow.value = ConnectionState.Disconnected(e)
+            connectionStateFlow.value = ConnectionState.Disconnected(e)
             return null
         }
     }
 
-    private suspend fun sendCloseFrame(statusCode: UShort = 1000u, message: String? = null) {
+    private suspend fun sendCloseFrame(
+        statusCode: UShort = 1000u,
+        message: String? = null,
+    ) {
         try {
             val utf8MessageBuffer = message?.toReadBuffer(Charset.UTF8) ?: EMPTY_BUFFER
             val closeBuffer = PlatformBuffer.allocate(UShort.SIZE_BYTES + utf8MessageBuffer.limit())
@@ -370,12 +387,16 @@ class DefaultWebSocketClient(
             sendCloseFrame()
         }
     }
+
     suspend fun cleanupResources() {
         outgoingMessages.close()
         socket.close()
     }
 
-    private fun indexOfBuffer(buffer: ReadBuffer, pattern: ReadBuffer): Int {
+    private fun indexOfBuffer(
+        buffer: ReadBuffer,
+        pattern: ReadBuffer,
+    ): Int {
         val n = buffer.remaining()
         val m = pattern.remaining()
         val patternPos = pattern.position()
@@ -406,6 +427,7 @@ class DefaultWebSocketClient(
 
     companion object {
         private val countMap = mutableMapOf<String, Int>()
+
         private fun getCountForConnection(connectionOptions: WebSocketConnectionOptions): Int {
             val key = "${connectionOptions.name}:${connectionOptions.port}"
             val value = countMap[key]
