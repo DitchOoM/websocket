@@ -1,7 +1,6 @@
 package com.ditchoom.websocket
 
 import agentName
-import block
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
@@ -13,71 +12,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
-import kotlinx.coroutines.withTimeout
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
-import kotlin.time.Duration.Companion.seconds
 
 class AutobahnTests {
-    enum class AutobahnConnectivityState {
-        UNTESTED,
-        AVAILABLE,
-        UNAVAILABLE,
-    }
-
-    private var autobahnState = AutobahnConnectivityState.UNTESTED
-
-    fun <T> maybeRun(lambda: suspend CoroutineScope.() -> T) =
-        block {
-            var shouldRun = false
-            when (autobahnState) {
-                AutobahnConnectivityState.UNTESTED -> {
-                    autobahnState =
-                        try {
-                            val websocket =
-                                WebSocketClient.allocate(
-                                    WebSocketConnectionOptions(
-                                        "localhost",
-                                        9001,
-                                        connectionTimeout = 1.seconds,
-                                    ),
-                                )
-                            withTimeout(1.seconds) {
-                                websocket.connect()
-                                websocket.connectionState.first { it is ConnectionState.Connected }
-                            }
-                            websocket.close()
-                            shouldRun = true
-                            AutobahnConnectivityState.AVAILABLE
-                        } catch (e: Exception) {
-                            AutobahnConnectivityState.UNAVAILABLE
-                        }
-                }
-
-                AutobahnConnectivityState.AVAILABLE -> {
-                    shouldRun = true
-                }
-
-                AutobahnConnectivityState.UNAVAILABLE -> {
-                    println("Autobahn Docker Image Unavailable, ignoring test.")
-                } // Do nothing
-            }
-            return@block if (shouldRun) {
-                try {
-                    withTimeout(40.seconds) { lambda() }
-                } catch (e: Exception) {
-                    println("Failed because of $e, trying again")
-                    withTimeout(40.seconds) { lambda() }
-                }
-            } else {
-                null
-            }
-        }
-
     @Test
     fun case1_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocketClient = prepareConnection(1)
             sendMessageWithPayloadLengthOf(webSocketClient, 0)
             closeConnection(webSocketClient)
@@ -85,7 +27,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket1Client = prepareConnection(2)
             sendMessageWithPayloadLengthOf(webSocket1Client, 125)
             closeConnection(webSocket1Client)
@@ -93,7 +35,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket3Client = prepareConnection(3)
             sendMessageWithPayloadLengthOf(webSocket3Client, 126)
             closeConnection(webSocket3Client)
@@ -101,7 +43,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket4Client = prepareConnection(4)
             sendMessageWithPayloadLengthOf(webSocket4Client, 127)
             closeConnection(webSocket4Client)
@@ -109,7 +51,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket5Client = prepareConnection(5)
             sendMessageWithPayloadLengthOf(webSocket5Client, 128)
             closeConnection(webSocket5Client)
@@ -117,7 +59,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket6Client = prepareConnection(6)
             sendMessageWithPayloadLengthOf(webSocket6Client, 65535)
             closeConnection(webSocket6Client)
@@ -125,7 +67,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket7Client = prepareConnection(7)
             sendMessageWithPayloadLengthOf(webSocket7Client, 65536)
             closeConnection(webSocket7Client)
@@ -133,7 +75,7 @@ class AutobahnTests {
 
     @Test
     fun case1_1_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket8Client = prepareConnection(8)
             sendMessageWithPayloadLengthOf(webSocket8Client, 65536)
             closeConnection(webSocket8Client)
@@ -141,7 +83,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocketClient = prepareConnection(9)
             sendBinaryWithPayloadLengthOf(webSocketClient, 0)
             closeConnection(webSocketClient)
@@ -149,7 +91,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket1Client = prepareConnection(10)
             sendBinaryWithPayloadLengthOf(webSocket1Client, 125)
             closeConnection(webSocket1Client)
@@ -157,7 +99,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket3Client = prepareConnection(11)
             sendBinaryWithPayloadLengthOf(webSocket3Client, 126)
             closeConnection(webSocket3Client)
@@ -165,7 +107,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket4Client = prepareConnection(12)
             sendBinaryWithPayloadLengthOf(webSocket4Client, 127)
             closeConnection(webSocket4Client)
@@ -173,7 +115,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket5Client = prepareConnection(13)
             sendBinaryWithPayloadLengthOf(webSocket5Client, 128)
             closeConnection(webSocket5Client)
@@ -181,7 +123,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket6Client = prepareConnection(14)
             sendBinaryWithPayloadLengthOf(webSocket6Client, 65535)
             closeConnection(webSocket6Client)
@@ -189,7 +131,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket7Client = prepareConnection(15)
             sendBinaryWithPayloadLengthOf(webSocket7Client, 65536)
             closeConnection(webSocket7Client)
@@ -197,7 +139,7 @@ class AutobahnTests {
 
     @Test
     fun case1_2_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val webSocket8Client = prepareConnection(16)
             sendBinaryWithPayloadLengthOf(webSocket8Client, 65536)
             closeConnection(webSocket8Client)
@@ -205,1712 +147,1712 @@ class AutobahnTests {
 
     @Test
     fun case2_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(17)
         }
 
     @Test
     fun case2_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(18)
         }
 
     @Test
     fun case2_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(19)
         }
 
     @Test
     fun case2_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(20)
         }
 
     @Test
     fun case2_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(21)
         }
 
     @Test
     fun case2_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(22)
         }
 
     @Test
     fun case2_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(23)
         }
 
     @Test
     fun case2_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(24)
         }
 
     @Test
     fun case2_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(25)
         }
 
     @Test
     fun case2_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(26)
         }
 
     @Test
     fun case2_11() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(27)
         }
 
     @Test
     fun case3_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(28)
         }
 
     @Test
     fun case3_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(29)
         }
 
     @Test
     fun case3_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(30)
         }
 
     @Test
     fun case3_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(31)
         }
 
     @Test
     fun case3_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(32)
         }
 
     @Test
     fun case3_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(33)
         }
 
     @Test
     fun case3_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(34)
         }
 
     @Test
     fun case4_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(35)
         }
 
     @Test
     fun case4_1_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(36)
         }
 
     @Test
     fun case4_1_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(37)
         }
 
     @Test
     fun case4_1_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(38)
         }
 
     @Test
     fun case4_1_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(39)
         }
 
     @Test
     fun case4_2_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(40)
         }
 
     @Test
     fun case4_2_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(41)
         }
 
     @Test
     fun case4_2_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(42)
         }
 
     @Test
     fun case4_2_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(43)
         }
 
     @Test
     fun case4_2_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(44)
             delay(100) // need to wait for the remote to close the connection
         }
 
     @Test
     fun case5_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(45)
         }
 
     @Test
     fun case5_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(46)
         }
 
     @Test
     fun case5_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(47)
         }
 
     @Test
     fun case5_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(48)
         }
 
     @Test
     fun case5_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(49)
         }
 
     @Test
     fun case5_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageWhenFoundText(50)
         }
 
     @Test
     fun case5_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageWhenFoundText(51)
         }
 
     @Test
     fun case5_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageWhenFoundText(52)
         }
 
     @Test
     fun case5_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(53))
         }
 
     @Test
     fun case5_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(54))
         }
 
     @Test
     fun case5_11() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(55))
         }
 
     @Test
     fun case5_12() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(56))
         }
 
     @Test
     fun case5_13() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(57))
         }
 
     @Test
     fun case5_14() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(58))
         }
 
     @Test
     fun case5_15() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(59))
         }
 
     @Test
     fun case5_16() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(60))
         }
 
     @Test
     fun case5_17() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(61))
         }
 
     @Test
     fun case5_18() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(62))
         }
 
     @Test
     fun case5_19() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageWhenFoundText(63)
         }
 
     @Test
     fun case5_20() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageWhenFoundText(64)
         }
 
     @Test
     fun case6_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(65)
         }
 
     @Test
     fun case6_1_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(66)
         }
 
     @Test
     fun case6_1_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(67)
         }
 
     @Test
     fun case6_2_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(68)
         }
 
     @Test
     fun case6_2_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(69)
         }
 
     @Test
     fun case6_2_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(70)
         }
 
     @Test
     fun case6_2_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(71)
         }
 
     @Test
     fun case6_3_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(72)
         }
 
     @Test
     fun case6_3_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(73)
         }
 
     @Test
     fun case6_4_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(74)
         }
 
     @Test
     fun case6_4_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(75)
         }
 
     @Test
     fun case6_4_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(76)
         }
 
     @Test
     fun case6_4_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(77)
         }
 
     @Test
     fun case6_5_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(78)
         }
 
     @Test
     fun case6_5_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(79)
         }
 
     @Test
     fun case6_5_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(80)
         }
 
     @Test
     fun case6_5_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(81)
         }
 
     @Test
     fun case6_5_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(82)
         }
 
     @Test
     fun case6_6_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(83)
         }
 
     @Test
     fun case6_6_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(84)
         }
 
     @Test
     fun case6_6_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(85)
         }
 
     @Test
     fun case6_6_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(86)
         }
 
     @Test
     fun case6_6_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(87)
         }
 
     @Test
     fun case6_6_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(88)
         }
 
     @Test
     fun case6_6_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(89)
         }
 
     @Test
     fun case6_6_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(90)
         }
 
     @Test
     fun case6_6_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(91)
         }
 
     @Test
     fun case6_6_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(92)
         }
 
     @Test
     fun case6_6_11() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(93)
         }
 
     @Test
     fun case6_7_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(94)
         }
 
     @Test
     fun case6_7_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(95)
         }
 
     @Test
     fun case6_7_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(96)
         }
 
     @Test
     fun case6_7_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(97)
         }
 
     @Test
     fun case6_8_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(98)
         }
 
     @Test
     fun case6_8_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(99)
         }
 
     @Test
     fun case6_9_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(100)
         }
 
     @Test
     fun case6_9_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(101)
         }
 
     @Test
     fun case6_9_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(102)
         }
 
     @Test
     fun case6_9_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(103)
         }
 
     @Test
     fun case6_10_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(104)
         }
 
     @Test
     fun case6_10_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(105)
         }
 
     @Test
     fun case6_10_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(106)
         }
 
     @Test
     fun case6_11_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(107)
         }
 
     @Test
     fun case6_11_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(108)
         }
 
     @Test
     fun case6_11_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(109)
         }
 
     @Test
     fun case6_11_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(110)
         }
 
     @Test
     fun case6_11_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(111)
         }
 
     @Test
     fun case6_12_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(112)
         }
 
     @Test
     fun case6_12_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(113)
         }
 
     @Test
     fun case6_12_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(114)
         }
 
     @Test
     fun case6_12_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(115)
         }
 
     @Test
     fun case6_12_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(116)
         }
 
     @Test
     fun case6_12_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(117)
         }
 
     @Test
     fun case6_12_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(118)
         }
 
     @Test
     fun case6_12_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(119)
         }
 
     @Test
     fun case6_13_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(120)
         }
 
     @Test
     fun case6_13_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(121)
         }
 
     @Test
     fun case6_13_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(122)
         }
 
     @Test
     fun case6_13_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(123)
         }
 
     @Test
     fun case6_13_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(124)
         }
 
     @Test
     fun case6_14_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(125)
         }
 
     @Test
     fun case6_14_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(126)
         }
 
     @Test
     fun case6_14_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(127)
         }
 
     @Test
     fun case6_14_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(128)
         }
 
     @Test
     fun case6_14_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(129)
         }
 
     @Test
     fun case6_14_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(130)
         }
 
     @Test
     fun case6_14_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(131)
         }
 
     @Test
     fun case6_14_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(132)
         }
 
     @Test
     fun case6_14_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(133)
         }
 
     @Test
     fun case6_14_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(134)
         }
 
     @Test
     fun case6_15_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(135)
         }
 
     @Test
     fun case6_16_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(136)
         }
 
     @Test
     fun case6_16_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(137)
         }
 
     @Test
     fun case6_16_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(138)
         }
 
     @Test
     fun case6_17_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(139)
         }
 
     @Test
     fun case6_17_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(140)
         }
 
     @Test
     fun case6_17_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(141)
         }
 
     @Test
     fun case6_17_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(142)
         }
 
     @Test
     fun case6_17_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(143)
         }
 
     @Test
     fun case6_18_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(144)
         }
 
     @Test
     fun case6_18_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(145)
         }
 
     @Test
     fun case6_18_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(146)
         }
 
     @Test
     fun case6_18_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(147)
         }
 
     @Test
     fun case6_18_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(148)
         }
 
     @Test
     fun case6_19_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(149)
         }
 
     @Test
     fun case6_19_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(150)
         }
 
     @Test
     fun case6_19_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(151)
         }
 
     @Test
     fun case6_19_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(152)
         }
 
     @Test
     fun case6_19_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(153)
         }
 
     @Test
     fun case6_20_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(154)
         }
 
     @Test
     fun case6_20_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(155)
         }
 
     @Test
     fun case6_20_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(156)
         }
 
     @Test
     fun case6_20_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(157)
         }
 
     @Test
     fun case6_20_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(158)
         }
 
     @Test
     fun case6_20_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(159)
         }
 
     @Test
     fun case6_20_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(160)
         }
 
     @Test
     fun case6_21_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(161)
         }
 
     @Test
     fun case6_21_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(162)
         }
 
     @Test
     fun case6_21_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(163)
         }
 
     @Test
     fun case6_21_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(164)
         }
 
     @Test
     fun case6_21_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(165)
         }
 
     @Test
     fun case6_21_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(166)
         }
 
     @Test
     fun case6_21_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(167)
         }
 
     @Test
     fun case6_21_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(168)
         }
 
     @Test
     fun case6_22_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(169)
         }
 
     @Test
     fun case6_22_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(170)
         }
 
     @Test
     fun case6_22_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(171)
         }
 
     @Test
     fun case6_22_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(172)
         }
 
     @Test
     fun case6_22_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(173)
         }
 
     @Test
     fun case6_22_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(174)
         }
 
     @Test
     fun case6_22_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(175)
         }
 
     @Test
     fun case6_22_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(176)
         }
 
     @Test
     fun case6_22_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(177)
         }
 
     @Test
     fun case6_22_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(178)
         }
 
     @Test
     fun case6_22_11() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(179)
         }
 
     @Test
     fun case6_22_12() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(180)
         }
 
     @Test
     fun case6_22_13() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(181)
         }
 
     @Test
     fun case6_22_14() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(182)
         }
 
     @Test
     fun case6_22_15() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(183)
         }
 
     @Test
     fun case6_22_16() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(184)
         }
 
     @Test
     fun case6_22_17() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(185)
         }
 
     @Test
     fun case6_22_18() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(186)
         }
 
     @Test
     fun case6_22_19() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(187)
         }
 
     @Test
     fun case6_22_20() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(188)
         }
 
     @Test
     fun case6_22_21() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(189)
         }
 
     @Test
     fun case6_22_22() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(190)
         }
 
     @Test
     fun case6_22_23() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(191)
         }
 
     @Test
     fun case6_22_24() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(192)
         }
 
     @Test
     fun case6_22_25() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(193)
         }
 
     @Test
     fun case6_22_26() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(194)
         }
 
     @Test
     fun case6_22_27() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(195)
         }
 
     @Test
     fun case6_22_28() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(196)
         }
 
     @Test
     fun case6_22_29() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(197)
         }
 
     @Test
     fun case6_22_30() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(198)
         }
 
     @Test
     fun case6_22_31() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(199)
         }
 
     @Test
     fun case6_22_32() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(200)
         }
 
     @Test
     fun case6_22_33() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(201)
         }
 
     @Test
     fun case6_22_34() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(202)
         }
 
     @Test
     fun case6_23_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(203)
         }
 
     @Test
     fun case6_23_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(204)
         }
 
     @Test
     fun case6_23_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(205)
         }
 
     @Test
     fun case6_23_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(206)
         }
 
     @Test
     fun case6_23_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(207)
         }
 
     @Test
     fun case6_23_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(208)
         }
 
     @Test
     fun case6_23_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(209)
         }
 
     @Test
     fun case7_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(210)
         }
 
     @Test
     fun case7_1_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(211)
         }
 
     @Test
     fun case7_1_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(212)
         }
 
     @Test
     fun case7_1_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(213)
         }
 
     @Test
     fun case7_1_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(214)
         }
 
     @Test
     fun case7_1_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(215)
         }
 
     @Test
     fun case7_3_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(216))
         }
 
     @Test
     fun case7_3_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(217)
         }
 
     @Test
     fun case7_3_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(218))
         }
 
     @Test
     fun case7_3_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(219))
         }
 
     @Test
     fun case7_3_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             closeConnection(prepareConnection(220))
         }
 
     @Test
     fun case7_3_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(221)
         }
 
     @Test
     fun case7_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(222)
         }
 
     @Test
     fun case7_7_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(223)
         }
 
     @Test
     fun case7_7_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(224)
         }
 
     @Test
     fun case7_7_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(225)
         }
 
     @Test
     fun case7_7_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(226)
         }
 
     @Test
     fun case7_7_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(227)
         }
 
     @Test
     fun case7_7_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(228)
         }
 
     @Test
     fun case7_7_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(229)
         }
 
     @Test
     fun case7_7_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(230)
         }
 
     @Test
     fun case7_7_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(231)
         }
 
     @Test
     fun case7_7_10() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(232)
         }
 
     @Test
     fun case7_7_11() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(233)
         }
 
     @Test
     fun case7_7_12() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(234)
         }
 
     @Test
     fun case7_7_13() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(235)
         }
 
     @Test
     fun case7_9_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(236)
         }
 
     @Test
     fun case7_9_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(237)
         }
 
     @Test
     fun case7_9_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(238)
         }
 
     @Test
     fun case7_9_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(239)
         }
 
     @Test
     fun case7_9_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(240)
         }
 
     @Test
     fun case7_9_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(241)
         }
 
     @Test
     fun case7_9_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(242)
         }
 
     @Test
     fun case7_9_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(243)
         }
 
     @Test
     fun case7_9_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(244)
         }
 
     @Test
     fun case7_13_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(245)
         }
 
     @Test
     fun case7_13_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             prepareConnection(246)
         }
 
     @Test
     fun case9_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(247)
         }
 
     @Test
     fun case9_1_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(248)
         }
 
     @Test
     fun case9_1_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(249)
         }
 
     @Test
     fun case9_1_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(250)
         }
 
     @Test
     fun case9_1_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(251)
         }
 
     @Test
     fun case9_1_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(252)
         }
 
     @Test
     fun case9_2_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(253)
         }
 
     @Test
     fun case9_2_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(254)
         }
 
     @Test
     fun case9_2_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(255)
         }
 
     @Test
     fun case9_2_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(256)
         }
 
     @Test
     fun case9_2_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(257)
         }
 
     @Test
     fun case9_2_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(258)
         }
 
     @Test
     fun case9_3_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(259)
         }
 
     @Test
     fun case9_3_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(260)
         }
 
     @Test
     fun case9_3_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(261)
         }
 
     @Test
     fun case9_3_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(262)
         }
 
     @Test
     fun case9_3_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(263)
         }
 
     @Test
     fun case9_3_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(264)
         }
 
     @Test
     fun case9_3_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(265)
         }
 
     @Test
     fun case9_3_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(266)
         }
 
     @Test
     fun case9_3_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(267)
         }
 
     @Test
     fun case9_4_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(268)
         }
 
     @Test
     fun case9_4_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(269)
         }
 
     @Test
     fun case9_4_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(270)
         }
 
     @Test
     fun case9_4_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(271)
         }
 
     @Test
     fun case9_4_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(272)
         }
 
     @Test
     fun case9_4_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(273)
         }
 
     @Test
     fun case9_4_7() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(274)
         }
 
     @Test
     fun case9_4_8() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(275)
         }
 
     @Test
     fun case9_4_9() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(276)
         }
 
     @Test
     fun case9_5_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(277)
         }
 
     @Test
     fun case9_5_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(278)
         }
 
     @Test
     fun case9_5_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(279)
         }
 
     @Test
     fun case9_5_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(280)
         }
 
     @Test
     fun case9_5_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(281)
         }
 
     @Test
     fun case9_5_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(282)
         }
 
     @Test
     fun case9_6_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(283)
         }
 
     @Test
     fun case9_6_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(284)
         }
 
     @Test
     fun case9_6_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(285)
         }
 
     @Test
     fun case9_6_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(286)
         }
 
     @Test
     fun case9_6_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(287)
         }
 
     @Test
     fun case9_6_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(288)
         }
 
     @Test
     fun case9_7_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(289, 1000)
         }
 
     @Test
     fun case9_7_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(290, 1000)
         }
 
     @Test
     fun case9_7_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(291, 1000)
         }
 
     @Test
     fun case9_7_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(292, 1000)
         }
 
     @Test
     fun case9_7_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(293, 1000)
         }
 
     @Test
     fun case9_7_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(294, 1000)
         }
 
     @Test
     fun case9_8_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(295, 1000)
         }
 
     @Test
     fun case9_8_2() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(296, 1000)
         }
 
     @Test
     fun case9_8_3() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(297, 1000)
         }
 
     @Test
     fun case9_8_4() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(298, 1000)
         }
 
     @Test
     fun case9_8_5() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(299, 1000)
         }
 
     @Test
     fun case9_8_6() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoBinaryMessageAndClose(300, 1000)
         }
 
     @Test
     fun case10_1_1() =
-        maybeRun {
+        runTestNoTimeSkipping {
             echoMessageAndClose(301)
         }
 
@@ -2045,7 +1987,7 @@ class AutobahnTests {
 
     @AfterTest
     fun validateResponse() =
-        maybeRun {
+        runTestNoTimeSkipping {
             val connectionOptions =
                 WebSocketConnectionOptions(
                     name = "localhost",
