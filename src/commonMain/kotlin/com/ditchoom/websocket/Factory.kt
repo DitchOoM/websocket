@@ -6,5 +6,5 @@ import kotlinx.coroutines.CoroutineScope
 expect fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     zone: AllocationZone = AllocationZone.Direct,
-    parentScope: CoroutineScope? = null
+    parentScope: CoroutineScope? = null,
 ): WebSocketClient

@@ -66,17 +66,17 @@ internal data class Frame(
      * payload length is the length of the "Extension data" + the length of the "Application data".  The length of the
      * "Extension data" may be zero, in which case the payload length is the length of the "Application data".
      */
-    val payloadLength: Int = if (payloadData.limit() <= 125) {
-        payloadData.limit()
-    } else {
-        if (payloadData.limit() <= UShort.MAX_VALUE.toInt()) {
-            126
+    val payloadLength: Int =
+        if (payloadData.limit() <= 125) {
+            payloadData.limit()
         } else {
-            127
-        }.also { check(it in 0..127) }
-    }
+            if (payloadData.limit() <= UShort.MAX_VALUE.toInt()) {
+                126
+            } else {
+                127
+            }.also { check(it in 0..127) }
+        },
 ) {
-
     constructor(fin: Boolean, opcode: Opcode, maskingKey: MaskingKey, payloadData: ReadBuffer) :
         this(fin, false, false, false, opcode, maskingKey, payloadData)
 
@@ -84,7 +84,7 @@ internal data class Frame(
         false,
         opcode,
         MaskingKey.NoMaskingKey,
-        payloadData
+        payloadData,
     )
 
     fun toBuffer(): ReadBuffer {
@@ -93,23 +93,25 @@ internal data class Frame(
         return buffer
     }
 
-    private val actualPayloadLength = if (payloadLength <= 125) {
-        payloadLength
-    } else if (payloadLength == 126) {
-        payloadData.limit() + UShort.SIZE_BYTES
-    } else if (payloadLength == 127) {
-        payloadData.limit() + ULong.SIZE_BYTES
-    } else {
-        throw IllegalStateException("Internal payload len size cannot be larger than 127")
-    }
+    private val actualPayloadLength =
+        if (payloadLength <= 125) {
+            payloadLength
+        } else if (payloadLength == 126) {
+            payloadData.limit() + UShort.SIZE_BYTES
+        } else if (payloadLength == 127) {
+            payloadData.limit() + ULong.SIZE_BYTES
+        } else {
+            throw IllegalStateException("Internal payload len size cannot be larger than 127")
+        }
 
     fun size(): Int {
         // the first byte includes fin, rsv1-3, and opcode. second byte includes mask and payload len
         val ws2ByteOverhead = 2
-        return actualPayloadLength + ws2ByteOverhead + when (maskingKey) {
-            is MaskingKey.FourByteMaskingKey -> 4
-            MaskingKey.NoMaskingKey -> 0
-        }
+        return actualPayloadLength + ws2ByteOverhead +
+            when (maskingKey) {
+                is MaskingKey.FourByteMaskingKey -> 4
+                MaskingKey.NoMaskingKey -> 0
+            }
     }
 
     fun serialize(writeBuffer: WriteBuffer) {
@@ -148,28 +150,32 @@ internal data class Frame(
         if (maskingKey is MaskingKey.FourByteMaskingKey) {
             maskingKey.write(writeBuffer)
         }
-        val data = if (maskingKey is MaskingKey.FourByteMaskingKey) {
-            payloadData.position(0)
-            TransformedReadBuffer(payloadData) { i, original ->
-                original xor maskingKey[i.toLong().mod(4)]
+        val data =
+            if (maskingKey is MaskingKey.FourByteMaskingKey) {
+                payloadData.position(0)
+                TransformedReadBuffer(payloadData) { i, original ->
+                    original xor maskingKey[i.toLong().mod(4)]
+                }
+            } else {
+                payloadData
             }
-        } else {
-            payloadData
-        }
         data.position(0)
         writeBuffer.write(data)
     }
 
     override fun toString(): String {
-        val p = if (opcode == Opcode.Text) {
-            val position = payloadData.position()
-            val s = payloadData.readString(payloadData.remaining())
-            payloadData.position(position)
-            s
-        } else {
-            payloadData.toString()
-        }
-        return "Frame(fin=$fin, rsv1=$rsv1, rsv2=$rsv2, rsv3=$rsv3, opcode=$opcode, maskingKey=$maskingKey, payloadData=$p, payloadLength=$payloadLength, actualPayloadLength=$actualPayloadLength)"
+        val p =
+            if (opcode == Opcode.Text) {
+                val position = payloadData.position()
+                val s = payloadData.readString(payloadData.remaining())
+                payloadData.position(position)
+                s
+            } else {
+                payloadData.toString()
+            }
+        return "Frame(fin=$fin, rsv1=$rsv1, rsv2=$rsv2, rsv3=$rsv3, opcode=$opcode, " +
+            "maskingKey=$maskingKey, payloadData=$p, payloadLength=$payloadLength, " +
+            "actualPayloadLength=$actualPayloadLength)"
     }
 
     fun Byte.toBooleanArray(): BooleanArray {

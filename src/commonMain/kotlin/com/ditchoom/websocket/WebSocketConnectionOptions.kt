@@ -11,14 +11,15 @@ data class WebSocketConnectionOptions(
     val readTimeout: Duration = connectionTimeout,
     val writeTimeout: Duration = connectionTimeout,
     val websocketEndpoint: String = "/",
-    val protocols: List<String> = emptyList()
+    val protocols: List<String> = emptyList(),
 ) {
     internal fun buildUrl(): String {
-        val prefix = if (tls) {
-            "wss://"
-        } else {
-            "ws://"
-        }
+        val prefix =
+            if (tls) {
+                "wss://"
+            } else {
+                "ws://"
+            }
         val postfix = "$name:$port$websocketEndpoint"
         return prefix + postfix
     }
@@ -32,7 +33,7 @@ data class WebSocketConnectionOptions(
             readTimeout: Duration = connectionTimeout,
             writeTimeout: Duration = connectionTimeout,
             websocketEndpoint: String = "/",
-            protocols: List<String> = emptyList()
+            protocols: List<String> = emptyList(),
         ): WebSocketConnectionOptions {
             return WebSocketConnectionOptions(
                 name,
@@ -42,7 +43,7 @@ data class WebSocketConnectionOptions(
                 readTimeout,
                 writeTimeout,
                 websocketEndpoint,
-                protocols
+                protocols,
             )
         }
     }
