@@ -27,7 +27,7 @@ jobs:
       - name: Setup docker (MacOS only)
         if: runner.os == 'macos'
         run: |
-          brew install colima docker --cask
+          brew install colima docker
           colima start
 
           # For testcontainers to find the Colima socket
