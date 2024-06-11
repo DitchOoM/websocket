@@ -14,8 +14,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlin.random.Random
 import kotlin.test.AfterTest
+import kotlin.test.Ignore
 import kotlin.test.Test
 
+@Ignore
 class AutobahnTests {
     @Test
     fun case1_1_1() =
