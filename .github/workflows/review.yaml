@@ -27,18 +27,7 @@ jobs:
       - name: Setup docker (MacOS only)
         if: runner.os == 'macos'
         run: |
-          brew install colima docker
-          
-          # Workaround for https://github.com/actions/runner-images/issues/8104
-          brew remove --ignore-dependencies qemu
-          curl -o ./qemu.rb https://raw.githubusercontent.com/Homebrew/homebrew-core/dc0669eca9479e9eeb495397ba3a7480aaa45c2e/Formula/qemu.rb
-          brew install ./qemu.rb
-          
-          colima start
-
-          # For testcontainers to find the Colima socket
-          # https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#cannot-connect-to-the-docker-daemon-at-unixvarrundockersock-is-the-docker-daemon-running
-          sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
+          brew install docker colima
       - name: Tests with Gradle Major
         if:  ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
         run: ./gradlew startAutobahnDockerContainer ktlintCheck assemble build check allTests publishToMavenLocal -PincrementMajor=true
