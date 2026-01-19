@@ -28,7 +28,11 @@
       "Bash(grep:*)",
       "Bash(pgrep:*)",
       "WebFetch(domain:)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(tee:*)",
+      "Bash(ls:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh run view:*)"
     ]
   }
 }
