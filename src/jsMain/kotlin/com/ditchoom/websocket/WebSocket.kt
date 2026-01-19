@@ -1,16 +1,18 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.pool.BufferPool
 import kotlinx.coroutines.CoroutineScope
 
 actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
-    zone: AllocationZone,
+    pool: BufferPool,
     parentScope: CoroutineScope?,
+    allocationZone: AllocationZone,
 ): WebSocketClient {
     return try {
-        DefaultWebSocketClient(connectionOptions, zone, parentScope)
+        DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
     } catch (e: UnsupportedOperationException) {
-        BrowserWebSocketController(connectionOptions, zone, parentScope)
+        BrowserWebSocketController(connectionOptions, pool, parentScope, allocationZone)
     }
 }

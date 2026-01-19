@@ -1,16 +1,17 @@
 import org.gradle.api.DefaultTask
-import org.gradle.api.provider.Property
-import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
 import org.gradle.workers.WorkAction
 import org.gradle.workers.WorkParameters
 import org.gradle.workers.WorkerExecutor
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import javax.inject.Inject
 
 abstract class AutobahnDockerTask : DefaultTask() {
     @Inject
     abstract fun getWorkerExecutor(): WorkerExecutor
+
     @TaskAction
     fun runDocker() {
         val workQueue = getWorkerExecutor().noIsolation()
@@ -20,21 +21,81 @@ abstract class AutobahnDockerTask : DefaultTask() {
     }
 }
 
-
 interface AutobahnDockerParams : WorkParameters {
     var projectDir: File
 }
 
 abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
     override fun execute() {
-        println("config \"${parameters.projectDir.absolutePath}/.docker/config:/config\"" +
-                "reports \"${parameters.projectDir.absolutePath}/.docker/reports:/reports\"")
-        ProcessBuilder("docker", "run", "-t", "--rm",
+        val containerName = "fuzzingserver"
+        val port = 9001
+
+        // Check if server is already running and healthy
+        if (isServerReady(port)) {
+            println("Autobahn fuzzing server already running on port $port")
+            return
+        }
+
+        // Stop and remove existing container if it exists
+        try {
+            ProcessBuilder("docker", "stop", containerName)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+            ProcessBuilder("docker", "rm", containerName)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (e: Exception) {
+            // Container might not exist, ignore
+        }
+
+        println("Starting Autobahn fuzzing server...")
+        println("  config: ${parameters.projectDir.absolutePath}/.docker/config:/config")
+        println("  reports: ${parameters.projectDir.absolutePath}/.docker/reports:/reports")
+
+        // Start the container in detached mode
+        val process = ProcessBuilder(
+            "docker", "run", "-d", "--rm",
             "-v", "${parameters.projectDir.absolutePath}/.docker/config:/config",
             "-v", "${parameters.projectDir.absolutePath}/.docker/reports:/reports",
-            "-p", "9001:9001", "--name", "fuzzingserver", "crossbario/autobahn-testsuite")
+            "-p", "$port:9001",
+            "--name", containerName,
+            "crossbario/autobahn-testsuite"
+        )
             .redirectErrorStream(true)
-            .inheritIO()
             .start()
+
+        val exitCode = process.waitFor()
+        if (exitCode != 0) {
+            val output = process.inputStream.bufferedReader().readText()
+            println("Warning: Docker container may have failed to start: $output")
+        }
+
+        // Wait for server to be ready
+        val maxWaitSeconds = 30
+        val startTime = System.currentTimeMillis()
+        while (!isServerReady(port)) {
+            if (System.currentTimeMillis() - startTime > maxWaitSeconds * 1000) {
+                throw RuntimeException("Autobahn server failed to start within $maxWaitSeconds seconds")
+            }
+            Thread.sleep(500)
+        }
+        println("Autobahn fuzzing server is ready on port $port")
+    }
+
+    private fun isServerReady(port: Int): Boolean {
+        return try {
+            val url = URL("http://127.0.0.1:$port")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 1000
+            connection.readTimeout = 1000
+            connection.requestMethod = "GET"
+            val responseCode = connection.responseCode
+            connection.disconnect()
+            responseCode in 200..499 // Any response means server is up
+        } catch (e: Exception) {
+            false
+        }
     }
 }

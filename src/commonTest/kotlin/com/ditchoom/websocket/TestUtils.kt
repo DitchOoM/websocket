@@ -11,6 +11,23 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 
+internal fun runTestNoTimeSkipping1(
+    count: Int = 1,
+    block: suspend TestScope.() -> Unit,
+) = runTest {
+    try {
+        withContext(Dispatchers.Default) {
+            block()
+        }
+    } catch (e: UnsupportedOperationException) {
+        // ignore
+        when (getNetworkCapabilities()) {
+            FULL_SOCKET_ACCESS -> throw e
+            WEBSOCKETS_ONLY -> {} // ignore, expected on browsers
+        }
+    }
+}
+
 internal fun runTestNoTimeSkipping(
     count: Int = 1,
     block: suspend TestScope.() -> Unit,

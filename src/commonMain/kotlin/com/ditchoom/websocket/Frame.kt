@@ -7,6 +7,8 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.TransformedReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.toComposableBuffer
+import com.ditchoom.buffer.wrap
 import com.ditchoom.data.get
 import com.ditchoom.data.toByte
 import kotlin.experimental.xor
@@ -87,8 +89,32 @@ internal data class Frame(
         payloadData,
     )
 
-    fun toBuffer(): ReadBuffer {
-        val buffer = PlatformBuffer.allocate(size(), AllocationZone.Direct)
+    suspend fun toBuffer(attemptDeflate: Boolean = false, level: Int = -1): ReadBuffer {
+        var didDeflate = false
+        val shouldDeflate = attemptDeflate
+                && (opcode == Opcode.Text || opcode == Opcode.Binary)
+                && fin
+                && !rsv1
+                && payloadData.hasRemaining()
+        val payload = if (shouldDeflate) {
+            val payloadSize = payloadData.remaining()
+            val compressed = payloadData.compressWebsocketBuffer(level)
+            if (compressed.remaining() >= payloadSize) {
+                payloadData.resetForRead()
+                payloadData
+            } else {
+                didDeflate = true
+                listOf(compressed, PlatformBuffer.wrap(byteArrayOf(0x00))).toComposableBuffer()
+            }
+        } else {
+            payloadData
+        }
+        if (didDeflate) {
+            val buffer = Frame(fin, true, rsv2, rsv3, opcode, maskingKey, payload)
+                .toBuffer(attemptDeflate = false)
+            return buffer
+        }
+        val buffer = PlatformBuffer.allocate(size())
         serialize(buffer)
         return buffer
     }
@@ -114,7 +140,7 @@ internal data class Frame(
             }
     }
 
-    fun serialize(writeBuffer: WriteBuffer) {
+    fun serialize(writeBuffer: PlatformBuffer) {
         serializeByte1(writeBuffer)
         serializeMaskAndPayloadLength(writeBuffer)
         serializeMaskingKeyAndPayload(writeBuffer)

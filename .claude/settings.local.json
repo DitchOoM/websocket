@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(python3:*)",
+      "Bash(docker pull:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker logs:*)",
+      "mcp__jetbrains__get_run_configurations",
+      "mcp__jetbrains__execute_terminal_command",
+      "mcp__jetbrains__execute_run_configuration",
+      "WebFetch(domain:scans.gradle.com)",
+      "WebSearch",
+      "WebFetch(domain:autobahn-testsuite.readthedocs.io)",
+      "WebFetch(domain:websocket.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:gwsocket.io)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd socket stability improvements and read\\(buffer\\) API\n\n- Add atomic closed state tracking in ByteBufferClientSocket to prevent\n  race conditions during socket close\n- Add isClosed checks before read/write operations to fail fast with\n  clear SocketClosedException instead of undefined behavior\n- Handle AsynchronousCloseException gracefully when coroutine is already\n  cancelled, avoiding spurious exception propagation\n- Add read\\(buffer: WriteBuffer, timeout\\) method to Reader interface to\n  allow callers to provide their own buffer, enabling buffer pooling\n- Add efficient JVM override in AsyncBaseClientSocket that avoids\n  buffer copying\n\nThese changes improve stability during concurrent socket operations\nand reduce memory pressure by allowing buffer reuse.\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(unzip:*)",
+      "Bash(lsof:*)",
+      "Bash(grep:*)",
+      "Bash(pgrep:*)",
+      "WebFetch(domain:)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

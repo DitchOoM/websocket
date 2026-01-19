@@ -12,6 +12,7 @@ data class WebSocketConnectionOptions(
     val writeTimeout: Duration = connectionTimeout,
     val websocketEndpoint: String = "/",
     val protocols: List<String> = emptyList(),
+    val requestCompression: Boolean = false,
 ) {
     internal fun buildUrl(): String {
         val prefix =
@@ -22,29 +23,5 @@ data class WebSocketConnectionOptions(
             }
         val postfix = "$name:$port$websocketEndpoint"
         return prefix + postfix
-    }
-
-    companion object {
-        fun build(
-            name: String,
-            port: Int = 443,
-            tls: Boolean = port == 443,
-            connectionTimeout: Duration = 15.seconds,
-            readTimeout: Duration = connectionTimeout,
-            writeTimeout: Duration = connectionTimeout,
-            websocketEndpoint: String = "/",
-            protocols: List<String> = emptyList(),
-        ): WebSocketConnectionOptions {
-            return WebSocketConnectionOptions(
-                name,
-                port,
-                tls,
-                connectionTimeout,
-                readTimeout,
-                writeTimeout,
-                websocketEndpoint,
-                protocols,
-            )
-        }
     }
 }

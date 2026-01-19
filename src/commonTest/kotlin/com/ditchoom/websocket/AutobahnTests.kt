@@ -14,10 +14,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlin.random.Random
 import kotlin.test.AfterTest
-import kotlin.test.Ignore
 import kotlin.test.Test
 
-@Ignore
 class AutobahnTests {
     @Test
     fun case1_1_1() =
@@ -1886,10 +1884,13 @@ class AutobahnTests {
                 port = 9001,
                 websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             )
+        // Use Heap allocation for large payload tests (case9_5/9_6/9_7/9_8 = cases 277-300)
+        // or high iteration tests to avoid OOM from direct buffer accumulation
+        val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
         val ws =
             WebSocketClient.allocate(
                 connectionOptions,
-                AllocationZone.Direct,
+                zone,
                 this,
             )
         ws.scope.launch {
@@ -1935,10 +1936,13 @@ class AutobahnTests {
                 port = 9001,
                 websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             )
+        // Use Heap allocation for large payload tests (case9_5/9_6/9_7/9_8 = cases 277-300)
+        // or high iteration tests to avoid OOM from direct buffer accumulation
+        val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
         val ws =
             WebSocketClient.allocate(
                 connectionOptions,
-                AllocationZone.Direct,
+                zone,
                 this + CoroutineName(case.toString()),
             )
         ws.scope.launch {

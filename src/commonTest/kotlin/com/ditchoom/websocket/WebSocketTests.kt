@@ -19,7 +19,7 @@ class WebSocketTests {
     @Test
     fun clientEchoString() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
+            val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
             websocket.connect()
             websocket.connectionState.first { it is ConnectionState.Connected }
@@ -71,7 +71,7 @@ class WebSocketTests {
     @Test
     fun allTypesWork() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
+            val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
@@ -107,16 +107,14 @@ class WebSocketTests {
 
     private fun createPayload(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
-        val readBuffer = PlatformBuffer.wrap(bytes)
-        readBuffer.position(readBuffer.limit())
-        return readBuffer
+        // wrap() returns buffer with position=0, limit=length, ready to read
+        return PlatformBuffer.wrap(bytes)
     }
 
     private fun createPayloadReverse(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8).reversedArray()
-        val readBuffer = PlatformBuffer.wrap(bytes)
-        readBuffer.position(readBuffer.limit())
-        return readBuffer
+        // wrap() returns buffer with position=0, limit=length, ready to read
+        return PlatformBuffer.wrap(bytes)
     }
 
     private fun validatePayload(buffer: ReadBuffer) {

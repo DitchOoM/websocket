@@ -3,6 +3,7 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.socket.SocketClosedException
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
@@ -25,8 +26,9 @@ import org.w3c.dom.WebSocket
 
 class BrowserWebSocketController(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val zone: AllocationZone,
+    private val pool: BufferPool,
     parentScope: CoroutineScope?,
+    private val allocationZone: AllocationZone = AllocationZone.Direct,
 ) : WebSocketClient {
     override val scope =
         if (parentScope == null) {
@@ -59,6 +61,7 @@ class BrowserWebSocketController(
     override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
+    private val useSharedMemory = allocationZone == AllocationZone.SharedMemory
 
     init {
         webSocket.binaryType = BinaryType.ARRAYBUFFER
@@ -86,13 +89,13 @@ class BrowserWebSocketController(
             when (val data = it.data) {
                 is ArrayBuffer -> {
                     val buffer =
-                        if (zone == AllocationZone.SharedMemory && crossOriginIsolated) {
+                        if (useSharedMemory && crossOriginIsolated) {
                             val sharedArrayBuffer = SharedArrayBuffer(data.byteLength)
                             val array = Int8Array(sharedArrayBuffer.unsafeCast<ArrayBuffer>())
                             array.set(Int8Array(it.data as ArrayBuffer), 0)
-                            JsBuffer(Int8Array(data), false, data.byteLength, data.byteLength, data.byteLength, sharedArrayBuffer)
+                            JsBuffer(array, sharedArrayBuffer = sharedArrayBuffer)
                         } else {
-                            if (zone == AllocationZone.SharedMemory && !crossOriginIsolated) {
+                            if (useSharedMemory && !crossOriginIsolated) {
                                 console.warn(
                                     "Failed to allocate shared buffer in " +
                                         "BrowserWebSocketController.kt. " +
@@ -105,10 +108,10 @@ class BrowserWebSocketController(
                                 )
                             }
                             val array = Int8Array(data)
-                            val buffer = JsBuffer(array)
-                            buffer.setLimit(array.length)
-                            buffer.setPosition(0)
-                            buffer.slice()
+                            val jsBuffer = JsBuffer(array)
+                            jsBuffer.setLimit(array.length)
+                            jsBuffer.position(0)
+                            jsBuffer.slice()
                         }
                     scope.launch {
                         incomingMessageSharedFlow.emit(WebSocketMessage.Binary(buffer))
