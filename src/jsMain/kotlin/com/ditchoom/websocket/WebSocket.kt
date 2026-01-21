@@ -9,10 +9,9 @@ actual fun WebSocketClient.Companion.allocate(
     pool: BufferPool,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
-): WebSocketClient {
-    return try {
+): WebSocketClient =
+    try {
         DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
     } catch (e: UnsupportedOperationException) {
         BrowserWebSocketController(connectionOptions, pool, parentScope, allocationZone)
     }
-}
