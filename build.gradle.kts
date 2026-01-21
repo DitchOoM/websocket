@@ -22,7 +22,6 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 println("Version: ${project.version}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub")
 
 repositories {
-    mavenLocal()
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
