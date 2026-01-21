@@ -8,13 +8,13 @@ import java.util.zip.Inflater
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-
 class CompressionByteBufferTests {
     @Test
     fun testDeflate() {
         val testString = "testingString123|testingString123|testingString123|testingString123"
-        val buffer = testString
-            .toReadBuffer(zone = AllocationZone.Direct) as JvmBuffer
+        val buffer =
+            testString
+                .toReadBuffer(zone = AllocationZone.Direct) as JvmBuffer
         val byteBuffer = buffer.byteBuffer
         val deflater = Deflater(Deflater.BEST_COMPRESSION)
         deflater.setInput(byteBuffer.array(), byteBuffer.position(), byteBuffer.remaining())
@@ -24,11 +24,12 @@ class CompressionByteBufferTests {
         deflater.end()
         byteBuffer.position(0)
         byteBuffer.limit(bytes)
-        val compressedString = try {
-            JvmBuffer(byteBuffer).readString(bytes)
-        } catch (e: Exception) {
-            "Unreadable string"
-        }
+        val compressedString =
+            try {
+                JvmBuffer(byteBuffer).readString(bytes)
+            } catch (e: Exception) {
+                "Unreadable string"
+            }
         println("before ${buffer.capacity} after: $bytes, compressed $compressedString")
         byteBuffer.position(0)
         val decompressor = Inflater()

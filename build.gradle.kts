@@ -67,26 +67,28 @@ kotlin {
         // This is needed because the klib doesn't embed the static library
         val socketSwiftLibDir = file("../socket/build/swift/lib")
         targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget>().configureEach {
-            val libSubdir = when (name) {
-                "macosArm64", "macosX64" -> "macos"
-                "iosArm64" -> "iphoneos"
-                "iosSimulatorArm64", "iosX64" -> "iphonesimulator"
-                "tvosArm64" -> "appletvos"
-                "tvosSimulatorArm64", "tvosX64" -> "appletvsimulator"
-                "watchosArm64" -> "watchos"
-                "watchosSimulatorArm64", "watchosX64" -> "watchsimulator"
-                else -> return@configureEach
-            }
-            val swiftPlatform = when (name) {
-                "macosArm64", "macosX64" -> "macosx"
-                "iosArm64" -> "iphoneos"
-                "iosSimulatorArm64", "iosX64" -> "iphonesimulator"
-                "tvosArm64" -> "appletvos"
-                "tvosSimulatorArm64", "tvosX64" -> "appletvsimulator"
-                "watchosArm64" -> "watchos"
-                "watchosSimulatorArm64", "watchosX64" -> "watchsimulator"
-                else -> return@configureEach
-            }
+            val libSubdir =
+                when (name) {
+                    "macosArm64", "macosX64" -> "macos"
+                    "iosArm64" -> "iphoneos"
+                    "iosSimulatorArm64", "iosX64" -> "iphonesimulator"
+                    "tvosArm64" -> "appletvos"
+                    "tvosSimulatorArm64", "tvosX64" -> "appletvsimulator"
+                    "watchosArm64" -> "watchos"
+                    "watchosSimulatorArm64", "watchosX64" -> "watchsimulator"
+                    else -> return@configureEach
+                }
+            val swiftPlatform =
+                when (name) {
+                    "macosArm64", "macosX64" -> "macosx"
+                    "iosArm64" -> "iphoneos"
+                    "iosSimulatorArm64", "iosX64" -> "iphonesimulator"
+                    "tvosArm64" -> "appletvos"
+                    "tvosSimulatorArm64", "tvosX64" -> "appletvsimulator"
+                    "watchosArm64" -> "watchos"
+                    "watchosSimulatorArm64", "watchosX64" -> "watchsimulator"
+                    else -> return@configureEach
+                }
             val libPath = socketSwiftLibDir.resolve(libSubdir).absolutePath
             binaries.all {
                 linkerOpts("-L$libPath", "-lSocketWrapper")

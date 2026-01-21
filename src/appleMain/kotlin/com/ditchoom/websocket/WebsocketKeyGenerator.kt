@@ -13,8 +13,9 @@ import kotlin.random.nextInt
 @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
 actual fun generateWebSocketKey(): String {
     val bytes = ByteArray(16) { Random.nextInt(97..122).toByte() }
-    val nsData = bytes.usePinned { pinned ->
-        NSData.create(bytes = pinned.addressOf(0), length = bytes.size.toULong())
-    }
+    val nsData =
+        bytes.usePinned { pinned ->
+            NSData.create(bytes = pinned.addressOf(0), length = bytes.size.toULong())
+        }
     return nsData.base64Encoding()
 }

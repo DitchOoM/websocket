@@ -21,13 +21,14 @@ fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     zone: AllocationZone = AllocationZone.Direct,
     parentScope: CoroutineScope? = null,
-): WebSocketClient = allocate(
-    connectionOptions,
-    BufferPool(
-        threadingMode = ThreadingMode.SingleThreaded,
-        defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
-        allocationZone = zone,
-    ),
-    parentScope,
-    zone,
-)
+): WebSocketClient =
+    allocate(
+        connectionOptions,
+        BufferPool(
+            threadingMode = ThreadingMode.SingleThreaded,
+            defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
+            allocationZone = zone,
+        ),
+        parentScope,
+        zone,
+    )

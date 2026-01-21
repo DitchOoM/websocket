@@ -7,7 +7,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.DEFAULT_NETWORK_BUFFER_SIZE
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.buffer.stream.builder
@@ -93,11 +92,12 @@ class DefaultWebSocketClient(
                 } else {
                     "${connectionOptions.name}:${connectionOptions.port}"
                 }
-            val deflateHeader = if (connectionOptions.requestCompression) {
-                "$HTTP_COMPRESSION_HEADER\r\n"
-            } else {
-                ""
-            }
+            val deflateHeader =
+                if (connectionOptions.requestCompression) {
+                    "$HTTP_COMPRESSION_HEADER\r\n"
+                } else {
+                    ""
+                }
             val request =
                 "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
                     "Host: $hostline\r\n" +
@@ -175,7 +175,10 @@ class DefaultWebSocketClient(
         return this
     }
 
-    private suspend fun findPattern(processor: SuspendingStreamProcessor, pattern: ReadBuffer): Boolean {
+    private suspend fun findPattern(
+        processor: SuspendingStreamProcessor,
+        pattern: ReadBuffer,
+    ): Boolean {
         val available = processor.available()
         val patternSize = pattern.remaining()
         if (available < patternSize) return false
@@ -193,7 +196,10 @@ class DefaultWebSocketClient(
         return false
     }
 
-    private suspend fun findPatternIndex(processor: SuspendingStreamProcessor, pattern: ReadBuffer): Int {
+    private suspend fun findPatternIndex(
+        processor: SuspendingStreamProcessor,
+        pattern: ReadBuffer,
+    ): Int {
         val available = processor.available()
         val patternSize = pattern.remaining()
         if (available < patternSize) return -1
@@ -232,8 +238,8 @@ class DefaultWebSocketClient(
         opcode: Opcode,
         payloadData: ReadBuffer = EMPTY_BUFFER,
         timeout: Duration = connectionOptions.writeTimeout,
-    ): Int {
-        return try {
+    ): Int =
+        try {
             val frame = Frame(true, opcode, MaskingKey.FourByteMaskingKey(), payloadData)
             val frameBuffer = frame.toBuffer(attemptDeflate = enableCompression)
             frameBuffer.resetForRead()
@@ -246,7 +252,6 @@ class DefaultWebSocketClient(
             connectionStateFlow.value = ConnectionState.Disconnected(e)
             -1
         }
-    }
 
     /**
      * Read from socket and append to the processor.
@@ -259,95 +264,96 @@ class DefaultWebSocketClient(
         }
     }
 
-    internal fun processIncomingMessages(
-        streamProcessor: SuspendingStreamProcessor,
-    ) = scope.launch {
-        try {
-            readLoop@ while (isOpen()) {
-                // Ensure we have data available, reading from socket if needed
-                while (streamProcessor.available() < 2) {
-                    readIntoProcessor(streamProcessor)
-                }
-
-                lateinit var firstFrame: Frame
-                val payloadBuffers = mutableListOf<ReadBuffer>()
-                var totalPayloadSize = 0
-
-                process@ do {
-                    val frame = readAndProcessWebSocketFrame(streamProcessor) ?: return@launch
-                    if (frame.opcode.isControlFrame()) {
-                        if (!handleControlPacketFrameShouldContinue(frame)) {
-                            return@launch
-                        }
-                    } else {
-                        if (payloadBuffers.isEmpty()) {
-                            firstFrame = frame
-                        }
-                        // Buffer is already in read mode from processor.readBuffer()
-                        payloadBuffers += frame.payloadData
-                        totalPayloadSize += frame.payloadData.remaining()
+    internal fun processIncomingMessages(streamProcessor: SuspendingStreamProcessor) =
+        scope.launch {
+            try {
+                readLoop@ while (isOpen()) {
+                    // Ensure we have data available, reading from socket if needed
+                    while (streamProcessor.available() < 2) {
+                        readIntoProcessor(streamProcessor)
                     }
-                } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
 
-                // Combine payloads into a single buffer
-                val payload = if (payloadBuffers.size == 1) {
-                    payloadBuffers[0]
-                } else if (totalPayloadSize == 0) {
-                    EMPTY_BUFFER
-                } else {
-                    val combined = PlatformBuffer.allocate(totalPayloadSize)
-                    for (buf in payloadBuffers) {
-                        combined.write(buf)
-                    }
-                    combined.resetForRead()
-                    combined
-                }
-                // Buffer is already in read mode, no resetForRead() needed
-                when (firstFrame.opcode) {
-                    Opcode.Text -> {
-                        try {
-                            val utf8StringRead = if (firstFrame.rsv1 && enableCompression) {
-                                payload.decompressWebsocketBuffer().let {
-                                    it.readString(it.remaining())
-                                }
-                            } else {
-                                payload.readString(payload.remaining())
+                    lateinit var firstFrame: Frame
+                    val payloadBuffers = mutableListOf<ReadBuffer>()
+                    var totalPayloadSize = 0
+
+                    process@ do {
+                        val frame = readAndProcessWebSocketFrame(streamProcessor) ?: return@launch
+                        if (frame.opcode.isControlFrame()) {
+                            if (!handleControlPacketFrameShouldContinue(frame)) {
+                                return@launch
                             }
-                            incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
-                        } catch (e: Throwable) {
-                            sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
+                        } else {
+                            if (payloadBuffers.isEmpty()) {
+                                firstFrame = frame
+                            }
+                            // Buffer is already in read mode from processor.readBuffer()
+                            payloadBuffers += frame.payloadData
+                            totalPayloadSize += frame.payloadData.remaining()
+                        }
+                    } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
+
+                    // Combine payloads into a single buffer
+                    val payload =
+                        if (payloadBuffers.size == 1) {
+                            payloadBuffers[0]
+                        } else if (totalPayloadSize == 0) {
+                            EMPTY_BUFFER
+                        } else {
+                            val combined = PlatformBuffer.allocate(totalPayloadSize)
+                            for (buf in payloadBuffers) {
+                                combined.write(buf)
+                            }
+                            combined.resetForRead()
+                            combined
+                        }
+                    // Buffer is already in read mode, no resetForRead() needed
+                    when (firstFrame.opcode) {
+                        Opcode.Text -> {
+                            try {
+                                val utf8StringRead =
+                                    if (firstFrame.rsv1 && enableCompression) {
+                                        payload.decompressWebsocketBuffer().let {
+                                            it.readString(it.remaining())
+                                        }
+                                    } else {
+                                        payload.readString(payload.remaining())
+                                    }
+                                incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
+                            } catch (e: Throwable) {
+                                sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
+                                return@launch
+                            }
+                        }
+                        Opcode.Binary -> {
+                            incomingMessageSharedFlow.emit(
+                                WebSocketMessage.Binary(
+                                    if (firstFrame.rsv1 && enableCompression) {
+                                        payload.decompressWebsocketBuffer()
+                                    } else {
+                                        payload
+                                    },
+                                ),
+                            )
+                        }
+                        else -> {
+                            sendCloseFrame(1002u, "Invalid opcode for frame")
                             return@launch
                         }
                     }
-                    Opcode.Binary -> {
-                        incomingMessageSharedFlow.emit(
-                            WebSocketMessage.Binary(
-                                if (firstFrame.rsv1 && enableCompression) {
-                                    payload.decompressWebsocketBuffer()
-                                } else {
-                                    payload
-                                },
-                            ),
-                        )
-                    }
-                    else -> {
-                        sendCloseFrame(1002u, "Invalid opcode for frame")
-                        return@launch
-                    }
                 }
+            } catch (e: SocketClosedException) {
+                // SocketClosedException is expected when the connection is closed
+                // Don't treat as error if we're already closing or server initiated close
+                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
+                    connectionStateFlow.value = ConnectionState.Disconnected(e)
+                } else {
+                    connectionStateFlow.value = ConnectionState.Disconnected(null)
+                }
+            } finally {
+                streamProcessor.release()
             }
-        } catch (e: SocketClosedException) {
-            // SocketClosedException is expected when the connection is closed
-            // Don't treat as error if we're already closing or server initiated close
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
-            }
-        } finally {
-            streamProcessor.release()
         }
-    }
 
     // Legacy method for tests - creates a stream processor internally
     internal fun processIncomingMessages(
@@ -389,29 +395,31 @@ class DefaultWebSocketClient(
                 } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
 
                 // Combine payloads into a single buffer
-                val payload = if (payloadBuffers.size == 1) {
-                    payloadBuffers[0]
-                } else if (totalPayloadSize == 0) {
-                    EMPTY_BUFFER
-                } else {
-                    val combined = PlatformBuffer.allocate(totalPayloadSize)
-                    for (buf in payloadBuffers) {
-                        combined.write(buf)
+                val payload =
+                    if (payloadBuffers.size == 1) {
+                        payloadBuffers[0]
+                    } else if (totalPayloadSize == 0) {
+                        EMPTY_BUFFER
+                    } else {
+                        val combined = PlatformBuffer.allocate(totalPayloadSize)
+                        for (buf in payloadBuffers) {
+                            combined.write(buf)
+                        }
+                        combined.resetForRead()
+                        combined
                     }
-                    combined.resetForRead()
-                    combined
-                }
                 // Buffer is already in read mode, no resetForRead() needed
                 when (firstFrame.opcode) {
                     Opcode.Text -> {
                         try {
-                            val utf8StringRead = if (firstFrame.rsv1 && enableCompression) {
-                                payload.decompressWebsocketBuffer().let {
-                                    it.readString(it.remaining())
+                            val utf8StringRead =
+                                if (firstFrame.rsv1 && enableCompression) {
+                                    payload.decompressWebsocketBuffer().let {
+                                        it.readString(it.remaining())
+                                    }
+                                } else {
+                                    payload.readString(payload.remaining())
                                 }
-                            } else {
-                                payload.readString(payload.remaining())
-                            }
                             incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
                         } catch (e: Throwable) {
                             sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
@@ -488,9 +496,7 @@ class DefaultWebSocketClient(
         return true
     }
 
-    private suspend fun readAndProcessWebSocketFrame(
-        processor: SuspendingStreamProcessor,
-    ): Frame? {
+    private suspend fun readAndProcessWebSocketFrame(processor: SuspendingStreamProcessor): Frame? {
         try {
             // Ensure we have at least 2 bytes for the header
             while (processor.available() < 2) {
@@ -778,8 +784,9 @@ class DefaultWebSocketClient(
             code in 4000u..4999u
 
     companion object {
-        private const val HTTP_COMPRESSION_HEADER = "Sec-WebSocket-Extensions: permessage-deflate" +
-            "; client_no_context_takeover; server_no_context_takeover\r\n"
+        private const val HTTP_COMPRESSION_HEADER =
+            "Sec-WebSocket-Extensions: permessage-deflate" +
+                "; client_no_context_takeover; server_no_context_takeover\r\n"
         private val countMap = mutableMapOf<String, Int>()
 
         private fun getCountForConnection(connectionOptions: WebSocketConnectionOptions): Int {

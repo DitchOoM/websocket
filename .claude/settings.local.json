@@ -32,7 +32,9 @@
       "Bash(tee:*)",
       "Bash(ls:*)",
       "Bash(gh pr:*)",
-      "Bash(gh run view:*)"
+      "Bash(gh run view:*)",
+      "Bash(gh run:*)",
+      "Bash(gh api:*)"
     ]
   }
 }

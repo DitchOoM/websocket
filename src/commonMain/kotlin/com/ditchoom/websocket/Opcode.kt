@@ -1,6 +1,8 @@
 package com.ditchoom.websocket
 
-enum class Opcode(val value: Byte) {
+enum class Opcode(
+    val value: Byte,
+) {
     Continuation(0x0),
     Text(0x1),
     Binary(0x2),
