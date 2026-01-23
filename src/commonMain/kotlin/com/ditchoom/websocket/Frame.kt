@@ -152,41 +152,30 @@ internal data class Frame(
     }
 
     /**
-     * Writes masking key and masked payload using Long-based bulk XOR.
-     * Processes 8 bytes at a time for large payloads, falling back to
-     * byte-at-a-time for remainders and small payloads.
+     * Writes masking key and masked payload using inline bulk XOR.
+     * The inline lambda pattern eliminates virtual dispatch on Native/JS,
+     * allowing the compiler to inline concrete buffer read/write operations.
      */
     private fun serializeMaskingKeyAndPayload(writeBuffer: PlatformBuffer) {
         if (maskingKey is MaskingKey.FourByteMaskingKey) {
             maskingKey.write(writeBuffer)
             val dataSize = payloadData.limit()
             payloadData.position(0)
+            val dstStart = writeBuffer.position()
 
-            if (dataSize >= 8) {
-                // Bulk XOR using Long operations (8 bytes at a time)
-                val maskLong = maskingKey.asLong()
-                var i = 0
-                val longLimit = dataSize - 7
+            bulkXor(
+                srcPos = 0,
+                dstPos = dstStart,
+                length = dataSize,
+                maskLong = maskingKey.asLong(),
+                getSrcLong = { payloadData.getLong(it) },
+                setDstLong = { index, value -> writeBuffer[index] = value },
+                getSrcByte = { payloadData[it] },
+                setDstByte = { index, value -> writeBuffer[index] = value },
+                getMaskByte = { maskingKey[it] },
+            )
 
-                while (i < longLimit) {
-                    val payloadLong = payloadData.readLong()
-                    writeBuffer.writeLong(payloadLong xor maskLong)
-                    i += 8
-                }
-
-                // Handle remaining bytes (0-7)
-                while (i < dataSize) {
-                    val original = payloadData.readByte()
-                    writeBuffer.writeByte((original.toInt() xor maskingKey[i and 3].toInt()).toByte())
-                    i++
-                }
-            } else {
-                // Small payloads: byte-at-a-time
-                for (i in 0 until dataSize) {
-                    val original = payloadData.readByte()
-                    writeBuffer.writeByte((original.toInt() xor maskingKey[i and 3].toInt()).toByte())
-                }
-            }
+            writeBuffer.position(dstStart + dataSize)
         } else {
             payloadData.position(0)
             writeBuffer.write(payloadData)

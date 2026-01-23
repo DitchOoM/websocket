@@ -283,6 +283,64 @@ class FrameSerializationBenchmark {
         bh.consume(outputBuffer)
     }
 
+    /**
+     * Inline bulkXor using position-indexed getLong/set (no cursor management).
+     * This matches the production code in Frame.kt after the optimization.
+     */
+    @Benchmark
+    fun masking_inlineBulkXorLarge(bh: Blackhole) {
+        val maskInt = (maskBytes[0].toInt() and 0xFF shl 24) or
+            (maskBytes[1].toInt() and 0xFF shl 16) or
+            (maskBytes[2].toInt() and 0xFF shl 8) or
+            (maskBytes[3].toInt() and 0xFF)
+        val maskLong = (maskInt.toLong() and 0xFFFFFFFFL shl 32) or
+            (maskInt.toLong() and 0xFFFFFFFFL)
+
+        val payloadBuffer = PlatformBuffer.wrap(largePayload)
+        val outputBuffer = PlatformBuffer.allocate(largePayload.size)
+
+        bulkXorBenchmark(
+            srcPos = 0,
+            dstPos = 0,
+            length = largePayload.size,
+            maskLong = maskLong,
+            getSrcLong = { payloadBuffer.getLong(it) },
+            setDstLong = { index, value -> outputBuffer[index] = value },
+            getSrcByte = { payloadBuffer[it] },
+            setDstByte = { index, value -> outputBuffer[index] = value },
+            getMaskByte = { maskBytes[it] },
+        )
+
+        bh.consume(outputBuffer)
+    }
+
+    @Benchmark
+    fun masking_inlineBulkXorMedium(bh: Blackhole) {
+        val maskInt = (maskBytes[0].toInt() and 0xFF shl 24) or
+            (maskBytes[1].toInt() and 0xFF shl 16) or
+            (maskBytes[2].toInt() and 0xFF shl 8) or
+            (maskBytes[3].toInt() and 0xFF)
+        val maskLong = (maskInt.toLong() and 0xFFFFFFFFL shl 32) or
+            (maskInt.toLong() and 0xFFFFFFFFL)
+
+        val payloadBuffer = PlatformBuffer.wrap(mediumPayload)
+        val outputBuffer = PlatformBuffer.allocate(mediumPayload.size)
+
+        bulkXorBenchmark(
+            srcPos = 0,
+            dstPos = 0,
+            length = mediumPayload.size,
+            maskLong = maskLong,
+            getSrcLong = { payloadBuffer.getLong(it) },
+            setDstLong = { index, value -> outputBuffer[index] = value },
+            getSrcByte = { payloadBuffer[it] },
+            setDstByte = { index, value -> outputBuffer[index] = value },
+            getMaskByte = { maskBytes[it] },
+        )
+
+        bh.consume(outputBuffer)
+    }
+
     // ===== Full Frame Serialization Benchmarks =====
 
     /**
@@ -379,5 +437,35 @@ class FrameSerializationBenchmark {
             array[i] = (byte.toInt() shr (7 - i)) and 1 == 1
         }
         return array
+    }
+}
+
+/**
+ * Inline bulk XOR matching the production code in BulkXor.kt.
+ * Position-indexed access eliminates cursor management overhead.
+ */
+internal inline fun bulkXorBenchmark(
+    srcPos: Int,
+    dstPos: Int,
+    length: Int,
+    maskLong: Long,
+    getSrcLong: (Int) -> Long,
+    setDstLong: (Int, Long) -> Unit,
+    getSrcByte: (Int) -> Byte,
+    setDstByte: (Int, Byte) -> Unit,
+    getMaskByte: (Int) -> Byte,
+) {
+    var i = 0
+    val longLimit = length - 7
+
+    while (i < longLimit) {
+        setDstLong(dstPos + i, getSrcLong(srcPos + i) xor maskLong)
+        i += 8
+    }
+
+    while (i < length) {
+        val src = getSrcByte(srcPos + i)
+        setDstByte(dstPos + i, (src.toInt() xor getMaskByte(i and 3).toInt()).toByte())
+        i++
     }
 }
