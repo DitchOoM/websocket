@@ -11,7 +11,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.buffer.toReadBuffer
-import com.ditchoom.data.get
+
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.allocate
@@ -505,19 +505,19 @@ class DefaultWebSocketClient(
 
             // Read first two bytes as a short for efficiency
             val headerShort = processor.readShort()
-            val byte1 = (headerShort.toInt() shr 8).toByte()
-            val maskAndPayloadLengthByte = headerShort.toByte()
+            val byte1Int = (headerShort.toInt() ushr 8) and 0xFF
+            val byte2Int = headerShort.toInt() and 0xFF
 
-            val fin = byte1[0]
-            val rsv1 = byte1[1]
+            val fin = byte1Int and 0x80 != 0
+            val rsv1 = byte1Int and 0x40 != 0
             val isRsv1Valid = !rsv1 || (rsv1 && enableCompression)
-            val rsv2 = byte1[2]
-            val rsv3 = byte1[3]
+            val rsv2 = byte1Int and 0x20 != 0
+            val rsv3 = byte1Int and 0x10 != 0
             check(isRsv1Valid && !rsv2 && !rsv3) {
                 sendCloseFrame(1002u, "Invalid RSV")
-                "Invalid incoming RSV bits $byte1"
+                "Invalid incoming RSV bits 0x${byte1Int.toString(16)}"
             }
-            val opcode = Opcode.from(byte1)
+            val opcode = Opcode.fromInt(byte1Int)
             if (!opcode.isValid()) {
                 sendCloseFrame(1002u, "Invalid OpCode $opcode")
                 return null
@@ -525,9 +525,9 @@ class DefaultWebSocketClient(
                 sendCloseFrame(1002u, "$opcode does not support fragmentation")
                 return null
             }
-            val mask = maskAndPayloadLengthByte[0]
+            val mask = byte2Int and 0x80 != 0
             check(!mask) // websocket spec requires this to be a 0 or false
-            val payloadLength = maskAndPayloadLengthByte.toInt() and 0x7F
+            val payloadLength = byte2Int and 0x7F
 
             val actualPayloadLength: ULong
             if (payloadLength <= 125) {
@@ -642,19 +642,19 @@ class DefaultWebSocketClient(
             }
 
             val headerShort = processor.readShort()
-            val byte1 = (headerShort.toInt() shr 8).toByte()
-            val maskAndPayloadLengthByte = headerShort.toByte()
+            val byte1Int = (headerShort.toInt() ushr 8) and 0xFF
+            val byte2Int = headerShort.toInt() and 0xFF
 
-            val fin = byte1[0]
-            val rsv1 = byte1[1]
+            val fin = byte1Int and 0x80 != 0
+            val rsv1 = byte1Int and 0x40 != 0
             val isRsv1Valid = !rsv1 || (rsv1 && enableCompression)
-            val rsv2 = byte1[2]
-            val rsv3 = byte1[3]
+            val rsv2 = byte1Int and 0x20 != 0
+            val rsv3 = byte1Int and 0x10 != 0
             check(isRsv1Valid && !rsv2 && !rsv3) {
                 sendCloseFrame(1002u, "Invalid RSV")
-                "Invalid incoming RSV bits $byte1"
+                "Invalid incoming RSV bits 0x${byte1Int.toString(16)}"
             }
-            val opcode = Opcode.from(byte1)
+            val opcode = Opcode.fromInt(byte1Int)
             if (!opcode.isValid()) {
                 sendCloseFrame(1002u, "Invalid OpCode $opcode")
                 return null
@@ -662,9 +662,9 @@ class DefaultWebSocketClient(
                 sendCloseFrame(1002u, "$opcode does not support fragmentation")
                 return null
             }
-            val mask = maskAndPayloadLengthByte[0]
+            val mask = byte2Int and 0x80 != 0
             check(!mask) // websocket spec requires this to be 0 for server-to-client
-            val payloadLength = maskAndPayloadLengthByte.toInt() and 0x7F
+            val payloadLength = byte2Int and 0x7F
 
             val actualPayloadLength: ULong
             if (payloadLength <= 125) {
