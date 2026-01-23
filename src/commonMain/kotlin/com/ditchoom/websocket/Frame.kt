@@ -153,8 +153,8 @@ internal data class Frame(
 
     /**
      * Writes masking key and masked payload using inline bulk XOR.
-     * The inline lambda pattern eliminates virtual dispatch on Native/JS,
-     * allowing the compiler to inline concrete buffer read/write operations.
+     * Uses position-indexed Long operations (8 bytes at a time) with inlined
+     * lambdas to eliminate virtual dispatch on all platforms.
      */
     private fun serializeMaskingKeyAndPayload(writeBuffer: PlatformBuffer) {
         if (maskingKey is MaskingKey.FourByteMaskingKey) {

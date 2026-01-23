@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -144,6 +145,10 @@ kotlin {
             implementation(libs.androidx.test.core.ktx)
         }
     }
+}
+
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
 }
 
 android {

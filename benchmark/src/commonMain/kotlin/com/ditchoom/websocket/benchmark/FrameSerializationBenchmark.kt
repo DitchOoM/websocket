@@ -341,6 +341,59 @@ class FrameSerializationBenchmark {
         bh.consume(outputBuffer)
     }
 
+    /**
+     * Direct ByteArray XOR with 4-byte unrolled loop.
+     * No buffer abstraction - operates on raw arrays.
+     * This is what the production code uses when ManagedMemoryAccess is available.
+     */
+    @Benchmark
+    fun masking_directArrayXorLarge(bh: Blackhole) {
+        val result = ByteArray(largePayload.size)
+        val m0 = maskBytes[0].toInt()
+        val m1 = maskBytes[1].toInt()
+        val m2 = maskBytes[2].toInt()
+        val m3 = maskBytes[3].toInt()
+
+        var i = 0
+        val limit = largePayload.size - 3
+        while (i < limit) {
+            result[i] = (largePayload[i].toInt() xor m0).toByte()
+            result[i + 1] = (largePayload[i + 1].toInt() xor m1).toByte()
+            result[i + 2] = (largePayload[i + 2].toInt() xor m2).toByte()
+            result[i + 3] = (largePayload[i + 3].toInt() xor m3).toByte()
+            i += 4
+        }
+        while (i < largePayload.size) {
+            result[i] = (largePayload[i].toInt() xor maskBytes[i and 3].toInt()).toByte()
+            i++
+        }
+        bh.consume(result)
+    }
+
+    @Benchmark
+    fun masking_directArrayXorMedium(bh: Blackhole) {
+        val result = ByteArray(mediumPayload.size)
+        val m0 = maskBytes[0].toInt()
+        val m1 = maskBytes[1].toInt()
+        val m2 = maskBytes[2].toInt()
+        val m3 = maskBytes[3].toInt()
+
+        var i = 0
+        val limit = mediumPayload.size - 3
+        while (i < limit) {
+            result[i] = (mediumPayload[i].toInt() xor m0).toByte()
+            result[i + 1] = (mediumPayload[i + 1].toInt() xor m1).toByte()
+            result[i + 2] = (mediumPayload[i + 2].toInt() xor m2).toByte()
+            result[i + 3] = (mediumPayload[i + 3].toInt() xor m3).toByte()
+            i += 4
+        }
+        while (i < mediumPayload.size) {
+            result[i] = (mediumPayload[i].toInt() xor maskBytes[i and 3].toInt()).toByte()
+            i++
+        }
+        bh.consume(result)
+    }
+
     // ===== Full Frame Serialization Benchmarks =====
 
     /**
