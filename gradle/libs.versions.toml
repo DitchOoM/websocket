@@ -6,15 +6,17 @@ ktlint = "14.0.1"
 mavenPublish = "0.35.0"
 kotlinxCoroutines = "1.10.2"
 kotlinWrappers = "2025.12.6"
+kotlinxBenchmark = "0.4.15"
 buffer = "2.0.3"
 bufferCompression = "2.0.3"
-socket = "1.2.2"
+socket = "1.2.2-SNAPSHOT"
 androidxCore = "1.17.0"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
 androidxTestCore = "1.7.0"
 
 [libraries]
+kotlinx-benchmark-runtime = { module = "org.jetbrains.kotlinx:kotlinx-benchmark-runtime", version.ref = "kotlinxBenchmark" }
 buffer = { module = "com.ditchoom:buffer", version.ref = "buffer" }
 buffer-compression = { module = "com.ditchoom:buffer-compression", version.ref = "bufferCompression" }
 socket = { module = "com.ditchoom:socket", version.ref = "socket" }
@@ -30,6 +32,8 @@ androidx-test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "and
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "kotlin" }
+kotlinx-benchmark = { id = "org.jetbrains.kotlinx.benchmark", version.ref = "kotlinxBenchmark" }
 android-library = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }

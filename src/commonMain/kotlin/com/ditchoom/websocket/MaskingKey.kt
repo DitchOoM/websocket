@@ -1,28 +1,40 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.wrap
+import kotlin.jvm.JvmInline
 import kotlin.random.Random
 
-internal sealed class MaskingKey {
-    internal data object NoMaskingKey : MaskingKey()
+internal sealed interface MaskingKey {
+    data object NoMaskingKey : MaskingKey
 
-    internal class FourByteMaskingKey(
-        private val underlyingBuffer: ReadBuffer,
-    ) : MaskingKey() {
-        constructor() : this(PlatformBuffer.wrap(Random.nextBytes(4), ByteOrder.BIG_ENDIAN))
+    /**
+     * Stores the 4-byte masking key packed into an Int for zero-allocation access.
+     * Bytes are stored in big-endian order: byte0 is the most significant byte.
+     */
+    @JvmInline
+    value class FourByteMaskingKey(
+        val packed: Int,
+    ) : MaskingKey {
+        constructor() : this(Random.nextInt())
 
-        fun write(buffer: WriteBuffer) {
-            underlyingBuffer.position(0)
-            buffer.write(underlyingBuffer)
+        /** Get the mask byte at index 0-3. */
+        operator fun get(index: Int): Byte =
+            when (index) {
+                0 -> (packed ushr 24).toByte()
+                1 -> (packed ushr 16).toByte()
+                2 -> (packed ushr 8).toByte()
+                3 -> packed.toByte()
+                else -> throw IndexOutOfBoundsException("Mask index must be 0-3, got $index")
+            }
+
+        /** Get the 4 mask bytes repeated to fill a Long for bulk XOR operations. */
+        fun asLong(): Long {
+            val p = packed.toLong() and 0xFFFFFFFFL
+            return (p shl 32) or p
         }
 
-        operator fun get(index: Int): Byte {
-            underlyingBuffer.position(index)
-            return underlyingBuffer.readByte()
+        fun write(buffer: WriteBuffer) {
+            buffer.writeInt(packed)
         }
     }
 }

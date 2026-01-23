@@ -3,14 +3,10 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.TransformedReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toComposableBuffer
 import com.ditchoom.buffer.wrap
-import com.ditchoom.data.get
-import com.ditchoom.data.toByte
-import kotlin.experimental.xor
 
 /**
  *
@@ -35,38 +31,13 @@ import kotlin.experimental.xor
  *
  */
 internal data class Frame(
-    /**
-     * Indicates that this is the final fragment in a message. The first fragment MAY also be the final fragment.
-     */
     val fin: Boolean,
-    /**
-     * MUST be false unless an extension is negotiated that defines meanings for non-zero values. If a nonzero value is
-     * received and none of the negotiated extensions defines the meaning of such a nonzero value, the receiving
-     * endpoint MUST _Fail the WebSocket Connection_.
-     */
     val rsv1: Boolean,
     val rsv2: Boolean,
     val rsv3: Boolean,
-    /** Defines the interpretation of the "Payload data".  If an unknown opcode is received, the receiving endpoint
-     * MUST _Fail the WebSocket Connection_.
-     */
     val opcode: Opcode,
-    /**
-     * All frames sent from the client to the server are masked by a 32-bit value that is contained within the frame.
-     * This field is present if the mask bit is set to true and is absent if the mask bit is set to false.  See Section
-     * 5.3 for further information on client- to-server masking.
-     */
     val maskingKey: MaskingKey,
     val payloadData: ReadBuffer,
-    /**
-     * The length of the "Payload data", in bytes: if 0-125, that is the payload length.  If 126, the following 2 bytes
-     * interpreted as a 16-bit unsigned integer are the payload length.  If 127, the following 8 bytes interpreted as a
-     * 64-bit unsigned integer (the most significant bit MUST be 0) are the payload length.  Multibyte length quantities
-     * are expressed in network byte order.  Note that in all cases, the minimal number of bytes MUST be used to encode
-     * the length, for example, the length of a 124-byte-long string can't be encoded as the sequence 126, 0, 124.  The
-     * payload length is the length of the "Extension data" + the length of the "Application data".  The length of the
-     * "Extension data" may be zero, in which case the payload length is the length of the "Application data".
-     */
     val payloadLength: Int =
         if (payloadData.limit() <= 125) {
             payloadData.limit()
@@ -136,7 +107,6 @@ internal data class Frame(
         }
 
     fun size(): Int {
-        // the first byte includes fin, rsv1-3, and opcode. second byte includes mask and payload len
         val ws2ByteOverhead = 2
         return actualPayloadLength + ws2ByteOverhead +
             when (maskingKey) {
@@ -151,25 +121,29 @@ internal data class Frame(
         serializeMaskingKeyAndPayload(writeBuffer)
     }
 
+    /**
+     * Encodes fin, rsv1-3, and opcode into a single byte using bitwise operations.
+     * Zero allocation - no BooleanArray created.
+     */
     private fun serializeByte1(writeBuffer: WriteBuffer) {
-        val byte1Array = BooleanArray(8)
-        byte1Array[0] = fin
-        byte1Array[1] = rsv1
-        byte1Array[2] = rsv2
-        byte1Array[3] = rsv3
-        byte1Array[4] = opcode.value[4]
-        byte1Array[5] = opcode.value[5]
-        byte1Array[6] = opcode.value[6]
-        byte1Array[7] = opcode.value[7]
-        writeBuffer.writeByte(byte1Array.toByte())
+        var byte1 = opcode.value.toInt() and 0x0F
+        if (fin) byte1 = byte1 or 0x80
+        if (rsv1) byte1 = byte1 or 0x40
+        if (rsv2) byte1 = byte1 or 0x20
+        if (rsv3) byte1 = byte1 or 0x10
+        writeBuffer.writeByte(byte1.toByte())
     }
 
+    /**
+     * Encodes mask bit and payload length using bitwise operations.
+     * Zero allocation - no BooleanArray created.
+     */
     private fun serializeMaskAndPayloadLength(writeBuffer: WriteBuffer) {
-        // write mask and payload len
-        val maskedBitAndPayloadLengthArray = payloadLength.toByte().toBooleanArray()
-        maskedBitAndPayloadLengthArray[0] = maskingKey is MaskingKey.FourByteMaskingKey
-        val byte = maskedBitAndPayloadLengthArray.toByte()
-        writeBuffer.writeByte(byte)
+        var byte2 = payloadLength and 0x7F
+        if (maskingKey is MaskingKey.FourByteMaskingKey) {
+            byte2 = byte2 or 0x80
+        }
+        writeBuffer.writeByte(byte2.toByte())
         if (payloadLength == 126) {
             writeBuffer.writeUShort(payloadData.limit().toUShort())
         } else if (payloadLength == 127) {
@@ -177,21 +151,46 @@ internal data class Frame(
         }
     }
 
-    private fun serializeMaskingKeyAndPayload(writeBuffer: WriteBuffer) {
+    /**
+     * Writes masking key and masked payload using Long-based bulk XOR.
+     * Processes 8 bytes at a time for large payloads, falling back to
+     * byte-at-a-time for remainders and small payloads.
+     */
+    private fun serializeMaskingKeyAndPayload(writeBuffer: PlatformBuffer) {
         if (maskingKey is MaskingKey.FourByteMaskingKey) {
             maskingKey.write(writeBuffer)
-        }
-        val data =
-            if (maskingKey is MaskingKey.FourByteMaskingKey) {
-                payloadData.position(0)
-                TransformedReadBuffer(payloadData) { i, original ->
-                    original xor maskingKey[i.toLong().mod(4)]
+            val dataSize = payloadData.limit()
+            payloadData.position(0)
+
+            if (dataSize >= 8) {
+                // Bulk XOR using Long operations (8 bytes at a time)
+                val maskLong = maskingKey.asLong()
+                var i = 0
+                val longLimit = dataSize - 7
+
+                while (i < longLimit) {
+                    val payloadLong = payloadData.readLong()
+                    writeBuffer.writeLong(payloadLong xor maskLong)
+                    i += 8
+                }
+
+                // Handle remaining bytes (0-7)
+                while (i < dataSize) {
+                    val original = payloadData.readByte()
+                    writeBuffer.writeByte((original.toInt() xor maskingKey[i and 3].toInt()).toByte())
+                    i++
                 }
             } else {
-                payloadData
+                // Small payloads: byte-at-a-time
+                for (i in 0 until dataSize) {
+                    val original = payloadData.readByte()
+                    writeBuffer.writeByte((original.toInt() xor maskingKey[i and 3].toInt()).toByte())
+                }
             }
-        data.position(0)
-        writeBuffer.write(data)
+        } else {
+            payloadData.position(0)
+            writeBuffer.write(payloadData)
+        }
     }
 
     override fun toString(): String {
@@ -207,18 +206,5 @@ internal data class Frame(
         return "Frame(fin=$fin, rsv1=$rsv1, rsv2=$rsv2, rsv3=$rsv3, opcode=$opcode, " +
             "maskingKey=$maskingKey, payloadData=$p, payloadLength=$payloadLength, " +
             "actualPayloadLength=$actualPayloadLength)"
-    }
-
-    fun Byte.toBooleanArray(): BooleanArray {
-        val booleanArray = BooleanArray(8)
-        booleanArray[0] = get(0)
-        booleanArray[1] = get(1)
-        booleanArray[2] = get(2)
-        booleanArray[3] = get(3)
-        booleanArray[4] = get(4)
-        booleanArray[5] = get(5)
-        booleanArray[6] = get(6)
-        booleanArray[7] = get(7)
-        return booleanArray
     }
 }
