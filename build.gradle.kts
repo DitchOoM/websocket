@@ -1,5 +1,8 @@
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.Socket
+import java.security.SecureRandom
+import java.util.Base64
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -147,8 +150,22 @@ kotlin {
     }
 }
 
+val integrationTestPatterns =
+    listOf(
+        "com.ditchoom.websocket.AutobahnCase*",
+        "com.ditchoom.websocket.WebSocketTests",
+        "com.ditchoom.websocket.ProfilingTest",
+    )
+
+val runIntegrationTests = project.hasProperty("integrationTests")
+
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
+    if (!runIntegrationTests) {
+        filter {
+            integrationTestPatterns.forEach { excludeTestsMatching(it) }
+        }
+    }
 }
 
 android {
@@ -264,16 +281,78 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 val validateAutobahnResults =
     task("validateAutobahnResults") {
         doLast {
-            // Autobahn validation can be added here if needed
+            val agents = listOf("JVM", "NodeJS", "macOS")
+            agents.forEach { agent ->
+                try {
+                    val socket = Socket("localhost", 9001)
+                    socket.soTimeout = 5000
+                    val output = socket.getOutputStream()
+                    val input = socket.getInputStream()
+                    val path = "/updateReports?agent=$agent"
+                    val keyBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+                    val key = Base64.getEncoder().encodeToString(keyBytes)
+                    val request =
+                        "GET $path HTTP/1.1\r\n" +
+                            "Host: localhost:9001\r\n" +
+                            "Upgrade: websocket\r\n" +
+                            "Connection: Upgrade\r\n" +
+                            "Sec-WebSocket-Key: $key\r\n" +
+                            "Sec-WebSocket-Version: 13\r\n" +
+                            "\r\n"
+                    output.write(request.toByteArray())
+                    output.flush()
+                    // Read response headers
+                    val buffer = StringBuilder()
+                    while (!buffer.endsWith("\r\n\r\n")) {
+                        val b = input.read()
+                        if (b == -1) break
+                        buffer.append(b.toChar())
+                    }
+                    // Send close frame (opcode 0x88, mask bit set, 2-byte payload with code 1000)
+                    val closeFrame =
+                        byteArrayOf(
+                            0x88.toByte(),
+                            0x82.toByte(),
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x00,
+                            0x03,
+                            0xE8.toByte(),
+                        )
+                    output.write(closeFrame)
+                    output.flush()
+                    Thread.sleep(200)
+                    socket.close()
+                    println("Updated Autobahn reports for agent: $agent")
+                } catch (e: Exception) {
+                    println("Warning: Could not update reports for agent $agent: ${e.message}")
+                }
+            }
         }
     }
-tasks.forEach { task ->
-    val taskName = task.name
-    if ((taskName.contains("test", ignoreCase = true) && !taskName.contains("clean", ignoreCase = true)) ||
-        taskName == "check"
-    ) {
-        task.dependsOn(echoWebsocket)
-        task.dependsOn(autobahnContainer)
-        task.finalizedBy(validateAutobahnResults)
+// Wire Docker/echo server dependencies only when integration tests are requested
+if (runIntegrationTests) {
+    tasks.forEach { task ->
+        val taskName = task.name
+        if ((
+                taskName.contains("test", ignoreCase = true) &&
+                    !taskName.contains("clean", ignoreCase = true)
+            ) ||
+            taskName == "check"
+        ) {
+            task.dependsOn(echoWebsocket)
+            task.dependsOn(autobahnContainer)
+            task.finalizedBy(validateAutobahnResults)
+        }
     }
+}
+
+// Convenience lifecycle task
+tasks.register("integrationTest") {
+    group = "verification"
+    description = "Run integration tests (requires Docker and echo server)"
+    dependsOn(echoWebsocket)
+    dependsOn(autobahnContainer)
+    finalizedBy(validateAutobahnResults)
 }
