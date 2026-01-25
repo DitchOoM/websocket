@@ -123,6 +123,7 @@ val integrationTestPatterns =
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
+// Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
     if (runIntegrationTests) {
         maxHeapSize = "2g" // CI environment needs more memory for large payload tests
@@ -131,6 +132,24 @@ tasks.withType<Test>().configureEach {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
         }
+    }
+}
+
+// Filter Kotlin/Native tests
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+    if (!runIntegrationTests) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.ProfilingTest")
+    }
+}
+
+// Filter Kotlin/JS tests
+tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
+    if (!runIntegrationTests) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.ProfilingTest")
     }
 }
 
