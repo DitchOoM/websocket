@@ -40,8 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-          restore-keys: konan-${{ runner.os }}-
+          key: konan-v2-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
       - name: Unit tests
