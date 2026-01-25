@@ -21,13 +21,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
       - name: Unit tests Major
         if: ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-        run: ./gradlew check publishToMavenLocal -PincrementMajor=true
+        run: ./gradlew check -PincrementMajor=true
       - name: Unit tests Minor
         if: ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew check publishToMavenLocal -PincrementMinor=true
+        run: ./gradlew check -PincrementMinor=true
       - name: Unit tests Patch
         if: ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew check publishToMavenLocal
+        run: ./gradlew check
 
   integration-tests:
     runs-on: macos-latest

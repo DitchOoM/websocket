@@ -84,12 +84,16 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Run all checks and tests
         run: ./gradlew check allTests --no-configuration-cache
-      - name: Dry-run publish (build artifacts without deploying)
-        run: ./gradlew publishToMavenLocal --no-configuration-cache
       - name: Upload dry-run artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -120,6 +124,12 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Get version (Major)
@@ -182,6 +192,12 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-${{ runner.os }}-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
       - name: Get version (Major)
