@@ -30,7 +30,7 @@ jobs:
         run: ./gradlew check
 
   integration-tests:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 19
@@ -43,9 +43,5 @@ jobs:
         uses: browser-actions/setup-chrome@v1
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
-      - name: Setup docker
-        run: |
-          brew install docker colima
-          colima start
       - name: Integration tests
-        run: ./gradlew allTests -PintegrationTests
+        run: ./gradlew jvmTest jsNodeTest jsBrowserTest -PintegrationTests
