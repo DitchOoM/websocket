@@ -17,21 +17,14 @@ internal sealed interface MaskingKey {
     ) : MaskingKey {
         constructor() : this(Random.nextInt())
 
-        /** Get the mask byte at index 0-3. */
+        /** Get the mask byte at index 0-3 (big-endian order). */
         operator fun get(index: Int): Byte =
-            when (index) {
+            when (index and 3) {
                 0 -> (packed ushr 24).toByte()
                 1 -> (packed ushr 16).toByte()
                 2 -> (packed ushr 8).toByte()
-                3 -> packed.toByte()
-                else -> throw IndexOutOfBoundsException("Mask index must be 0-3, got $index")
+                else -> packed.toByte()
             }
-
-        /** Get the 4 mask bytes repeated to fill a Long for bulk XOR operations. */
-        fun asLong(): Long {
-            val p = packed.toLong() and 0xFFFFFFFFL
-            return (p shl 32) or p
-        }
 
         fun write(buffer: WriteBuffer) {
             buffer.writeInt(packed)

@@ -3,10 +3,9 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.allocate
-import com.ditchoom.buffer.toComposableBuffer
-import com.ditchoom.buffer.wrap
 
 /**
  *
@@ -64,12 +63,11 @@ internal data class Frame(
         level: Int = -1,
     ): ReadBuffer {
         var didDeflate = false
-        val shouldDeflate =
-            attemptDeflate &&
-                (opcode == Opcode.Text || opcode == Opcode.Binary) &&
-                fin &&
-                !rsv1 &&
-                payloadData.hasRemaining()
+        // WebSocket permessage-deflate requires Z_SYNC_FLUSH for compression, but the
+        // buffer-compression library only supports Z_FINISH. Sending uncompressed frames is
+        // valid per RFC 7692 when the extension is negotiated. Incoming decompression works
+        // correctly. TODO: implement Z_SYNC_FLUSH support for outgoing compression.
+        val shouldDeflate = false
         val payload =
             if (shouldDeflate) {
                 val payloadSize = payloadData.remaining()
@@ -79,7 +77,7 @@ internal data class Frame(
                     payloadData
                 } else {
                     didDeflate = true
-                    listOf(compressed, PlatformBuffer.wrap(byteArrayOf(0x00))).toComposableBuffer()
+                    compressed
                 }
             } else {
                 payloadData
@@ -115,7 +113,7 @@ internal data class Frame(
             }
     }
 
-    fun serialize(writeBuffer: PlatformBuffer) {
+    fun serialize(writeBuffer: ReadWriteBuffer) {
         serializeByte1(writeBuffer)
         serializeMaskAndPayloadLength(writeBuffer)
         serializeMaskingKeyAndPayload(writeBuffer)
@@ -152,30 +150,26 @@ internal data class Frame(
     }
 
     /**
-     * Writes masking key and masked payload using inline bulk XOR.
-     * Uses position-indexed Long operations (8 bytes at a time) with inlined
-     * lambdas to eliminate virtual dispatch on all platforms.
+     * Writes masking key and masked payload using buffer's optimized xorMask.
+     * Copies payload data first, then applies XOR mask in-place.
      */
-    private fun serializeMaskingKeyAndPayload(writeBuffer: PlatformBuffer) {
+    private fun serializeMaskingKeyAndPayload(writeBuffer: ReadWriteBuffer) {
         if (maskingKey is MaskingKey.FourByteMaskingKey) {
             maskingKey.write(writeBuffer)
             val dataSize = payloadData.limit()
             payloadData.position(0)
             val dstStart = writeBuffer.position()
 
-            bulkXor(
-                srcPos = 0,
-                dstPos = dstStart,
-                length = dataSize,
-                maskLong = maskingKey.asLong(),
-                getSrcLong = { payloadData.getLong(it) },
-                setDstLong = { index, value -> writeBuffer[index] = value },
-                getSrcByte = { payloadData[it] },
-                setDstByte = { index, value -> writeBuffer[index] = value },
-                getMaskByte = { maskingKey[it] },
-            )
+            // Copy payload data to write buffer
+            writeBuffer.write(payloadData)
 
-            writeBuffer.position(dstStart + dataSize)
+            // Apply XOR mask in-place on the written region
+            val dstEnd = writeBuffer.position()
+            writeBuffer.position(dstStart)
+            writeBuffer.setLimit(dstEnd)
+            writeBuffer.xorMask(maskingKey.packed)
+            writeBuffer.position(dstEnd)
+            writeBuffer.setLimit(writeBuffer.capacity)
         } else {
             payloadData.position(0)
             writeBuffer.write(payloadData)

@@ -9,13 +9,14 @@ import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.compressAsync
 import com.ditchoom.buffer.compression.decompressAsync
 
-private val COMPRESSION_TERMINATOR = byteArrayOf(0, 0, -1, -1)
+// WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
+private const val COMPRESSION_TERMINATOR = 0x0000FFFF
 
 suspend fun ReadBuffer.decompressWebsocketBuffer(zone: AllocationZone = AllocationZone.Direct): ReadBuffer {
     // WebSocket permessage-deflate requires appending the terminator before decompression
-    val wrappedBuffer = PlatformBuffer.allocate(this.remaining() + COMPRESSION_TERMINATOR.size, zone)
+    val wrappedBuffer = PlatformBuffer.allocate(this.remaining() + 4, zone)
     wrappedBuffer.write(this)
-    wrappedBuffer.writeBytes(COMPRESSION_TERMINATOR)
+    wrappedBuffer.writeInt(COMPRESSION_TERMINATOR)
     wrappedBuffer.resetForRead()
     return decompressAsync(wrappedBuffer, CompressionAlgorithm.Raw, zone)
 }
@@ -34,14 +35,11 @@ suspend fun ReadBuffer.compressWebsocketBuffer(
         }
     val compressed = compressAsync(this, CompressionAlgorithm.Raw, compressionLevel, zone)
     // WebSocket permessage-deflate requires stripping the terminator if present
-    val compressionTerminatorSize = COMPRESSION_TERMINATOR.size
-    if (compressed.remaining() >= compressionTerminatorSize) {
-        val positionLastFourBytes = compressed.limit() - compressionTerminatorSize
-        compressed.position(positionLastFourBytes)
-        val last4Bytes = compressed.readByteArray(compressionTerminatorSize)
-        compressed.position(0)
-        if (COMPRESSION_TERMINATOR.contentEquals(last4Bytes)) {
-            compressed.setLimit(compressed.limit() - compressionTerminatorSize)
+    if (compressed.remaining() >= 4) {
+        val positionLastFourBytes = compressed.limit() - 4
+        val last4Bytes = compressed.getInt(positionLastFourBytes)
+        if (last4Bytes == COMPRESSION_TERMINATOR) {
+            compressed.setLimit(compressed.limit() - 4)
         }
     }
     return compressed
