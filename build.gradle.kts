@@ -124,6 +124,9 @@ val integrationTestPatterns =
 val runIntegrationTests = project.hasProperty("integrationTests")
 
 tasks.withType<Test>().configureEach {
+    if (runIntegrationTests) {
+        maxHeapSize = "2g" // CI environment needs more memory for large payload tests
+    }
     if (!runIntegrationTests) {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
