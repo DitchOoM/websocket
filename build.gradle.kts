@@ -142,6 +142,7 @@ kotlin {
         androidUnitTest.dependsOn(commonJvmTest)
 
         androidInstrumentedTest.dependencies {
+            implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.androidx.test.runner)
             implementation(libs.androidx.test.rules)
