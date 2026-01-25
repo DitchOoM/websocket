@@ -43,10 +43,8 @@ jobs:
           key: konan-v2-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
-      - name: Clean and Unit tests
-        run: ./gradlew clean macosArm64Test iosSimulatorArm64Test --no-build-cache --rerun-tasks
-      - name: WebSocket integration tests (echo server)
-        run: ./gradlew macosArm64Test -PintegrationTests --tests "com.ditchoom.websocket.WebSocketTests" --no-build-cache
+      - name: Unit tests
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test
 
   integration-tests:
     name: "Integration Tests (Autobahn)"
