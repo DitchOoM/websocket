@@ -44,8 +44,10 @@ jobs:
           restore-keys: konan-${{ runner.os }}-
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
-      - name: Run tests
+      - name: Unit tests
         run: ./gradlew macosArm64Test iosSimulatorArm64Test
+      - name: WebSocket integration tests (echo server)
+        run: ./gradlew macosArm64Test -PintegrationTests --tests "com.ditchoom.websocket.WebSocketTests"
 
   integration-tests:
     name: "Integration Tests (Autobahn)"
