@@ -45,9 +45,9 @@ jobs:
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
       - name: Unit tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test
+        run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache
       - name: WebSocket integration tests (echo server)
-        run: ./gradlew macosArm64Test -PintegrationTests --tests "com.ditchoom.websocket.WebSocketTests"
+        run: ./gradlew macosArm64Test -PintegrationTests --tests "com.ditchoom.websocket.WebSocketTests" --no-build-cache
 
   integration-tests:
     name: "Integration Tests (Autobahn)"
