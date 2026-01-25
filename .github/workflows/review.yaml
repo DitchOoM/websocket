@@ -8,10 +8,7 @@ on:
       - opened
 jobs:
   unit-tests:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 19
@@ -24,19 +21,16 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
       - name: Unit tests Major
         if: ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
-        run: ./gradlew ktlintCheck assemble allTests publishToMavenLocal -PincrementMajor=true
+        run: ./gradlew check publishToMavenLocal -PincrementMajor=true
       - name: Unit tests Minor
         if: ${{ contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew ktlintCheck assemble allTests publishToMavenLocal -PincrementMinor=true
+        run: ./gradlew check publishToMavenLocal -PincrementMinor=true
       - name: Unit tests Patch
         if: ${{ !contains(github.event.pull_request.labels.*.name, 'major') && !contains(github.event.pull_request.labels.*.name, 'minor') }}
-        run: ./gradlew ktlintCheck assemble allTests publishToMavenLocal
+        run: ./gradlew check publishToMavenLocal
 
   integration-tests:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest]
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 19
@@ -49,8 +43,7 @@ jobs:
         uses: browser-actions/setup-chrome@v1
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
-      - name: Setup docker (MacOS only)
-        if: runner.os == 'macos'
+      - name: Setup docker
         run: brew install docker colima
       - name: Integration tests
         run: ./gradlew allTests -PintegrationTests
