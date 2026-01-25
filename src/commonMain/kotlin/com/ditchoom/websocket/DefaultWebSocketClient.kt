@@ -17,6 +17,9 @@ import com.ditchoom.socket.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +27,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 
@@ -34,22 +36,16 @@ class DefaultWebSocketClient(
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone = AllocationZone.Direct,
 ) : WebSocketClient {
+    private val job = SupervisorJob(parentScope?.coroutineContext?.get(Job))
     override val scope =
-        if (parentScope == null) {
-            CoroutineScope(
+        CoroutineScope(
+            job +
                 Dispatchers.Default +
-                    CoroutineName(
-                        "Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                            ": ${connectionOptions.name}:${connectionOptions.port}",
-                    ),
-            )
-        } else {
-            parentScope + Dispatchers.Default +
                 CoroutineName(
                     "Websocket Connection #${getCountForConnection(connectionOptions)}" +
                         ": ${connectionOptions.name}:${connectionOptions.port}",
-                )
-        }
+                ),
+        )
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private var hasServerInitiatedClose = false
     internal val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
@@ -772,6 +768,7 @@ class DefaultWebSocketClient(
         if (!hasServerInitiatedClose) {
             sendCloseFrame()
         }
+        scope.cancel()
     }
 
     suspend fun cleanupResources() {
