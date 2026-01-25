@@ -44,6 +44,8 @@ jobs:
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v3
       - name: Setup docker
-        run: brew install docker colima
+        run: |
+          brew install docker colima
+          colima start
       - name: Integration tests
         run: ./gradlew allTests -PintegrationTests
