@@ -75,7 +75,7 @@ jobs:
     name: Dry-run Build (skip-release)
     needs: check-release
     if: needs.check-release.outputs.skip_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -105,7 +105,7 @@ jobs:
     name: Draft Release (staging only)
     needs: check-release
     if: needs.check-release.outputs.draft_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     env:
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
@@ -167,7 +167,7 @@ jobs:
     name: Build & Deploy to Maven Central
     needs: check-release
     if: needs.check-release.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     env:
       ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
       ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
