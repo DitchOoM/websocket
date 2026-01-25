@@ -768,7 +768,7 @@ class DefaultWebSocketClient(
         if (!hasServerInitiatedClose) {
             sendCloseFrame()
         }
-        scope.cancel()
+        job.cancel()
     }
 
     suspend fun cleanupResources() {

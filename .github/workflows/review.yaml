@@ -10,6 +10,7 @@ jobs:
   jvm-js-tests:
     name: "JVM/JS Tests"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -28,6 +29,7 @@ jobs:
   apple-tests:
     name: "Apple Target Tests"
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -49,6 +51,7 @@ jobs:
   integration-tests:
     name: "Integration Tests (Autobahn)"
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
