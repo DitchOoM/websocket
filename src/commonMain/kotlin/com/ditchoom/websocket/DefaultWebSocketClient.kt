@@ -11,7 +11,6 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.buffer.toReadBuffer
-
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.allocate
@@ -94,7 +93,7 @@ class DefaultWebSocketClient(
                 }
             val deflateHeader =
                 if (connectionOptions.requestCompression) {
-                    "$HTTP_COMPRESSION_HEADER\r\n"
+                    HTTP_COMPRESSION_HEADER
                 } else {
                     ""
                 }
@@ -149,7 +148,10 @@ class DefaultWebSocketClient(
                         "websockets. Response:\r\n$response",
                 )
             }
-            if (response.contains(HTTP_COMPRESSION_HEADER, ignoreCase = true)) {
+            if (connectionOptions.requestCompression &&
+                response.contains("Sec-WebSocket-Extensions:", ignoreCase = true) &&
+                response.contains("permessage-deflate", ignoreCase = true)
+            ) {
                 enableCompression = true
             }
             connectionStateFlow.value = ConnectionState.Connected
