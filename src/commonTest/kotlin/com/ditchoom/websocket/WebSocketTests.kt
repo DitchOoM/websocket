@@ -20,7 +20,7 @@ class WebSocketTests {
     fun clientEchoString() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this)
             websocket.connect()
             websocket.connectionState.first { it is ConnectionState.Connected }
             val string1 = "test"
@@ -38,7 +38,7 @@ class WebSocketTests {
     fun clientEchoReadBuffer() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this)
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
             val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
@@ -53,7 +53,7 @@ class WebSocketTests {
     fun pingPongWorks() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this)
             websocket.connect()
             if (websocket.isPingSupported()) {
                 val payload = createPayload()
@@ -72,7 +72,7 @@ class WebSocketTests {
     fun allTypesWork() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this)
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
             val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary

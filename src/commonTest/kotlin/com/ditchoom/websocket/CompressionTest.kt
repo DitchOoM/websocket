@@ -16,7 +16,6 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.time.Duration.Companion.seconds
 
 class CompressionTest {
     private val pool = BufferPool(allocationZone = AllocationZone.Heap)
@@ -43,7 +42,7 @@ class CompressionTest {
 
     @Test // https://datatracker.ietf.org/doc/html/rfc7692#section-7.2.3.1
     fun inflateExample7_2_3_1_Unfragmented() =
-        runTest(timeout = 2.seconds) {
+        runTestNoTimeSkipping {
             val expectedBytes =
                 byteArrayOf(
                     0xc1.toByte(),
