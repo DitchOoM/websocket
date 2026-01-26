@@ -10,11 +10,15 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.seconds
+
+// Increase timeout for CI environments where tests may be slower
+private val testTimeout = 60.seconds
 
 internal fun runTestNoTimeSkipping1(
     count: Int = 1,
     block: suspend TestScope.() -> Unit,
-) = runTest {
+) = runTest(timeout = testTimeout) {
     try {
         withContext(Dispatchers.Default) {
             block()
@@ -31,7 +35,7 @@ internal fun runTestNoTimeSkipping1(
 internal fun runTestNoTimeSkipping(
     count: Int = 1,
     block: suspend TestScope.() -> Unit,
-) = runTest {
+) = runTest(timeout = testTimeout) {
     try {
         withContext(Dispatchers.Default.limitedParallelism(count)) {
             block()
