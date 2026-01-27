@@ -119,8 +119,11 @@ val integrationTestPatterns =
     listOf(
         "com.ditchoom.websocket.Autobahn*",
         "com.ditchoom.websocket.WebSocketTests",
-        "com.ditchoom.websocket.ProfilingTest",
     )
+
+// ProfilingTest is excluded from CI - it's a diagnostic tool for local profiling,
+// not a conformance test. Run manually with: ./gradlew jvmTest --tests "*ProfilingTest*"
+val profilingTestPattern = "com.ditchoom.websocket.ProfilingTest"
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
@@ -131,6 +134,10 @@ tasks.withType<Test>().configureEach {
         maxRetries.set(if (runIntegrationTests) 2 else 0)
         maxFailures.set(10)
         failOnPassedAfterRetry.set(false)
+    }
+    // Always exclude ProfilingTest from CI - run manually when needed
+    filter {
+        excludeTestsMatching(profilingTestPattern)
     }
     if (runIntegrationTests) {
         // Compression tests need more memory:
@@ -148,19 +155,21 @@ tasks.withType<Test>().configureEach {
 
 // Filter Kotlin/Native tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+    // Always exclude ProfilingTest from CI
+    this.filter.excludeTestsMatching(profilingTestPattern)
     if (!runIntegrationTests) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.ProfilingTest")
     }
 }
 
 // Filter Kotlin/JS tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
+    // Always exclude ProfilingTest from CI
+    this.filter.excludeTestsMatching(profilingTestPattern)
     if (!runIntegrationTests) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.ProfilingTest")
     }
 }
 
