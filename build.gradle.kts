@@ -127,7 +127,6 @@ val runIntegrationTests = project.hasProperty("integrationTests")
 // Filter JVM/Android tests and configure retries for flaky tests
 tasks.withType<Test>().configureEach {
     if (runIntegrationTests) {
-        maxHeapSize = "2g" // CI environment needs more memory for large payload tests
         // Retry flaky integration tests
         retry {
             maxRetries.set(2)
