@@ -126,13 +126,11 @@ val runIntegrationTests = project.hasProperty("integrationTests")
 
 // Filter JVM/Android tests and configure retries for flaky tests
 tasks.withType<Test>().configureEach {
-    if (runIntegrationTests) {
-        // Retry flaky integration tests
-        retry {
-            maxRetries.set(2)
-            maxFailures.set(10)
-            failOnPassedAfterRetry.set(false)
-        }
+    // Retry flaky tests - only for integration tests
+    retry {
+        maxRetries.set(if (runIntegrationTests) 2 else 0)
+        maxFailures.set(10)
+        failOnPassedAfterRetry.set(false)
     }
     if (!runIntegrationTests) {
         filter {

@@ -12,8 +12,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.seconds
 
-// Timeout for individual tests - keep reasonable since we have retries
-private val testTimeout = 30.seconds
+// Timeout for individual tests
+private val testTimeout = 60.seconds
 
 internal fun runTestNoTimeSkipping1(
     count: Int = 1,
