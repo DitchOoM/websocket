@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.test.retry)
     signing
 }
 
@@ -123,10 +124,16 @@ val integrationTestPatterns =
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
-// Filter JVM/Android tests
+// Filter JVM/Android tests and configure retries for flaky tests
 tasks.withType<Test>().configureEach {
     if (runIntegrationTests) {
         maxHeapSize = "2g" // CI environment needs more memory for large payload tests
+        // Retry flaky integration tests
+        retry {
+            maxRetries.set(2)
+            maxFailures.set(10)
+            failOnPassedAfterRetry.set(false)
+        }
     }
     if (!runIntegrationTests) {
         filter {

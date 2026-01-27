@@ -12,8 +12,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.seconds
 
-// Increase timeout for CI environments where tests may be slower
-private val testTimeout = 60.seconds
+// Timeout for individual tests - keep reasonable since we have retries
+private val testTimeout = 30.seconds
 
 internal fun runTestNoTimeSkipping1(
     count: Int = 1,
