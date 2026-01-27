@@ -65,7 +65,7 @@ class ProfilingTest {
             val memAfter = getUsedMemoryMB()
 
             ws.close()
-            withTimeoutOrNull(5.seconds) {
+            withTimeoutOrNull(10.seconds) {
                 ws.connectionState.first { it is ConnectionState.Disconnected }
             }
 
@@ -95,7 +95,7 @@ class ProfilingTest {
                 ws.connectionState.first { it is ConnectionState.Connected }
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
-                withTimeoutOrNull(5.seconds) {
+                withTimeoutOrNull(10.seconds) {
                     ws.connectionState.first { it is ConnectionState.Disconnected }
                 }
             }
@@ -244,7 +244,7 @@ class ProfilingTest {
         }
 
         ws.close()
-        withTimeoutOrNull(5.seconds) {
+        withTimeoutOrNull(10.seconds) {
             ws.connectionState.first { it is ConnectionState.Disconnected }
         }
 
