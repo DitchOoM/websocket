@@ -65,6 +65,9 @@ class ProfilingTest {
             val memAfter = getUsedMemoryMB()
 
             ws.close()
+            withTimeoutOrNull(5.seconds) {
+                ws.connectionState.first { it is ConnectionState.Disconnected }
+            }
 
             println(
                 "PROFILE [${agentName()}] memory_large_payload: " +
@@ -241,6 +244,9 @@ class ProfilingTest {
         }
 
         ws.close()
+        withTimeoutOrNull(5.seconds) {
+            ws.connectionState.first { it is ConnectionState.Disconnected }
+        }
 
         val totalRtMs = roundTripTimes.sum() / 1000
         val avgWriteUs = writeTimes.average().toLong()

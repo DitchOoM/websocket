@@ -132,7 +132,14 @@ tasks.withType<Test>().configureEach {
         maxFailures.set(10)
         failOnPassedAfterRetry.set(false)
     }
-    if (!runIntegrationTests) {
+    if (runIntegrationTests) {
+        // Compression tests need more memory:
+        // - CompressionTest.largeBuffer() allocates 32MB buffers (original + compressed + decompressed)
+        // - Autobahn case 9.5.x/9.6.x use 1MB payloads with compression
+        // - Each compression/decompression creates working buffers
+        // - Tests may run in parallel, multiplying memory usage
+        maxHeapSize = "2g"
+    } else {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
         }
