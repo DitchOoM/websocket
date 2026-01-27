@@ -9,7 +9,6 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
-    alias(libs.plugins.test.retry)
     signing
 }
 
@@ -127,14 +126,8 @@ val profilingTestPattern = "com.ditchoom.websocket.ProfilingTest"
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
-// Filter JVM/Android tests and configure retries for flaky tests
+// Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
-    // Retry flaky tests - only for integration tests
-    retry {
-        maxRetries.set(if (runIntegrationTests) 2 else 0)
-        maxFailures.set(10)
-        failOnPassedAfterRetry.set(false)
-    }
     // Always exclude ProfilingTest from CI - run manually when needed
     filter {
         excludeTestsMatching(profilingTestPattern)

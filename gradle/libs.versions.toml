@@ -4,7 +4,6 @@ kotlin = "2.3.0"
 androidGradlePlugin = "8.13.2"
 ktlint = "14.0.1"
 mavenPublish = "0.35.0"
-testRetry = "1.6.4"
 kotlinxCoroutines = "1.10.2"
 kotlinWrappers = "2025.12.6"
 kotlinxBenchmark = "0.4.15"
@@ -38,4 +37,3 @@ kotlinx-benchmark = { id = "org.jetbrains.kotlinx.benchmark", version.ref = "kot
 android-library = { id = "com.android.library", version.ref = "androidGradlePlugin" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
-test-retry = { id = "org.gradle.test-retry", version.ref = "testRetry" }
