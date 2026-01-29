@@ -6,6 +6,12 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.compression.BufferAllocator
+import com.ditchoom.buffer.compression.CompressionAlgorithm
+import com.ditchoom.buffer.compression.CompressionLevel
+import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
+import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
+import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
@@ -13,6 +19,7 @@ import com.ditchoom.buffer.stream.builder
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
+import com.ditchoom.socket.SocketException
 import com.ditchoom.socket.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -58,6 +65,8 @@ class DefaultWebSocketClient(
     override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
     val outgoingMessages = Channel<WebSocketMessage>()
     internal var enableCompression = false
+    private var outgoingCompressor: SuspendingStreamingCompressor? = null
+    private var incomingDecompressor: SuspendingStreamingDecompressor? = null
 
     fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
 
@@ -153,6 +162,15 @@ class DefaultWebSocketClient(
                 response.contains("permessage-deflate", ignoreCase = true)
             ) {
                 enableCompression = true
+                outgoingCompressor = SuspendingStreamingCompressor.create(
+                    CompressionAlgorithm.Raw,
+                    CompressionLevel.Default,
+                    BufferAllocator.Heap,
+                )
+                incomingDecompressor = SuspendingStreamingDecompressor.create(
+                    CompressionAlgorithm.Raw,
+                    BufferAllocator.Direct,
+                )
             }
             connectionStateFlow.value = ConnectionState.Connected
             processIncomingMessages(streamProcessor)
@@ -243,7 +261,10 @@ class DefaultWebSocketClient(
     ): Int =
         try {
             val frame = Frame(true, opcode, MaskingKey.FourByteMaskingKey(), payloadData)
-            val frameBuffer = frame.toBuffer(attemptDeflate = enableCompression)
+            val frameBuffer = frame.toBuffer(
+                attemptDeflate = enableCompression,
+                compressor = outgoingCompressor,
+            )
             frameBuffer.resetForRead()
             val remainingBytes = frameBuffer.remaining()
             while (frameBuffer.hasRemaining()) {
@@ -315,9 +336,14 @@ class DefaultWebSocketClient(
                             try {
                                 val utf8StringRead =
                                     if (firstFrame.rsv1 && enableCompression) {
-                                        payload.decompressWebsocketBuffer().let {
-                                            it.readString(it.remaining())
+                                        val decompressed = if (incomingDecompressor != null) {
+                                            val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                            incomingDecompressor!!.reset()
+                                            combineChunks(chunks, AllocationZone.Direct)
+                                        } else {
+                                            payload.decompressWebsocketBuffer()
                                         }
+                                        decompressed.readString(decompressed.remaining())
                                     } else {
                                         payload.readString(payload.remaining())
                                     }
@@ -328,15 +354,18 @@ class DefaultWebSocketClient(
                             }
                         }
                         Opcode.Binary -> {
-                            incomingMessageSharedFlow.emit(
-                                WebSocketMessage.Binary(
-                                    if (firstFrame.rsv1 && enableCompression) {
-                                        payload.decompressWebsocketBuffer()
-                                    } else {
-                                        payload
-                                    },
-                                ),
-                            )
+                            val binaryPayload = if (firstFrame.rsv1 && enableCompression) {
+                                if (incomingDecompressor != null) {
+                                    val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                    incomingDecompressor!!.reset()
+                                    combineChunks(chunks, AllocationZone.Direct)
+                                } else {
+                                    payload.decompressWebsocketBuffer()
+                                }
+                            } else {
+                                payload
+                            }
+                            incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
                         }
                         else -> {
                             sendCloseFrame(1002u, "Invalid opcode for frame")
@@ -347,6 +376,13 @@ class DefaultWebSocketClient(
             } catch (e: SocketClosedException) {
                 // SocketClosedException is expected when the connection is closed
                 // Don't treat as error if we're already closing or server initiated close
+                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
+                    connectionStateFlow.value = ConnectionState.Disconnected(e)
+                } else {
+                    connectionStateFlow.value = ConnectionState.Disconnected(null)
+                }
+            } catch (e: SocketException) {
+                // SocketException (connection reset, etc.) is expected when the connection is closed
                 if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
                     connectionStateFlow.value = ConnectionState.Disconnected(e)
                 } else {
@@ -416,9 +452,14 @@ class DefaultWebSocketClient(
                         try {
                             val utf8StringRead =
                                 if (firstFrame.rsv1 && enableCompression) {
-                                    payload.decompressWebsocketBuffer().let {
-                                        it.readString(it.remaining())
+                                    val decompressed = if (incomingDecompressor != null) {
+                                        val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                        incomingDecompressor!!.reset()
+                                        combineChunks(chunks, AllocationZone.Direct)
+                                    } else {
+                                        payload.decompressWebsocketBuffer()
                                     }
+                                    decompressed.readString(decompressed.remaining())
                                 } else {
                                     payload.readString(payload.remaining())
                                 }
@@ -429,15 +470,18 @@ class DefaultWebSocketClient(
                         }
                     }
                     Opcode.Binary -> {
-                        incomingMessageSharedFlow.emit(
-                            WebSocketMessage.Binary(
-                                if (firstFrame.rsv1 && enableCompression) {
-                                    payload.decompressWebsocketBuffer()
-                                } else {
-                                    payload
-                                },
-                            ),
-                        )
+                        val binaryPayload = if (firstFrame.rsv1 && enableCompression) {
+                            if (incomingDecompressor != null) {
+                                val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                incomingDecompressor!!.reset()
+                                combineChunks(chunks, AllocationZone.Direct)
+                            } else {
+                                payload.decompressWebsocketBuffer()
+                            }
+                        } else {
+                            payload
+                        }
+                        incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
                     }
                     else -> {
                         sendCloseFrame(1002u, "Invalid opcode for frame")
@@ -447,6 +491,13 @@ class DefaultWebSocketClient(
             }
         } catch (e: SocketClosedException) {
             // SocketClosedException is expected when the connection is closed
+            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
+                connectionStateFlow.value = ConnectionState.Disconnected(e)
+            } else {
+                connectionStateFlow.value = ConnectionState.Disconnected(null)
+            }
+        } catch (e: SocketException) {
+            // SocketException (connection reset, etc.) is expected when the connection is closed
             if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
                 connectionStateFlow.value = ConnectionState.Disconnected(e)
             } else {
@@ -621,6 +672,14 @@ class DefaultWebSocketClient(
                 connectionStateFlow.value = ConnectionState.Disconnected(null)
             }
             return null
+        } catch (e: SocketException) {
+            // SocketException (connection reset, etc.) is expected when the server closes
+            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
+                connectionStateFlow.value = ConnectionState.Disconnected(e)
+            } else {
+                connectionStateFlow.value = ConnectionState.Disconnected(null)
+            }
+            return null
         } catch (e: Exception) {
             connectionStateFlow.value = ConnectionState.Disconnected(e)
             return null
@@ -742,6 +801,14 @@ class DefaultWebSocketClient(
                 connectionStateFlow.value = ConnectionState.Disconnected(null)
             }
             return null
+        } catch (e: SocketException) {
+            // SocketException (connection reset, etc.) is expected when the server closes
+            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
+                connectionStateFlow.value = ConnectionState.Disconnected(e)
+            } else {
+                connectionStateFlow.value = ConnectionState.Disconnected(null)
+            }
+            return null
         } catch (e: Exception) {
             connectionStateFlow.value = ConnectionState.Disconnected(e)
             return null
@@ -777,6 +844,10 @@ class DefaultWebSocketClient(
     suspend fun cleanupResources() {
         outgoingMessages.close()
         socket.close()
+        outgoingCompressor?.close()
+        outgoingCompressor = null
+        incomingDecompressor?.close()
+        incomingDecompressor = null
     }
 
     private fun isValidServerCloseCode(code: UShort): Boolean =
