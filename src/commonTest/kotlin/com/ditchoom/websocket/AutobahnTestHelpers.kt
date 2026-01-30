@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlin.random.Random
 
+private val testImplementation = WebSocketImplementation.MODULAR
+
 internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
@@ -29,6 +31,7 @@ internal suspend fun CoroutineScope.prepareConnection(
             connectionOptions,
             AllocationZone.Direct,
             this + CoroutineName(case.toString()),
+            testImplementation,
         )
     websocket.connect()
     websocket.connectionState.first { it is ConnectionState.Connected }
@@ -53,6 +56,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             connectionOptions,
             zone,
             this,
+            testImplementation,
         )
     ws.scope.launch {
         ws.connect()
@@ -92,6 +96,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             connectionOptions,
             zone,
             this + CoroutineName(case.toString()),
+            testImplementation,
         )
     ws.scope.launch {
         ws.connect()
@@ -129,6 +134,7 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
             connectionOptions,
             AllocationZone.Direct,
             this + CoroutineName(case.toString()),
+            testImplementation,
         )
     ws.scope.launch {
         ws.connect()
