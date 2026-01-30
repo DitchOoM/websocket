@@ -22,10 +22,19 @@ import com.ditchoom.buffer.toReadBuffer
  *
  * The parser uses [ReadBuffer.slice] to extract header values without copying data.
  * String conversion only happens at the final stage when values are needed.
+ *
+ * ## Performance Optimizations
+ *
+ * - Uses buffer's SIMD-accelerated `indexOf(Byte)` for pattern searching
+ * - Uses `readString()` with position/limit manipulation for zero-copy string extraction
+ * - Pre-computed byte constants avoid repeated conversions
  */
 object HandshakeResponseParser {
     // Pre-allocated marker buffers for pattern matching
     private val HEADER_END = "\r\n\r\n".toReadBuffer(Charset.UTF8)
+
+    // Pre-computed HTTP version prefix for fast comparison
+    private const val HTTP_1_PREFIX = "HTTP/1."
 
     // Expected values
     private val EXTENSION_PERMESSAGE_DEFLATE = "permessage-deflate"
@@ -73,8 +82,9 @@ object HandshakeResponseParser {
                 }
 
                 // Parse header line
-                val result = parseHeaderLine(buffer, pos)
-                    ?: throw HandshakeException("Malformed header at position $pos")
+                val result =
+                    parseHeaderLine(buffer, pos)
+                        ?: throw HandshakeException("Malformed header at position $pos")
 
                 val (name, value, newPos) = result
                 pos = newPos
@@ -136,7 +146,10 @@ object HandshakeResponseParser {
      *
      * @return Triple of (statusCode, reasonPhrase, nextPosition)
      */
-    private fun parseStatusLine(buffer: ReadBuffer, startPos: Int): Triple<Int, String, Int> {
+    private fun parseStatusLine(
+        buffer: ReadBuffer,
+        startPos: Int,
+    ): Triple<Int, String, Int> {
         // Find end of line
         val lineEnd = findCRLF(buffer, startPos)
         if (lineEnd < 0) {
@@ -150,23 +163,36 @@ object HandshakeResponseParser {
             throw HandshakeException("Status line too short")
         }
 
-        // Verify HTTP version prefix (we only check "HTTP/1.")
-        if (buffer.get(startPos) != 'H'.code.toByte() ||
-            buffer.get(startPos + 1) != 'T'.code.toByte() ||
-            buffer.get(startPos + 2) != 'T'.code.toByte() ||
-            buffer.get(startPos + 3) != 'P'.code.toByte() ||
-            buffer.get(startPos + 4) != '/'.code.toByte() ||
-            buffer.get(startPos + 5) != '1'.code.toByte() ||
-            buffer.get(startPos + 6) != '.'.code.toByte()
-        ) {
+        // Verify HTTP version prefix using bulk string comparison
+        // This uses readString which is optimized for bulk reads
+        val savedPos = buffer.position()
+        val savedLimit = buffer.limit()
+
+        buffer.position(startPos)
+        if (buffer.remaining() < HTTP_1_PREFIX.length) {
+            buffer.position(savedPos)
+            buffer.setLimit(savedLimit)
+            throw HandshakeException("Status line too short for HTTP version")
+        }
+        val versionStr = buffer.readString(HTTP_1_PREFIX.length, Charset.UTF8)
+        if (versionStr != HTTP_1_PREFIX) {
+            buffer.position(savedPos)
+            buffer.setLimit(savedLimit)
             throw HandshakeException("Invalid HTTP version")
         }
 
+        buffer.position(savedPos)
+        buffer.setLimit(savedLimit)
+
         // Find first space after version (position 8+ after "HTTP/1.X")
-        var spaceIdx = startPos + 8
-        while (spaceIdx < lineEnd && buffer.get(spaceIdx) != SPACE) {
-            spaceIdx++
-        }
+        // Use SIMD-accelerated indexOf for space search
+        buffer.position(startPos + 8)
+        buffer.setLimit(lineEnd)
+        val spaceOffset = buffer.indexOf(SPACE)
+        buffer.position(savedPos)
+        buffer.setLimit(savedLimit)
+
+        val spaceIdx = if (spaceOffset >= 0) startPos + 8 + spaceOffset else lineEnd
         if (spaceIdx >= lineEnd) {
             throw HandshakeException("Missing status code in status line")
         }
@@ -177,20 +203,22 @@ object HandshakeResponseParser {
             throw HandshakeException("Status code too short")
         }
 
-        val statusCode = parseDigits(buffer, codeStart, 3)
-            ?: throw HandshakeException("Invalid status code")
+        val statusCode =
+            parseDigits(buffer, codeStart, 3)
+                ?: throw HandshakeException("Invalid status code")
 
         // Extract reason phrase (everything after status code + space)
         val reasonStart = codeStart + 3
-        val statusReason = if (reasonStart < lineEnd && buffer.get(reasonStart) == SPACE) {
-            // Skip space and read reason
-            extractString(buffer, reasonStart + 1, lineEnd)
-        } else if (reasonStart < lineEnd) {
-            // No space, but there's content (unusual but handle it)
-            extractString(buffer, reasonStart, lineEnd)
-        } else {
-            ""
-        }
+        val statusReason =
+            if (reasonStart < lineEnd && buffer.get(reasonStart) == SPACE) {
+                // Skip space and read reason
+                extractString(buffer, reasonStart + 1, lineEnd)
+            } else if (reasonStart < lineEnd) {
+                // No space, but there's content (unusual but handle it)
+                extractString(buffer, reasonStart, lineEnd)
+            } else {
+                ""
+            }
 
         // Return position after CRLF
         return Triple(statusCode, statusReason, lineEnd + 2)
@@ -204,15 +232,25 @@ object HandshakeResponseParser {
      *
      * @return Triple of (headerName, headerValue, nextPosition) or null if malformed
      */
-    private fun parseHeaderLine(buffer: ReadBuffer, startPos: Int): Triple<String, String, Int>? {
+    private fun parseHeaderLine(
+        buffer: ReadBuffer,
+        startPos: Int,
+    ): Triple<String, String, Int>? {
         val lineEnd = findCRLF(buffer, startPos)
         if (lineEnd < 0) return null
 
-        // Find colon separator
-        var colonIdx = startPos
-        while (colonIdx < lineEnd && buffer.get(colonIdx) != COLON) {
-            colonIdx++
-        }
+        // Save buffer state
+        val savedPos = buffer.position()
+        val savedLimit = buffer.limit()
+
+        // Find colon separator using SIMD-accelerated indexOf
+        buffer.position(startPos)
+        buffer.setLimit(lineEnd)
+        val colonOffset = buffer.indexOf(COLON)
+        buffer.position(savedPos)
+        buffer.setLimit(savedLimit)
+
+        val colonIdx = if (colonOffset >= 0) startPos + colonOffset else lineEnd
         if (colonIdx >= lineEnd) return null
 
         // Extract header name
@@ -240,28 +278,83 @@ object HandshakeResponseParser {
     /**
      * Extracts a string from buffer without modifying buffer position.
      * This is the only place where we convert bytes to String.
+     *
+     * Uses buffer's optimized position/limit manipulation and bulk readString()
+     * for zero-copy string extraction when possible.
      */
-    private fun extractString(buffer: ReadBuffer, start: Int, end: Int): String {
+    private fun extractString(
+        buffer: ReadBuffer,
+        start: Int,
+        end: Int,
+    ): String {
         if (start >= end) return ""
         val length = end - start
-        val bytes = ByteArray(length)
-        for (i in 0 until length) {
-            bytes[i] = buffer.get(start + i)
-        }
-        return bytes.decodeToString()
+
+        // Save current buffer state
+        val savedPos = buffer.position()
+        val savedLimit = buffer.limit()
+
+        // Position buffer at the slice we want to read
+        buffer.position(start)
+        buffer.setLimit(end)
+
+        // Use bulk readString - internally optimized with SIMD on supported platforms
+        val result = buffer.readString(length, Charset.UTF8)
+
+        // Restore buffer state
+        buffer.position(savedPos)
+        buffer.setLimit(savedLimit)
+
+        return result
     }
 
     /**
      * Finds CRLF starting from the given position.
+     *
+     * Uses buffer's SIMD-accelerated indexOf(Byte) to find CR bytes,
+     * then verifies LF follows. This is significantly faster than
+     * byte-by-byte iteration for longer buffers.
+     *
      * @return Position of CR, or -1 if not found
      */
-    private fun findCRLF(buffer: ReadBuffer, startPos: Int): Int {
+    private fun findCRLF(
+        buffer: ReadBuffer,
+        startPos: Int,
+    ): Int {
+        val savedPos = buffer.position()
+        val savedLimit = buffer.limit()
         val limit = buffer.limit()
-        for (i in startPos until limit - 1) {
-            if (buffer.get(i) == CR && buffer.get(i + 1) == LF) {
-                return i
+
+        var searchPos = startPos
+        while (searchPos < limit - 1) {
+            // Position buffer for indexOf search
+            buffer.position(searchPos)
+
+            // Use SIMD-accelerated indexOf to find CR byte
+            val crOffset = buffer.indexOf(CR)
+
+            if (crOffset < 0) {
+                // No CR found in remaining buffer
+                buffer.position(savedPos)
+                buffer.setLimit(savedLimit)
+                return -1
             }
+
+            val crPos = searchPos + crOffset
+
+            // Check if there's room for LF and verify it follows
+            if (crPos + 1 < limit && buffer.get(crPos + 1) == LF) {
+                buffer.position(savedPos)
+                buffer.setLimit(savedLimit)
+                return crPos
+            }
+
+            // CR not followed by LF, continue searching after this CR
+            searchPos = crPos + 1
         }
+
+        buffer.position(savedPos)
+        buffer.setLimit(savedLimit)
         return -1
     }
 
@@ -332,7 +425,11 @@ object HandshakeResponseParser {
     /**
      * Parses decimal digits from buffer without string allocation.
      */
-    private fun parseDigits(buffer: ReadBuffer, start: Int, count: Int): Int? {
+    private fun parseDigits(
+        buffer: ReadBuffer,
+        start: Int,
+        count: Int,
+    ): Int? {
         var result = 0
         for (i in 0 until count) {
             val b = buffer.get(start + i)

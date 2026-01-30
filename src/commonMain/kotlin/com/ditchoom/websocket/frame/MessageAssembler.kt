@@ -80,7 +80,7 @@ class MessageAssembler {
         if (!frame.fin) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
-                "Control frame must have FIN set"
+                "Control frame must have FIN set",
             )
         }
 
@@ -88,30 +88,33 @@ class MessageAssembler {
         if (frame.payloadLength > 125) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
-                "Control frame payload exceeds 125 bytes"
+                "Control frame payload exceeds 125 bytes",
             )
         }
 
         return AssemblyResult.ControlFrame(frame)
     }
 
-    private fun handleDataFrame(frame: ParsedFrame): AssemblyResult {
-        return when (frame.opcode) {
-            Opcode.Text, Opcode.Binary -> handleFirstFragment(frame)
-            Opcode.Continuation -> handleContinuation(frame)
-            else -> AssemblyResult.Error(
-                CloseCode.PROTOCOL_ERROR,
-                "Unexpected opcode: ${frame.opcode}"
-            )
+    private fun handleDataFrame(frame: ParsedFrame): AssemblyResult =
+        when (frame) {
+            is ParsedFrame.DataFrame.Text -> handleFirstFragment(frame)
+            is ParsedFrame.DataFrame.Binary -> handleFirstFragment(frame)
+            is ParsedFrame.DataFrame.Continuation -> handleContinuation(frame)
+            is ParsedFrame.ControlFrame -> {
+                // Should not reach here - control frames handled separately
+                AssemblyResult.Error(
+                    CloseCode.PROTOCOL_ERROR,
+                    "Unexpected control frame in data frame handler",
+                )
+            }
         }
-    }
 
     private fun handleFirstFragment(frame: ParsedFrame): AssemblyResult {
         // RFC 6455 Section 5.4: Cannot start new message while one is in progress
         if (isFragmentInProgress) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
-                "Received new message while fragment in progress"
+                "Received new message while fragment in progress",
             )
         }
 
@@ -122,7 +125,7 @@ class MessageAssembler {
                     opcode = frame.opcode,
                     payload = frame.payload,
                     compressed = frame.rsv1,
-                )
+                ),
             )
         }
 
@@ -140,7 +143,7 @@ class MessageAssembler {
         if (!isFragmentInProgress) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
-                "Received continuation frame without starting fragment"
+                "Received continuation frame without starting fragment",
             )
         }
 
@@ -158,11 +161,12 @@ class MessageAssembler {
     }
 
     private fun assembleMessage(): AssembledMessage {
-        val payload = when {
-            fragmentBuffers.size == 1 -> fragmentBuffers[0]
-            totalPayloadSize == 0 -> EMPTY_BUFFER
-            else -> combineBuffers()
-        }
+        val payload =
+            when {
+                fragmentBuffers.size == 1 -> fragmentBuffers[0]
+                totalPayloadSize == 0 -> EMPTY_BUFFER
+                else -> combineBuffers()
+            }
 
         return AssembledMessage(
             opcode = firstFrameOpcode!!,
@@ -190,12 +194,16 @@ sealed interface AssemblyResult {
      * A control frame was received. Handle it immediately.
      * Control frames can be interspersed between data frame fragments.
      */
-    data class ControlFrame(val frame: ParsedFrame) : AssemblyResult
+    data class ControlFrame(
+        val frame: ParsedFrame,
+    ) : AssemblyResult
 
     /**
      * A complete message has been assembled.
      */
-    data class CompleteMessage(val message: AssembledMessage) : AssemblyResult
+    data class CompleteMessage(
+        val message: AssembledMessage,
+    ) : AssemblyResult
 
     /**
      * More frames are needed to complete the message.
@@ -205,7 +213,10 @@ sealed interface AssemblyResult {
     /**
      * A protocol error occurred.
      */
-    data class Error(val code: CloseCode, val reason: String) : AssemblyResult
+    data class Error(
+        val code: CloseCode,
+        val reason: String,
+    ) : AssemblyResult
 }
 
 /**
@@ -224,26 +235,61 @@ data class AssembledMessage(
 /**
  * WebSocket close status codes per RFC 6455 Section 7.4.1.
  * https://datatracker.ietf.org/doc/html/rfc6455#section-7.4.1
+ *
+ * This value class provides zero-allocation overhead for close code handling.
  */
 @JvmInline
-value class CloseCode(val code: UShort) {
+value class CloseCode(
+    val code: UShort,
+) {
+    /**
+     * Whether a close code is actually present in the close frame.
+     * Per RFC 6455, status code 1005 (NO_STATUS_RECEIVED) indicates no code was present.
+     */
+    val isPresent: Boolean get() = code != 1005u.toUShort()
+
+    /**
+     * Whether this is a valid close code per RFC 6455 Section 7.4.1.
+     * Valid codes are: 1000-1003, 1007-1011, 3000-3999, 4000-4999.
+     */
+    val isValid: Boolean
+        get() =
+            code in 1000u..1003u ||
+                code in 1007u..1011u ||
+                code in 3000u..3999u ||
+                code in 4000u..4999u
+
     companion object {
         /** 1000 - Normal closure */
         val NORMAL = CloseCode(1000u)
+
         /** 1001 - Endpoint going away */
         val GOING_AWAY = CloseCode(1001u)
+
         /** 1002 - Protocol error */
         val PROTOCOL_ERROR = CloseCode(1002u)
+
         /** 1003 - Unsupported data type */
         val UNSUPPORTED_DATA = CloseCode(1003u)
+
+        /**
+         * 1005 - No status received. Per RFC 6455, this status code is used internally
+         * and MUST NOT be sent on the wire. Indicates no close code was present in the frame.
+         */
+        val NO_STATUS_RECEIVED = CloseCode(1005u)
+
         /** 1007 - Invalid payload data (e.g., non-UTF-8 in text message) */
         val INVALID_PAYLOAD = CloseCode(1007u)
+
         /** 1008 - Policy violation */
         val POLICY_VIOLATION = CloseCode(1008u)
+
         /** 1009 - Message too big */
         val MESSAGE_TOO_BIG = CloseCode(1009u)
-        /** 1010 - Missing expected extension */
+
+        /** 1010 - Missing expected extension (also known as MANDATORY_EXTENSION) */
         val MISSING_EXTENSION = CloseCode(1010u)
+
         /** 1011 - Internal server error */
         val INTERNAL_ERROR = CloseCode(1011u)
     }

@@ -1,5 +1,6 @@
 package com.ditchoom.websocket.frame
 
+import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
@@ -12,17 +13,34 @@ import kotlin.jvm.JvmInline
 /**
  * Packed representation of frame header byte 1.
  * Zero-allocation access to FIN, RSV1-3, and opcode fields.
+ *
+ * Per RFC 6455 Section 5.2:
+ * ```
+ *  0 1 2 3 4 5 6 7
+ * +-+-+-+-+-------+
+ * |F|R|R|R| opcode|
+ * |I|S|S|S|  (4)  |
+ * |N|V|V|V|       |
+ * | |1|2|3|       |
+ * +-+-+-+-+-------+
+ * ```
  */
 @JvmInline
-internal value class FrameHeaderByte1(val packed: Int) {
+value class FrameHeaderByte1(
+    val packed: Int,
+) {
     /** FIN bit - indicates final fragment */
     inline val fin: Boolean get() = (packed and 0x80) != 0
+
     /** RSV1 bit - used by extensions (e.g., compression) */
     inline val rsv1: Boolean get() = (packed and 0x40) != 0
+
     /** RSV2 bit - reserved */
     inline val rsv2: Boolean get() = (packed and 0x20) != 0
+
     /** RSV3 bit - reserved */
     inline val rsv3: Boolean get() = (packed and 0x10) != 0
+
     /** Frame opcode */
     inline val opcode: Opcode get() = Opcode.fromInt(packed and 0x0F)
 }
@@ -30,11 +48,25 @@ internal value class FrameHeaderByte1(val packed: Int) {
 /**
  * Packed representation of frame header byte 2.
  * Zero-allocation access to MASK and payload length fields.
+ *
+ * Per RFC 6455 Section 5.2:
+ * ```
+ *  0 1 2 3 4 5 6 7
+ * +-+-------------+
+ * |M| Payload len |
+ * |A|     (7)     |
+ * |S|             |
+ * |K|             |
+ * +-+-------------+
+ * ```
  */
 @JvmInline
-internal value class FrameHeaderByte2(val packed: Int) {
+value class FrameHeaderByte2(
+    val packed: Int,
+) {
     /** MASK bit - indicates payload is masked */
     inline val masked: Boolean get() = (packed and 0x80) != 0
+
     /** 7-bit payload length (may indicate extended length follows) */
     inline val payloadLen7: Int get() = packed and 0x7F
 }
@@ -100,8 +132,9 @@ class FrameReader(
         val header2 = FrameHeaderByte2(headerShort and 0xFF)
 
         // Calculate header size and actual payload length
-        val (headerSize, payloadLength) = calculateLengths(header2.payloadLen7, header2.masked)
-            ?: return null // Not enough data for extended length
+        val (headerSize, payloadLength) =
+            calculateLengths(header2.payloadLen7, header2.masked)
+                ?: return null // Not enough data for extended length
 
         // Check if we have the complete frame
         val totalFrameSize = headerSize + payloadLength
@@ -111,101 +144,149 @@ class FrameReader(
         processor.skip(2) // Skip first two bytes we already peeked
 
         // Read extended payload length if present
-        val actualPayloadLength = when (header2.payloadLen7) {
-            126 -> {
-                processor.readShort().toInt() and 0xFFFF
-            }
-            127 -> {
-                val len64 = processor.readLong()
-                // RFC 6455 Section 5.2: "the most significant bit MUST be 0"
-                if (len64 < 0) {
-                    throw FrameParseException("Invalid payload length: MSB must be 0")
+        val actualPayloadLength =
+            when (header2.payloadLen7) {
+                126 -> {
+                    processor.readShort().toInt() and 0xFFFF
                 }
-                // For practical purposes, limit to Int.MAX_VALUE
-                if (len64 > Int.MAX_VALUE) {
-                    throw FrameParseException("Payload too large: $len64")
+                127 -> {
+                    val len64 = processor.readLong()
+                    // RFC 6455 Section 5.2: "the most significant bit MUST be 0"
+                    if (len64 < 0) {
+                        throw FrameParseException("Invalid payload length: MSB must be 0")
+                    }
+                    // For practical purposes, limit to Int.MAX_VALUE
+                    if (len64 > Int.MAX_VALUE) {
+                        throw FrameParseException("Payload too large: $len64")
+                    }
+                    len64.toInt()
                 }
-                len64.toInt()
+                else -> header2.payloadLen7
             }
-            else -> header2.payloadLen7
-        }
 
         // Read masking key if present
-        val maskingKey = if (header2.masked) {
-            MaskingKey.FourByteMaskingKey(processor.readInt())
-        } else {
-            MaskingKey.NoMaskingKey
-        }
+        val maskingKey =
+            if (header2.masked) {
+                MaskingKey.FourByteMaskingKey(processor.readInt())
+            } else {
+                MaskingKey.NoMaskingKey
+            }
 
         // Read payload data (zero-copy when possible via processor.readBuffer)
-        val payload = if (actualPayloadLength > 0) {
-            val buffer = processor.readBuffer(actualPayloadLength)
-            // Unmask if needed (note: servers never send masked frames per RFC 6455)
-            if (maskingKey is MaskingKey.FourByteMaskingKey) {
-                // Try in-place modification if buffer is writable, otherwise copy
-                val writableBuffer = if (buffer is ReadWriteBuffer) {
-                    buffer
+        val payload =
+            if (actualPayloadLength > 0) {
+                val buffer = processor.readBuffer(actualPayloadLength)
+                // Unmask if needed (note: servers never send masked frames per RFC 6455)
+                if (maskingKey is MaskingKey.FourByteMaskingKey) {
+                    // Try in-place modification if buffer is writable, otherwise copy
+                    val writableBuffer =
+                        if (buffer is ReadWriteBuffer) {
+                            buffer
+                        } else {
+                            // Fallback: copy to writable buffer
+                            val copy = PlatformBuffer.allocate(actualPayloadLength)
+                            copy.write(buffer)
+                            copy
+                        }
+                    // Apply SIMD-optimized XOR mask in-place
+                    writableBuffer.position(0)
+                    writableBuffer.setLimit(actualPayloadLength)
+                    writableBuffer.xorMask(maskingKey.packed)
+                    writableBuffer.position(0)
+                    writableBuffer
                 } else {
-                    // Fallback: copy to writable buffer
-                    val copy = PlatformBuffer.allocate(actualPayloadLength)
-                    copy.write(buffer)
-                    copy
+                    buffer
                 }
-                // Apply SIMD-optimized XOR mask in-place
-                writableBuffer.position(0)
-                writableBuffer.setLimit(actualPayloadLength)
-                writableBuffer.xorMask(maskingKey.packed)
-                writableBuffer.position(0)
-                writableBuffer
             } else {
-                buffer
+                ReadBuffer.EMPTY_BUFFER
             }
-        } else {
-            ReadBuffer.EMPTY_BUFFER
-        }
 
-        return ParsedFrame(
-            fin = header1.fin,
-            rsv1 = header1.rsv1,
-            rsv2 = header1.rsv2,
-            rsv3 = header1.rsv3,
-            opcode = header1.opcode,
-            masked = header2.masked,
-            payloadLength = actualPayloadLength,
-            payload = payload,
-        )
+        // Construct the appropriate concrete frame type based on opcode
+        return when (header1.opcode) {
+            Opcode.Text -> ParsedFrame.DataFrame.Text(header1, header2, actualPayloadLength, payload)
+            Opcode.Binary -> ParsedFrame.DataFrame.Binary(header1, header2, actualPayloadLength, payload)
+            Opcode.Continuation -> ParsedFrame.DataFrame.Continuation(header1, header2, actualPayloadLength, payload)
+            Opcode.Ping -> ParsedFrame.ControlFrame.Ping(header1, header2, actualPayloadLength, payload)
+            Opcode.Pong -> ParsedFrame.ControlFrame.Pong(header1, header2, actualPayloadLength, payload)
+            Opcode.Close -> {
+                // Parse close code and reason from payload
+                val (closeCode, closeReason) = parseClosePayloadInternal(payload, actualPayloadLength)
+                ParsedFrame.ControlFrame.Close(header1, header2, actualPayloadLength, payload, closeCode, closeReason)
+            }
+            else -> {
+                // Reserved opcodes - treat as binary (will be rejected by protocol validation)
+                ParsedFrame.DataFrame.Binary(header1, header2, actualPayloadLength, payload)
+            }
+        }
     }
 
+    /**
+     * Internal close payload parser for FrameReader.
+     */
+    private fun parseClosePayloadInternal(
+        payload: ReadBuffer,
+        payloadLength: Int,
+    ): Pair<CloseCode, String> {
+        if (payloadLength == 0) {
+            return CloseCode.NO_STATUS_RECEIVED to ""
+        }
+
+        val savedPos = payload.position()
+
+        if (payloadLength == 1) {
+            payload.position(savedPos)
+            return CloseCode.PROTOCOL_ERROR to "Invalid close payload length"
+        }
+
+        val code = CloseCode(payload.readUnsignedShort())
+        val reason =
+            if (payload.hasRemaining()) {
+                try {
+                    payload.readString(payload.remaining(), Charset.UTF8)
+                } catch (e: Exception) {
+                    ""
+                }
+            } else {
+                ""
+            }
+
+        payload.position(savedPos)
+        return code to reason
+    }
 
     /**
      * Calculates header size and payload length based on the 7-bit length field.
      *
      * @return Pair of (headerSize, payloadLength) or null if not enough data
      */
-    private suspend fun calculateLengths(payloadLen7: Int, masked: Boolean): Pair<Int, Int>? {
+    private suspend fun calculateLengths(
+        payloadLen7: Int,
+        masked: Boolean,
+    ): Pair<Int, Int>? {
         // Base header is 2 bytes
         var headerSize = 2
 
         // Extended payload length
-        val payloadLength = when (payloadLen7) {
-            126 -> {
-                // Need 2 more bytes for 16-bit length
-                if (processor.available() < 4) return null
-                headerSize += 2
-                (processor.peekShort(2).toInt() and 0xFFFF)
-            }
-            127 -> {
-                // Need 8 more bytes for 64-bit length
-                if (processor.available() < 10) return null
-                headerSize += 8
-                val len64 = processor.peekLong(2)
-                if (len64 > Int.MAX_VALUE || len64 < 0) {
-                    throw FrameParseException("Payload length out of range: $len64")
+        val payloadLength =
+            when (payloadLen7) {
+                126 -> {
+                    // Need 2 more bytes for 16-bit length
+                    if (processor.available() < 4) return null
+                    headerSize += 2
+                    (processor.peekShort(2).toInt() and 0xFFFF)
                 }
-                len64.toInt()
+                127 -> {
+                    // Need 8 more bytes for 64-bit length
+                    if (processor.available() < 10) return null
+                    headerSize += 8
+                    val len64 = processor.peekLong(2)
+                    if (len64 > Int.MAX_VALUE || len64 < 0) {
+                        throw FrameParseException("Payload length out of range: $len64")
+                    }
+                    len64.toInt()
+                }
+                else -> payloadLen7
             }
-            else -> payloadLen7
-        }
 
         // Add masking key size if present
         if (masked) {
@@ -225,45 +306,208 @@ class FrameReader(
 }
 
 /**
- * A parsed WebSocket frame.
+ * Sealed interface for parsed incoming WebSocket frames.
  *
- * This is the result of parsing a frame from the wire format. The payload
- * has already been unmasked if it was masked.
+ * Uses value classes for header bytes - preserves wire format with zero allocation overhead.
+ * Access fields via header1.fin, header1.rsv1, header1.opcode, header2.masked, etc.
  *
- * @property fin FIN bit - indicates this is the final fragment
- * @property rsv1 RSV1 bit - used by extensions (e.g., compression)
- * @property rsv2 RSV2 bit - reserved for future use
- * @property rsv3 RSV3 bit - reserved for future use
- * @property opcode Frame opcode (text, binary, close, ping, pong, etc.)
- * @property masked Whether the frame was masked (client->server frames must be masked)
- * @property payloadLength The length of the payload in bytes
- * @property payload The payload data (already unmasked)
+ * This sealed interface hierarchy enables exhaustive pattern matching in Kotlin,
+ * eliminating runtime opcode checks and improving type safety.
+ *
+ * ## RFC 6455 Section 5.2 - Base Framing Protocol
+ * https://datatracker.ietf.org/doc/html/rfc6455#section-5.2
  */
-data class ParsedFrame(
-    val fin: Boolean,
-    val rsv1: Boolean,
-    val rsv2: Boolean,
-    val rsv3: Boolean,
-    val opcode: Opcode,
-    val masked: Boolean,
-    val payloadLength: Int,
-    val payload: ReadBuffer,
-) {
-    /**
-     * Whether this is a control frame (close, ping, pong).
-     *
-     * Per RFC 6455 Section 5.5, control frames have opcodes 0x8-0xF.
-     */
-    val isControlFrame: Boolean
-        get() = opcode.isControlFrame()
+sealed interface ParsedFrame {
+    /** First header byte - packs FIN, RSV1-3, opcode (inline accessors) */
+    val header1: FrameHeaderByte1
+
+    /** Second header byte - packs MASK flag, payloadLen7 (inline accessors) */
+    val header2: FrameHeaderByte2
+
+    /** Actual payload length (extended if needed) */
+    val payloadLength: Int
+
+    /** The payload data (already unmasked if was masked) */
+    val payload: ReadBuffer
+
+    /** Whether this is a control frame (close, ping, pong) */
+    val isControlFrame: Boolean get() = this is ControlFrame
+
+    /** Whether this is a data frame (text, binary, continuation) */
+    val isDataFrame: Boolean get() = this is DataFrame
+
+    // Convenience accessors that delegate to header bytes
+    val fin: Boolean get() = header1.fin
+    val rsv1: Boolean get() = header1.rsv1
+    val rsv2: Boolean get() = header1.rsv2
+    val rsv3: Boolean get() = header1.rsv3
+    val opcode: Opcode get() = header1.opcode
+    val masked: Boolean get() = header2.masked
 
     /**
-     * Whether this is a data frame (text, binary, continuation).
-     *
-     * Per RFC 6455 Section 5.6, data frames have opcodes 0x0-0x7.
+     * Data frames (text, binary, continuation) per RFC 6455 Section 5.6.
      */
-    val isDataFrame: Boolean
-        get() = !isControlFrame
+    sealed interface DataFrame : ParsedFrame {
+        /**
+         * Text frame (opcode 0x1).
+         * Payload is UTF-8 encoded text.
+         */
+        data class Text(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+        ) : DataFrame
+
+        /**
+         * Binary frame (opcode 0x2).
+         * Payload is arbitrary binary data.
+         */
+        data class Binary(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+        ) : DataFrame
+
+        /**
+         * Continuation frame (opcode 0x0).
+         * Used for message fragmentation per RFC 6455 Section 5.4.
+         */
+        data class Continuation(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+        ) : DataFrame
+    }
+
+    /**
+     * Control frames per RFC 6455 Section 5.5.
+     * Control frames have opcodes 0x8-0xF and MUST have payload <= 125 bytes.
+     */
+    sealed interface ControlFrame : ParsedFrame {
+        /**
+         * Ping frame (opcode 0x9).
+         * Per RFC 6455 Section 5.5.2, must be responded to with Pong.
+         */
+        data class Ping(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+        ) : ControlFrame
+
+        /**
+         * Pong frame (opcode 0xA).
+         * Per RFC 6455 Section 5.5.3, sent in response to Ping.
+         */
+        data class Pong(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+        ) : ControlFrame
+
+        /**
+         * Close frame (opcode 0x8).
+         * Per RFC 6455 Section 5.5.1, initiates connection close.
+         *
+         * @property closeCode The close status code (1005 NO_STATUS_RECEIVED if not present in payload)
+         * @property closeReason Optional human-readable reason (UTF-8)
+         */
+        data class Close(
+            override val header1: FrameHeaderByte1,
+            override val header2: FrameHeaderByte2,
+            override val payloadLength: Int,
+            override val payload: ReadBuffer,
+            val closeCode: CloseCode = CloseCode.NO_STATUS_RECEIVED,
+            val closeReason: String = "",
+        ) : ControlFrame
+    }
+}
+
+/**
+ * Factory function to create ParsedFrame instances (for backwards compatibility).
+ * Prefer using the concrete types directly when possible.
+ */
+@Suppress("FunctionName")
+fun ParsedFrame(
+    fin: Boolean,
+    rsv1: Boolean,
+    rsv2: Boolean,
+    rsv3: Boolean,
+    opcode: Opcode,
+    masked: Boolean,
+    payloadLength: Int,
+    payload: ReadBuffer,
+): ParsedFrame {
+    // Construct header bytes from individual flags
+    var byte1 = opcode.value.toInt() and 0x0F
+    if (fin) byte1 = byte1 or 0x80
+    if (rsv1) byte1 = byte1 or 0x40
+    if (rsv2) byte1 = byte1 or 0x20
+    if (rsv3) byte1 = byte1 or 0x10
+    val header1 = FrameHeaderByte1(byte1)
+
+    var byte2 = payloadLength.coerceAtMost(127) and 0x7F
+    if (masked) byte2 = byte2 or 0x80
+    val header2 = FrameHeaderByte2(byte2)
+
+    return when (opcode) {
+        Opcode.Text -> ParsedFrame.DataFrame.Text(header1, header2, payloadLength, payload)
+        Opcode.Binary -> ParsedFrame.DataFrame.Binary(header1, header2, payloadLength, payload)
+        Opcode.Continuation -> ParsedFrame.DataFrame.Continuation(header1, header2, payloadLength, payload)
+        Opcode.Ping -> ParsedFrame.ControlFrame.Ping(header1, header2, payloadLength, payload)
+        Opcode.Pong -> ParsedFrame.ControlFrame.Pong(header1, header2, payloadLength, payload)
+        Opcode.Close -> {
+            // Parse close code and reason from payload if present
+            val (closeCode, closeReason) = parseClosePayload(payload, payloadLength)
+            ParsedFrame.ControlFrame.Close(header1, header2, payloadLength, payload, closeCode, closeReason)
+        }
+        else -> {
+            // For reserved opcodes, treat as data frame (will be rejected by protocol validation)
+            ParsedFrame.DataFrame.Binary(header1, header2, payloadLength, payload)
+        }
+    }
+}
+
+/**
+ * Parses close code and reason from a close frame payload.
+ */
+private fun parseClosePayload(
+    payload: ReadBuffer,
+    payloadLength: Int,
+): Pair<CloseCode, String> {
+    if (payloadLength == 0) {
+        return CloseCode.NO_STATUS_RECEIVED to ""
+    }
+
+    // Save position for restoration
+    val savedPos = payload.position()
+
+    if (payloadLength == 1) {
+        // Invalid: close frame with only 1 byte
+        payload.position(savedPos)
+        return CloseCode.PROTOCOL_ERROR to "Invalid close payload length"
+    }
+
+    val code = CloseCode(payload.readUnsignedShort())
+    val reason =
+        if (payload.hasRemaining()) {
+            try {
+                payload.readString(payload.remaining(), Charset.UTF8)
+            } catch (e: Exception) {
+                ""
+            }
+        } else {
+            ""
+        }
+
+    // Restore position for consumers who want to read the raw payload
+    payload.position(savedPos)
+
+    return code to reason
 }
 
 /**
