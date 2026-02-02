@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
@@ -59,20 +60,18 @@ class ModularWebSocketClient(
     parentScope: CoroutineScope?,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
 ) : WebSocketClient {
+    // Create a dedicated Job for this client so we can cancel it independently
+    private val clientJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
+
     override val scope: CoroutineScope =
-        if (parentScope == null) {
-            CoroutineScope(
+        CoroutineScope(
+            (parentScope?.coroutineContext ?: Dispatchers.Default) +
+                clientJob +
                 Dispatchers.Default +
-                    CoroutineName(
-                        "ModularWebSocket: ${connectionOptions.name}:${connectionOptions.port}",
-                    ),
-            )
-        } else {
-            parentScope + Dispatchers.Default +
                 CoroutineName(
                     "ModularWebSocket: ${connectionOptions.name}:${connectionOptions.port}",
-                )
-        }
+                ),
+        )
 
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
@@ -163,6 +162,7 @@ class ModularWebSocketClient(
                             compressor = outgoingCompressor,
                             compressionEnabled = compressionEnabled,
                             clientMode = true,
+                            allocationZone = allocationZone,
                         )
 
                     connectionStateFlow.value = ConnectionState.Connected
@@ -188,7 +188,7 @@ class ModularWebSocketClient(
             SuspendingStreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                BufferAllocator.Heap,
+                BufferAllocator.Direct, // Linux requires NativeMemoryAccess for zlib
             )
         incomingDecompressor =
             SuspendingStreamingDecompressor.create(
@@ -237,6 +237,11 @@ class ModularWebSocketClient(
         }
     }
 
+    /**
+     * Reads data from socket into the processor.
+     * Socket cancellation is handled via suspendCancellableCoroutine + invokeOnCancellation
+     * in the underlying socket implementation.
+     */
     private suspend fun readIntoProcessor(processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
         val readBuffer = socket.read(connectionOptions.readTimeout)
         readBuffer.resetForRead()
@@ -248,14 +253,16 @@ class ModularWebSocketClient(
     private fun startReadLoop(streamProcessor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
         scope.launch {
             val frameReader = FrameReader(streamProcessor)
-            val messageAssembler = MessageAssembler()
+            val messageAssembler = MessageAssembler(compressionEnabled)
 
             try {
-                readLoop@ while (isOpen()) {
+                readLoop@ while (isOpen() && isActive) {
                     // Ensure minimum data for frame header
-                    while (streamProcessor.available() < 2) {
+                    while (streamProcessor.available() < 2 && isActive) {
                         readIntoProcessor(streamProcessor)
                     }
+
+                    if (!isActive) break@readLoop
 
                     // Try to read a frame
                     val frame = frameReader.readFrame()
@@ -282,9 +289,20 @@ class ModularWebSocketClient(
                         }
                         is AssemblyResult.Error -> {
                             sendCloseFrame(result.code.code, result.reason)
+                            // Update state to prevent close() from sending another close frame
+                            connectionStateFlow.value =
+                                ConnectionState.Disconnected(
+                                    code = result.code.code,
+                                    reason = result.reason,
+                                )
                             return@launch
                         }
                     }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Clean cancellation - update state and exit
+                if (connectionState.value !is ConnectionState.Disconnected) {
+                    connectionStateFlow.value = ConnectionState.Disconnected()
                 }
             } catch (e: SocketClosedException) {
                 // Expected on close
@@ -363,18 +381,16 @@ class ModularWebSocketClient(
     }
 
     private suspend fun emitMessage(message: AssembledMessage) {
-        val payload =
-            if (message.compressed && compressionEnabled) {
-                decompressPayload(message.payload)
-            } else {
-                message.payload
-            }
-
         when (message.opcode) {
             Opcode.Text -> {
                 val text =
                     try {
-                        payload.readString(payload.remaining(), Charset.UTF8)
+                        if (message.compressed && compressionEnabled) {
+                            // Stream decompressed chunks directly to string to avoid intermediate buffer
+                            decompressPayloadToString(message.payload)
+                        } else {
+                            message.payload.readString(message.payload.remaining(), Charset.UTF8)
+                        }
                     } catch (e: Exception) {
                         sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
                         return
@@ -382,6 +398,12 @@ class ModularWebSocketClient(
                 incomingMessageSharedFlow.emit(WebSocketMessage.Text(text))
             }
             Opcode.Binary -> {
+                val payload =
+                    if (message.compressed && compressionEnabled) {
+                        decompressPayload(message.payload)
+                    } else {
+                        message.payload
+                    }
                 incomingMessageSharedFlow.emit(WebSocketMessage.Binary(payload))
             }
             else -> {
@@ -394,12 +416,28 @@ class ModularWebSocketClient(
         val decompressor = incomingDecompressor ?: return payload
 
         return try {
-            val chunks = decompressWithStreamingDecompressor(payload, decompressor)
+            // Stream decompress to single buffer - reduces peak memory
+            val result = decompressToBuffer(payload, decompressor)
             decompressor.reset()
-            combineChunks(chunks, AllocationZone.Direct)
+            result
         } catch (e: Exception) {
             payload // Fallback to original on error
         }
+    }
+
+    /**
+     * Decompresses payload directly to string with streaming UTF-8 handling.
+     * Reduces peak memory by not holding all decompressed chunks at once.
+     */
+    private suspend fun decompressPayloadToString(payload: ReadBuffer): String {
+        val decompressor =
+            incomingDecompressor
+                ?: return payload.readString(payload.remaining(), Charset.UTF8)
+
+        // Stream decompress directly to string - reduces peak memory
+        val result = decompressToString(payload, decompressor)
+        decompressor.reset()
+        return result
     }
 
     override suspend fun write(string: String) {
@@ -459,11 +497,22 @@ class ModularWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Close socket - this will cause the read loop to exit with SocketClosedException
+        // Cancel job FIRST - this triggers CancellationException in read loop
+        // which is properly handled via suspendCancellableCoroutine + invokeOnCancellation
+        clientJob.cancel()
+        // Then close socket (causes SocketClosedException if read is still in progress)
         try {
             socket.close()
         } catch (e: Exception) {
-            // Ignore
+            // Ignore - socket may already be closed
+        }
+        // Brief wait for cleanup
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(200) {
+                clientJob.join()
+            }
+        } catch (e: Exception) {
+            // Ignore join failures
         }
         if (connectionState.value !is ConnectionState.Disconnected) {
             connectionStateFlow.value = ConnectionState.Disconnected()
