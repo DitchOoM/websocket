@@ -43,6 +43,24 @@ value class FrameHeaderByte1(
 
     /** Frame opcode */
     inline val opcode: Opcode get() = Opcode.fromInt(packed and 0x0F)
+
+    companion object {
+        /** Pack header byte 1 from individual flags - zero allocation */
+        fun pack(
+            fin: Boolean,
+            rsv1: Boolean,
+            rsv2: Boolean,
+            rsv3: Boolean,
+            opcode: Opcode,
+        ): FrameHeaderByte1 {
+            var byte1 = opcode.value.toInt() and 0x0F
+            if (fin) byte1 = byte1 or 0x80
+            if (rsv1) byte1 = byte1 or 0x40
+            if (rsv2) byte1 = byte1 or 0x20
+            if (rsv3) byte1 = byte1 or 0x10
+            return FrameHeaderByte1(byte1)
+        }
+    }
 }
 
 /**
@@ -69,6 +87,23 @@ value class FrameHeaderByte2(
 
     /** 7-bit payload length (may indicate extended length follows) */
     inline val payloadLen7: Int get() = packed and 0x7F
+
+    companion object {
+        /** Create header byte 2 for given payload length (unmasked) - zero allocation */
+        fun forPayload(
+            length: Int,
+            masked: Boolean = false,
+        ): FrameHeaderByte2 {
+            val len7 =
+                when {
+                    length <= 125 -> length
+                    length <= 65535 -> 126
+                    else -> 127
+                }
+            val byte2 = if (masked) len7 or 0x80 else len7
+            return FrameHeaderByte2(byte2)
+        }
+    }
 }
 
 /**
@@ -210,15 +245,38 @@ class FrameReader(
             Opcode.Pong -> ParsedFrame.ControlFrame.Pong(header1, header2, actualPayloadLength, payload)
             Opcode.Close -> {
                 // Parse close code and reason from payload
-                val (closeCode, closeReason) = parseClosePayloadInternal(payload, actualPayloadLength)
-                ParsedFrame.ControlFrame.Close(header1, header2, actualPayloadLength, payload, closeCode, closeReason)
+                val result = parseClosePayloadInternal(payload, actualPayloadLength)
+                ParsedFrame.ControlFrame.Close(
+                    header1,
+                    header2,
+                    actualPayloadLength,
+                    payload,
+                    result.code,
+                    result.reason,
+                    result.hasInvalidUtf8,
+                )
             }
             else -> {
-                // Reserved opcodes - treat as binary (will be rejected by protocol validation)
-                ParsedFrame.DataFrame.Binary(header1, header2, actualPayloadLength, payload)
+                // Reserved opcodes (0x3-0x7 non-control, 0xB-0xF control) are invalid per RFC 6455
+                ParsedFrame.InvalidFrame(
+                    header1,
+                    header2,
+                    actualPayloadLength,
+                    payload,
+                    "Reserved opcode ${header1.opcode} is not allowed",
+                )
             }
         }
     }
+
+    /**
+     * Result of parsing a close frame payload.
+     */
+    private data class ClosePayloadParseResult(
+        val code: CloseCode,
+        val reason: String,
+        val hasInvalidUtf8: Boolean,
+    )
 
     /**
      * Internal close payload parser for FrameReader.
@@ -226,24 +284,27 @@ class FrameReader(
     private fun parseClosePayloadInternal(
         payload: ReadBuffer,
         payloadLength: Int,
-    ): Pair<CloseCode, String> {
+    ): ClosePayloadParseResult {
         if (payloadLength == 0) {
-            return CloseCode.NO_STATUS_RECEIVED to ""
+            return ClosePayloadParseResult(CloseCode.NO_STATUS_RECEIVED, "", false)
         }
 
         val savedPos = payload.position()
 
         if (payloadLength == 1) {
             payload.position(savedPos)
-            return CloseCode.PROTOCOL_ERROR to "Invalid close payload length"
+            return ClosePayloadParseResult(CloseCode.PROTOCOL_ERROR, "Invalid close payload length", false)
         }
 
         val code = CloseCode(payload.readUnsignedShort())
+        var hasInvalidUtf8 = false
         val reason =
             if (payload.hasRemaining()) {
                 try {
                     payload.readString(payload.remaining(), Charset.UTF8)
-                } catch (e: Exception) {
+                } catch (@Suppress("TooGenericExceptionCaught") e: Throwable) {
+                    // Use Throwable to catch JS TypeError from TextDecoder
+                    hasInvalidUtf8 = true
                     ""
                 }
             } else {
@@ -251,7 +312,7 @@ class FrameReader(
             }
 
         payload.position(savedPos)
-        return code to reason
+        return ClosePayloadParseResult(code, reason, hasInvalidUtf8)
     }
 
     /**
@@ -383,6 +444,19 @@ sealed interface ParsedFrame {
     }
 
     /**
+     * Invalid frame with reserved opcode per RFC 6455.
+     * Reserved opcodes are 0x3-0x7 (non-control) and 0xB-0xF (control).
+     * These frames should be rejected with close code 1002 (Protocol Error).
+     */
+    data class InvalidFrame(
+        override val header1: FrameHeaderByte1,
+        override val header2: FrameHeaderByte2,
+        override val payloadLength: Int,
+        override val payload: ReadBuffer,
+        val reason: String,
+    ) : ParsedFrame
+
+    /**
      * Control frames per RFC 6455 Section 5.5.
      * Control frames have opcodes 0x8-0xF and MUST have payload <= 125 bytes.
      */
@@ -415,6 +489,7 @@ sealed interface ParsedFrame {
          *
          * @property closeCode The close status code (1005 NO_STATUS_RECEIVED if not present in payload)
          * @property closeReason Optional human-readable reason (UTF-8)
+         * @property hasInvalidUtf8 True if the close reason contained invalid UTF-8 bytes
          */
         data class Close(
             override val header1: FrameHeaderByte1,
@@ -423,6 +498,7 @@ sealed interface ParsedFrame {
             override val payload: ReadBuffer,
             val closeCode: CloseCode = CloseCode.NO_STATUS_RECEIVED,
             val closeReason: String = "",
+            val hasInvalidUtf8: Boolean = false,
         ) : ControlFrame
     }
 }
@@ -462,15 +538,38 @@ fun ParsedFrame(
         Opcode.Pong -> ParsedFrame.ControlFrame.Pong(header1, header2, payloadLength, payload)
         Opcode.Close -> {
             // Parse close code and reason from payload if present
-            val (closeCode, closeReason) = parseClosePayload(payload, payloadLength)
-            ParsedFrame.ControlFrame.Close(header1, header2, payloadLength, payload, closeCode, closeReason)
+            val result = parseClosePayload(payload, payloadLength)
+            ParsedFrame.ControlFrame.Close(
+                header1,
+                header2,
+                payloadLength,
+                payload,
+                result.code,
+                result.reason,
+                result.hasInvalidUtf8,
+            )
         }
         else -> {
-            // For reserved opcodes, treat as data frame (will be rejected by protocol validation)
-            ParsedFrame.DataFrame.Binary(header1, header2, payloadLength, payload)
+            // Reserved opcodes (0x3-0x7 non-control, 0xB-0xF control) are invalid per RFC 6455
+            ParsedFrame.InvalidFrame(
+                header1,
+                header2,
+                payloadLength,
+                payload,
+                "Reserved opcode $opcode is not allowed",
+            )
         }
     }
 }
+
+/**
+ * Result of parsing a close frame payload.
+ */
+private data class ClosePayloadResult(
+    val code: CloseCode,
+    val reason: String,
+    val hasInvalidUtf8: Boolean,
+)
 
 /**
  * Parses close code and reason from a close frame payload.
@@ -478,9 +577,9 @@ fun ParsedFrame(
 private fun parseClosePayload(
     payload: ReadBuffer,
     payloadLength: Int,
-): Pair<CloseCode, String> {
+): ClosePayloadResult {
     if (payloadLength == 0) {
-        return CloseCode.NO_STATUS_RECEIVED to ""
+        return ClosePayloadResult(CloseCode.NO_STATUS_RECEIVED, "", false)
     }
 
     // Save position for restoration
@@ -489,15 +588,18 @@ private fun parseClosePayload(
     if (payloadLength == 1) {
         // Invalid: close frame with only 1 byte
         payload.position(savedPos)
-        return CloseCode.PROTOCOL_ERROR to "Invalid close payload length"
+        return ClosePayloadResult(CloseCode.PROTOCOL_ERROR, "Invalid close payload length", false)
     }
 
     val code = CloseCode(payload.readUnsignedShort())
+    var hasInvalidUtf8 = false
     val reason =
         if (payload.hasRemaining()) {
             try {
                 payload.readString(payload.remaining(), Charset.UTF8)
-            } catch (e: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: Throwable) {
+                // Use Throwable to catch JS TypeError from TextDecoder
+                hasInvalidUtf8 = true
                 ""
             }
         } else {
@@ -507,7 +609,7 @@ private fun parseClosePayload(
     // Restore position for consumers who want to read the raw payload
     payload.position(savedPos)
 
-    return code to reason
+    return ClosePayloadResult(code, reason, hasInvalidUtf8)
 }
 
 /**
