@@ -11,13 +11,16 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 
 private val testImplementation = WebSocketImplementation.MODULAR
 
 internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
+    awaitClose: Boolean = true,
 ): WebSocketClient {
     val connectionOptions =
         WebSocketConnectionOptions(
@@ -35,6 +38,22 @@ internal suspend fun CoroutineScope.prepareConnection(
         )
     websocket.connect()
     websocket.connectionState.first { it is ConnectionState.Connected }
+
+    if (awaitClose) {
+        // Wait for server to close the connection (with timeout)
+        val closed = withTimeoutOrNull(10.seconds) {
+            websocket.connectionState.first { it is ConnectionState.Disconnected }
+        }
+        if (closed == null) {
+            // Server didn't close in time, close from client side
+            try {
+                websocket.close()
+            } catch (_: Exception) {
+                // Ignore close errors
+            }
+        }
+    }
+
     return websocket
 }
 
@@ -71,6 +90,9 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
+    // Give the read loop a chance to detect any remaining protocol errors
+    // before explicitly closing. This allows proper close codes to be sent.
+    kotlinx.coroutines.delay(100)
     try {
         ws.close()
     } catch (_: Exception) {
@@ -155,6 +177,9 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
 }
 
 internal suspend fun closeConnection(websocket: WebSocketClient) {
+    // Give the read loop a chance to detect any protocol errors
+    // before explicitly closing. This allows proper close codes to be sent.
+    kotlinx.coroutines.delay(100)
     try {
         websocket.close()
     } catch (_: Exception) {

@@ -60,8 +60,10 @@ class ModularWebSocketClient(
     parentScope: CoroutineScope?,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
 ) : WebSocketClient {
-    // Create a dedicated Job for this client so we can cancel it independently
-    private val clientJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
+    // Create a dedicated Job for this client - NOT a child of parent scope.
+    // This ensures the websocket can be cancelled without blocking parent scope completion.
+    // The websocket runs independently; callers must explicitly call close().
+    private val clientJob = kotlinx.coroutines.Job()
 
     override val scope: CoroutineScope =
         CoroutineScope(

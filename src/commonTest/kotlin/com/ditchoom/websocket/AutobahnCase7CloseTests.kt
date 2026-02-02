@@ -42,7 +42,7 @@ class AutobahnCase7CloseTests {
     @Test
     fun case7_3_1() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(216))
+            closeConnection(prepareConnection(216, awaitClose = false))
         }
 
     @Test
@@ -54,19 +54,19 @@ class AutobahnCase7CloseTests {
     @Test
     fun case7_3_3() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(218))
+            closeConnection(prepareConnection(218, awaitClose = false))
         }
 
     @Test
     fun case7_3_4() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(219))
+            closeConnection(prepareConnection(219, awaitClose = false))
         }
 
     @Test
     fun case7_3_5() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(220))
+            closeConnection(prepareConnection(220, awaitClose = false))
         }
 
     @Test

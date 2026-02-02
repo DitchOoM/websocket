@@ -54,61 +54,61 @@ class AutobahnCase5ControlFrameTests {
     @Test
     fun case5_9() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(53))
+            closeConnection(prepareConnection(53, awaitClose = false))
         }
 
     @Test
     fun case5_10() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(54))
+            closeConnection(prepareConnection(54, awaitClose = false))
         }
 
     @Test
     fun case5_11() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(55))
+            closeConnection(prepareConnection(55, awaitClose = false))
         }
 
     @Test
     fun case5_12() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(56))
+            closeConnection(prepareConnection(56, awaitClose = false))
         }
 
     @Test
     fun case5_13() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(57))
+            closeConnection(prepareConnection(57, awaitClose = false))
         }
 
     @Test
     fun case5_14() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(58))
+            closeConnection(prepareConnection(58, awaitClose = false))
         }
 
     @Test
     fun case5_15() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(59))
+            closeConnection(prepareConnection(59, awaitClose = false))
         }
 
     @Test
     fun case5_16() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(60))
+            closeConnection(prepareConnection(60, awaitClose = false))
         }
 
     @Test
     fun case5_17() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(61))
+            closeConnection(prepareConnection(61, awaitClose = false))
         }
 
     @Test
     fun case5_18() =
         runTestNoTimeSkipping {
-            closeConnection(prepareConnection(62))
+            closeConnection(prepareConnection(62, awaitClose = false))
         }
 
     @Test
