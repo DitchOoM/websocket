@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
@@ -59,6 +60,7 @@ class ModularWebSocketClient(
     private val pool: BufferPool,
     parentScope: CoroutineScope?,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
 ) : WebSocketClient {
     // Create a dedicated Job for this client - NOT a child of parent scope.
     // This ensures the websocket can be cancelled without blocking parent scope completion.
@@ -78,15 +80,21 @@ class ModularWebSocketClient(
     private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
+
+    // Use replay=1 so late collectors don't miss the first message
+    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>(replay = 1)
     override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
 
     // Components initialized during connect()
+    // Note: These are set once during connect() and cleared during close().
+    // The nullable checks (e.g., frameWriter ?: return) provide defensive access.
     private var frameWriter: FrameWriter? = null
     private var outgoingCompressor: SuspendingStreamingCompressor? = null
     private var incomingDecompressor: SuspendingStreamingDecompressor? = null
     private var compressionEnabled = false
-    private var hasServerInitiatedClose = false
+
+    // Use StateFlow for thread-safe access between read loop and close()
+    private val serverInitiatedClose = MutableStateFlow(false)
     private var clientKey: String = ""
 
     fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
@@ -241,15 +249,30 @@ class ModularWebSocketClient(
 
     /**
      * Reads data from socket into the processor.
+     * Uses zero-copy path when available: socket writes directly into our buffer.
      * Socket cancellation is handled via suspendCancellableCoroutine + invokeOnCancellation
      * in the underlying socket implementation.
      */
     private suspend fun readIntoProcessor(processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
-        val readBuffer = socket.read(connectionOptions.readTimeout)
-        readBuffer.resetForRead()
-        if (readBuffer.hasRemaining()) {
-            processor.append(readBuffer)
+        // Allocate buffer that we own (not from socket's internal pool).
+        // This buffer will be owned by the processor after append.
+        val buffer = PlatformBuffer.allocate(readBufferSize, allocationZone)
+
+        // Zero-copy: socket writes directly into our buffer
+        val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
+
+        if (bytesRead > 0) {
+            // Buffer was written at position 0..bytesRead, position is now at bytesRead
+            // Set limit to bytesRead and position to 0 for reading
+            buffer.setLimit(buffer.position())
+            buffer.position(0)
+            processor.append(buffer)
         }
+    }
+
+    companion object {
+        /** Default read buffer size (64KB) - matches typical socket receive buffer */
+        const val DEFAULT_READ_BUFFER_SIZE = 65536
     }
 
     private fun startReadLoop(streamProcessor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
@@ -302,23 +325,33 @@ class ModularWebSocketClient(
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // Clean cancellation - update state and exit
-                if (connectionState.value !is ConnectionState.Disconnected) {
-                    connectionStateFlow.value = ConnectionState.Disconnected()
+                // Clean cancellation - update state atomically
+                connectionStateFlow.update { current ->
+                    if (current !is ConnectionState.Disconnected) {
+                        ConnectionState.Disconnected()
+                    } else {
+                        current
+                    }
                 }
             } catch (e: SocketClosedException) {
-                // Expected on close
-                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                    connectionStateFlow.value = ConnectionState.Disconnected(e)
-                } else {
-                    connectionStateFlow.value = ConnectionState.Disconnected()
+                // Expected on close - update state atomically
+                connectionStateFlow.update { current ->
+                    when {
+                        current is ConnectionState.Disconnected -> current
+                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
+                            ConnectionState.Disconnected(e)
+                        else -> ConnectionState.Disconnected()
+                    }
                 }
             } catch (e: SocketException) {
-                // Socket error
-                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                    connectionStateFlow.value = ConnectionState.Disconnected(e)
-                } else {
-                    connectionStateFlow.value = ConnectionState.Disconnected()
+                // Socket error - update state atomically
+                connectionStateFlow.update { current ->
+                    when {
+                        current is ConnectionState.Disconnected -> current
+                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
+                            ConnectionState.Disconnected(e)
+                        else -> ConnectionState.Disconnected()
+                    }
                 }
             } finally {
                 streamProcessor.release()
@@ -327,6 +360,7 @@ class ModularWebSocketClient(
     }
 
     private suspend fun handleControlFrame(frame: ParsedFrame) {
+        // Note: FrameReader guarantees payload.position() == 0
         when (frame.opcode) {
             Opcode.Ping -> {
                 // Auto-respond with pong
@@ -337,14 +371,21 @@ class ModularWebSocketClient(
                         EMPTY_BUFFER
                     }
                 writePongFrame(pongData)
+                // Reset position after pong write so consumers can read the payload
+                if (frame.payloadLength > 0) {
+                    frame.payload.position(0)
+                }
                 incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payload))
             }
             Opcode.Pong -> {
                 incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payload))
             }
             Opcode.Close -> {
-                hasServerInitiatedClose = true
-                val (code, reason) = parseClosePayload(frame)
+                serverInitiatedClose.value = true
+                // Use pre-parsed close code and reason from FrameReader
+                val closeFrame = frame as ParsedFrame.ControlFrame.Close
+                val code = closeFrame.closeCode.code
+                val reason = closeFrame.closeReason
 
                 // Send close response if we haven't already
                 if (connectionState.value is ConnectionState.Connected) {
@@ -358,28 +399,6 @@ class ModularWebSocketClient(
                 // Unexpected control opcode
             }
         }
-    }
-
-    private fun parseClosePayload(frame: ParsedFrame): Pair<UShort, String> {
-        if (frame.payloadLength == 0) {
-            return 1005u.toUShort() to ""
-        }
-        if (frame.payloadLength == 1) {
-            return 1002u.toUShort() to "Invalid close payload"
-        }
-
-        val code = frame.payload.readUnsignedShort()
-        val reason =
-            if (frame.payload.hasRemaining()) {
-                try {
-                    frame.payload.readString(frame.payload.remaining(), Charset.UTF8)
-                } catch (e: Exception) {
-                    ""
-                }
-            } else {
-                ""
-            }
-        return code to reason
     }
 
     private suspend fun emitMessage(message: AssembledMessage) {
@@ -419,11 +438,16 @@ class ModularWebSocketClient(
 
         return try {
             // Stream decompress to single buffer - reduces peak memory
-            val result = decompressToBuffer(payload, decompressor)
-            decompressor.reset()
-            result
+            decompressToBuffer(payload, decompressor)
         } catch (e: Exception) {
             payload // Fallback to original on error
+        } finally {
+            // Always reset decompressor to ensure clean state for next message
+            try {
+                decompressor.reset()
+            } catch (_: Exception) {
+                // Ignore reset failures
+            }
         }
     }
 
@@ -436,10 +460,17 @@ class ModularWebSocketClient(
             incomingDecompressor
                 ?: return payload.readString(payload.remaining(), Charset.UTF8)
 
-        // Stream decompress directly to string - reduces peak memory
-        val result = decompressToString(payload, decompressor)
-        decompressor.reset()
-        return result
+        return try {
+            // Stream decompress directly to string - reduces peak memory
+            decompressToString(payload, decompressor)
+        } finally {
+            // Always reset decompressor to ensure clean state for next message
+            try {
+                decompressor.reset()
+            } catch (_: Exception) {
+                // Ignore reset failures
+            }
+        }
     }
 
     override suspend fun write(string: String) {
@@ -491,7 +522,7 @@ class ModularWebSocketClient(
     }
 
     override suspend fun close() {
-        if (connectionState.value is ConnectionState.Connected && !hasServerInitiatedClose) {
+        if (connectionState.value is ConnectionState.Connected && !serverInitiatedClose.value) {
             sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
         }
         // Clean up compression resources
@@ -508,16 +539,21 @@ class ModularWebSocketClient(
         } catch (e: Exception) {
             // Ignore - socket may already be closed
         }
-        // Brief wait for cleanup
+        // Wait for cleanup with increased timeout for reliable close handshake
         try {
-            kotlinx.coroutines.withTimeoutOrNull(200) {
+            kotlinx.coroutines.withTimeoutOrNull(1000) {
                 clientJob.join()
             }
         } catch (e: Exception) {
             // Ignore join failures
         }
-        if (connectionState.value !is ConnectionState.Disconnected) {
-            connectionStateFlow.value = ConnectionState.Disconnected()
+        // Atomic state update to avoid race with read loop
+        connectionStateFlow.update { current ->
+            if (current !is ConnectionState.Disconnected) {
+                ConnectionState.Disconnected()
+            } else {
+                current
+            }
         }
     }
 }

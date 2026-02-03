@@ -17,7 +17,7 @@ apply(from = "gradle/setup.gradle.kts")
 group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
-val isMacOS = System.getProperty("os.name").lowercase().contains("mac")
+val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
 
 @Suppress("UNCHECKED_CAST")
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
@@ -26,6 +26,7 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 println("Version: ${project.version}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub")
 
 repositories {
+    mavenLocal() // For local buffer library testing
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -53,8 +54,8 @@ kotlin {
         }
     }
 
-    // Apple targets
-    if (isMacOS) {
+    // Apple targets (only on macOS host)
+    if (hostOs.family.isAppleFamily) {
         macosX64()
         macosArm64()
         iosArm64()
@@ -66,6 +67,13 @@ kotlin {
         watchosArm64()
         watchosSimulatorArm64()
         watchosX64()
+    }
+
+    // Linux targets (only on Linux host)
+    if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
+        linuxX64()
+        // TODO: re-enable when socket library publishes linuxArm64 to mavenLocal
+        // linuxArm64()
     }
 
     applyDefaultHierarchyTemplate()
@@ -133,12 +141,9 @@ tasks.withType<Test>().configureEach {
         excludeTestsMatching(profilingTestPattern)
     }
     if (runIntegrationTests) {
-        // Compression tests need more memory:
-        // - CompressionTest.largeBuffer() allocates 32MB buffers (original + compressed + decompressed)
-        // - Autobahn case 9.5.x/9.6.x use 1MB payloads with compression
-        // - Each compression/decompression creates working buffers
-        // - Tests may run in parallel, multiplying memory usage
-        maxHeapSize = "2g"
+        // Stress tests with 1MB+ compressed payloads need adequate heap
+        // (Streaming decompression reduced requirement from 2GB to ~640MB)
+        maxHeapSize = "1g"
     } else {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
@@ -163,6 +168,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     if (!runIntegrationTests) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+    }
+    // Exclude handshake tests from browser - they use Node.js crypto module
+    // Browser WebSocket handles handshake internally via native API
+    if (name.contains("Browser", ignoreCase = true)) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
     }
 }
 
@@ -279,10 +289,11 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 val validateAutobahnResults =
     task("validateAutobahnResults") {
         doLast {
-            val agents = listOf("JVM", "NodeJS", "macOS")
+            val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
+            val agents = listOf("JVM", "NodeJS", "macOS", "LinuxX64")
             agents.forEach { agent ->
                 try {
-                    val socket = Socket("localhost", 9001)
+                    val socket = Socket(autobahnHost, 9001)
                     socket.soTimeout = 5000
                     val output = socket.getOutputStream()
                     val input = socket.getInputStream()
@@ -291,7 +302,7 @@ val validateAutobahnResults =
                     val key = Base64.getEncoder().encodeToString(keyBytes)
                     val request =
                         "GET $path HTTP/1.1\r\n" +
-                            "Host: localhost:9001\r\n" +
+                            "Host: $autobahnHost:9001\r\n" +
                             "Upgrade: websocket\r\n" +
                             "Connection: Upgrade\r\n" +
                             "Sec-WebSocket-Key: $key\r\n" +
