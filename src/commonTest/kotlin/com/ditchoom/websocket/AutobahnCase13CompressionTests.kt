@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.minutes
 
 class AutobahnCase13CompressionTests {
     // Case 13.1: permessage-deflate with client_no_context_takeover + server_no_context_takeover
@@ -102,16 +103,16 @@ class AutobahnCase13CompressionTests {
     fun case13_2_14() = runTestNoTimeSkipping { echoMessageAndClose(423, 1000, requestCompression = true) }
 
     @Test
-    fun case13_2_15() = runTestNoTimeSkipping { echoMessageAndClose(424, 1000, requestCompression = true) }
+    fun case13_2_15() = runStrictTest(timeout = 5.minutes) { echoMessageAndClose(424, 1000, requestCompression = true) }
 
     @Test
-    fun case13_2_16() = runTestNoTimeSkipping { echoMessageAndClose(425, 1000, requestCompression = true) }
+    fun case13_2_16() = runStrictTest(timeout = 5.minutes) { echoMessageAndClose(425, 1000, requestCompression = true) }
 
     @Test
-    fun case13_2_17() = runTestNoTimeSkipping { echoMessageAndClose(426, 1000, requestCompression = true) }
+    fun case13_2_17() = runStrictTest(timeout = 5.minutes) { echoMessageAndClose(426, 1000, requestCompression = true) }
 
     @Test
-    fun case13_2_18() = runTestNoTimeSkipping { echoMessageAndClose(427, 1000, requestCompression = true) }
+    fun case13_2_18() = runStrictTest(timeout = 5.minutes) { echoMessageAndClose(427, 1000, requestCompression = true) }
 
     // Cases 13.3-13.6 (case numbers 428-499) require different compression parameter offers
     // (e.g., server_no_context_takeover only, no params, client_max_window_bits, server_max_window_bits)

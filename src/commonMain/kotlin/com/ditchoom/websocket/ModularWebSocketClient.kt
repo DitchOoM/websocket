@@ -81,8 +81,7 @@ class ModularWebSocketClient(
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
-    // Use replay=1 so late collectors don't miss the first message
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>(replay = 1)
+    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
     override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
 
     // Components initialized during connect()
@@ -412,7 +411,10 @@ class ModularWebSocketClient(
                         } else {
                             message.payload.readString(message.payload.remaining(), Charset.UTF8)
                         }
-                    } catch (e: Exception) {
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught") e: Throwable,
+                    ) {
+                        // Use Throwable to catch JS TypeError from TextDecoder on invalid UTF-8
                         sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
                         return
                     }
