@@ -1,11 +1,13 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
 
 /**
  *
@@ -61,24 +63,38 @@ internal data class Frame(
     suspend fun toBuffer(
         attemptDeflate: Boolean = false,
         level: Int = -1,
+        compressor: SuspendingStreamingCompressor? = null,
     ): ReadBuffer {
         var didDeflate = false
-        // WebSocket permessage-deflate requires Z_SYNC_FLUSH for compression, but the
-        // buffer-compression library only supports Z_FINISH. Sending uncompressed frames is
-        // valid per RFC 7692 when the extension is negotiated. Incoming decompression works
-        // correctly. TODO: implement Z_SYNC_FLUSH support for outgoing compression.
-        val shouldDeflate = false
         val payload =
-            if (shouldDeflate) {
+            if (attemptDeflate && !rsv1) {
                 val payloadSize = payloadData.remaining()
-                val compressed = payloadData.compressWebsocketBuffer(level)
-                if (compressed.remaining() >= payloadSize) {
-                    payloadData.resetForRead()
-                    payloadData
-                } else {
-                    didDeflate = true
-                    compressed
-                }
+                val compressed: ReadBuffer =
+                    if (compressor != null) {
+                        val chunks = compressWithStreamingCompressor(payloadData, compressor)
+                        val compressedSize = totalRemaining(chunks)
+                        if (compressedSize >= payloadSize) {
+                            // Compression didn't help, use original
+                            payloadData.resetForRead()
+                            compressor.reset()
+                            payloadData
+                        } else {
+                            didDeflate = true
+                            compressor.reset()
+                            // Combine chunks for frame serialization (needed for masking)
+                            combineChunks(chunks, AllocationZone.Heap)
+                        }
+                    } else {
+                        val compressedBuffer = payloadData.compressWebsocketBuffer(level)
+                        if (compressedBuffer.remaining() >= payloadSize) {
+                            payloadData.resetForRead()
+                            payloadData
+                        } else {
+                            didDeflate = true
+                            compressedBuffer
+                        }
+                    }
+                compressed
             } else {
                 payloadData
             }

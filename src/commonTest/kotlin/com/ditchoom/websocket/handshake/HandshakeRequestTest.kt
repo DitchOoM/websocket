@@ -18,7 +18,6 @@ import kotlin.test.assertTrue
  *   https://datatracker.ietf.org/doc/html/rfc7692#section-7
  */
 class HandshakeRequestTest {
-
     // ========================================================================
     // RFC 6455 Section 4.1 - Required Headers
     // https://datatracker.ietf.org/doc/html/rfc6455#section-4.1
@@ -69,9 +68,11 @@ class HandshakeRequestTest {
     fun `RFC 6455 Section 4-1 - Host header omits default port 80`() {
         // "When the default port for the scheme is used (port 80 for ws://),
         // the port component may be omitted"
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .useTls(false)
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .useTls(false)
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -82,9 +83,11 @@ class HandshakeRequestTest {
     @Test
     fun `RFC 6455 Section 4-1 - Host header omits default port 443 for TLS`() {
         // "port 443 for wss://"
-        val request = HandshakeRequest.builder("example.com", 443, "/ws")
-            .useTls(true)
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 443, "/ws")
+                .useTls(true)
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -153,9 +156,11 @@ class HandshakeRequestTest {
         // "The request MAY include a header field with the name
         // |Sec-WebSocket-Protocol|. If present, this value indicates one or
         // more comma-separated subprotocol the client wishes to speak"
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .protocols("chat", "superchat")
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .protocols("chat", "superchat")
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -175,9 +180,11 @@ class HandshakeRequestTest {
     fun `RFC 6455 Section 4-1 - request may include Sec-WebSocket-Extensions`() {
         // "The request MAY include a header field with the name
         // |Sec-WebSocket-Extensions|"
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .extension("permessage-deflate")
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .extension("permessage-deflate")
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -191,9 +198,11 @@ class HandshakeRequestTest {
 
     @Test
     fun `RFC 7692 Section 7 - requestCompression adds permessage-deflate`() {
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .requestCompression()
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression()
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -204,9 +213,11 @@ class HandshakeRequestTest {
     fun `RFC 7692 Section 7-1-1 - client_no_context_takeover parameter`() {
         // "A client MAY include the 'client_no_context_takeover' extension
         // parameter in an extension negotiation offer"
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .requestCompression(clientNoContextTakeover = true, serverNoContextTakeover = false)
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(clientNoContextTakeover = true, serverNoContextTakeover = false)
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -218,9 +229,11 @@ class HandshakeRequestTest {
     fun `RFC 7692 Section 7-1-1 - server_no_context_takeover parameter`() {
         // "A client MAY include the 'server_no_context_takeover' extension
         // parameter in an extension negotiation offer"
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .requestCompression(clientNoContextTakeover = false, serverNoContextTakeover = true)
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(clientNoContextTakeover = false, serverNoContextTakeover = true)
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -230,9 +243,11 @@ class HandshakeRequestTest {
 
     @Test
     fun `RFC 7692 Section 7-1-1 - both context takeover parameters`() {
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .requestCompression(clientNoContextTakeover = true, serverNoContextTakeover = true)
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(clientNoContextTakeover = true, serverNoContextTakeover = true)
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -246,10 +261,12 @@ class HandshakeRequestTest {
 
     @Test
     fun `custom headers can be added`() {
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .header("Origin", "https://example.com")
-            .header("User-Agent", "TestClient/1.0")
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .header("Origin", "https://example.com")
+                .header("User-Agent", "TestClient/1.0")
+                .build()
         val buffer = request.toBuffer()
         val text = buffer.readString(buffer.remaining(), Charset.UTF8)
 
@@ -291,9 +308,11 @@ class HandshakeRequestTest {
     @Test
     fun `expectedAcceptKey is computed correctly`() {
         // Using the RFC 6455 example key
-        val request = HandshakeRequest.builder("example.com", 80, "/ws")
-            .key("dGhlIHNhbXBsZSBub25jZQ==")
-            .build()
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .key("dGhlIHNhbXBsZSBub25jZQ==")
+                .build()
 
         assertEquals("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", request.expectedAcceptKey)
     }

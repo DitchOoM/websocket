@@ -25,7 +25,7 @@ import kotlin.jvm.JvmInline
  * ## Usage
  *
  * ```kotlin
- * val assembler = MessageAssembler()
+ * val assembler = MessageAssembler(compressionEnabled = false)
  *
  * while (true) {
  *     val frame = frameReader.readFrame() ?: continue
@@ -37,8 +37,13 @@ import kotlin.jvm.JvmInline
  *     }
  * }
  * ```
+ *
+ * @param compressionEnabled Whether permessage-deflate compression is negotiated.
+ *                           When true, RSV1 bit is allowed on data frames.
  */
-class MessageAssembler {
+class MessageAssembler(
+    private val compressionEnabled: Boolean = false,
+) {
     private var firstFrameOpcode: Opcode? = null
     private var firstFrameRsv1: Boolean = false
     private val fragmentBuffers = mutableListOf<ReadBuffer>()
@@ -51,6 +56,36 @@ class MessageAssembler {
      * @return The result of adding this frame
      */
     fun addFrame(frame: ParsedFrame): AssemblyResult {
+        // RFC 6455: Reserved opcodes are not allowed
+        if (frame is ParsedFrame.InvalidFrame) {
+            return AssemblyResult.Error(
+                CloseCode.PROTOCOL_ERROR,
+                frame.reason,
+            )
+        }
+
+        // RFC 6455 Section 5.2: RSV bits MUST be 0 unless an extension is negotiated.
+        // RSV2 and RSV3 are never used by any defined extension.
+        if (frame.rsv2) {
+            return AssemblyResult.Error(
+                CloseCode.PROTOCOL_ERROR,
+                "RSV2 must be 0 when no extension defining its meaning is negotiated",
+            )
+        }
+        if (frame.rsv3) {
+            return AssemblyResult.Error(
+                CloseCode.PROTOCOL_ERROR,
+                "RSV3 must be 0 when no extension defining its meaning is negotiated",
+            )
+        }
+        // RSV1 is used by permessage-deflate extension
+        if (frame.rsv1 && !compressionEnabled) {
+            return AssemblyResult.Error(
+                CloseCode.PROTOCOL_ERROR,
+                "RSV1 must be 0 when permessage-deflate is not negotiated",
+            )
+        }
+
         // Control frames are handled immediately and don't affect fragmentation state
         if (frame.isControlFrame) {
             return handleControlFrame(frame)
@@ -92,6 +127,28 @@ class MessageAssembler {
             )
         }
 
+        // RFC 6455 Section 7.4.1: Validate close frame
+        if (frame is ParsedFrame.ControlFrame.Close) {
+            // Check for invalid UTF-8 in close reason
+            if (frame.hasInvalidUtf8) {
+                return AssemblyResult.Error(
+                    CloseCode.INVALID_PAYLOAD,
+                    "Invalid UTF-8 in close reason",
+                )
+            }
+
+            // Check if the close code is valid per RFC 6455 Section 7.4.1
+            // Valid codes for wire transmission: 1000-1003, 1007-1011, 3000-3999, 4000-4999
+            // Codes 1005, 1006, 1015 MUST NOT be sent on the wire
+            // Invalid codes include: 0-999, 1004-1006, 1012-2999, 5000+
+            if (frame.payloadLength >= 2 && !frame.closeCode.isValidForWire) {
+                return AssemblyResult.Error(
+                    CloseCode.PROTOCOL_ERROR,
+                    "Invalid close code: ${frame.closeCode.code}",
+                )
+            }
+        }
+
         return AssemblyResult.ControlFrame(frame)
     }
 
@@ -107,6 +164,13 @@ class MessageAssembler {
                     "Unexpected control frame in data frame handler",
                 )
             }
+            is ParsedFrame.InvalidFrame -> {
+                // Should not reach here - invalid frames handled at the start of addFrame()
+                AssemblyResult.Error(
+                    CloseCode.PROTOCOL_ERROR,
+                    frame.reason,
+                )
+            }
         }
 
     private fun handleFirstFragment(frame: ParsedFrame): AssemblyResult {
@@ -120,6 +184,7 @@ class MessageAssembler {
 
         if (frame.fin) {
             // Complete message in a single frame (common case)
+            // Note: FrameReader guarantees payload.position() == 0
             return AssemblyResult.CompleteMessage(
                 AssembledMessage(
                     opcode = frame.opcode,
@@ -133,7 +198,8 @@ class MessageAssembler {
         firstFrameOpcode = frame.opcode
         firstFrameRsv1 = frame.rsv1
         fragmentBuffers.add(frame.payload)
-        totalPayloadSize += frame.payload.remaining()
+        // Use payloadLength instead of remaining() to handle buffers with non-zero position
+        totalPayloadSize += frame.payloadLength
 
         return AssemblyResult.NeedMoreFrames
     }
@@ -148,7 +214,8 @@ class MessageAssembler {
         }
 
         fragmentBuffers.add(frame.payload)
-        totalPayloadSize += frame.payload.remaining()
+        // Use payloadLength instead of remaining() to handle buffers with non-zero position
+        totalPayloadSize += frame.payloadLength
 
         if (!frame.fin) {
             return AssemblyResult.NeedMoreFrames
@@ -178,6 +245,9 @@ class MessageAssembler {
     private fun combineBuffers(): ReadBuffer {
         val combined = PlatformBuffer.allocate(totalPayloadSize, AllocationZone.Heap)
         for (buf in fragmentBuffers) {
+            // Reset position to re-read from start
+            // Note: position(0) is correct here - these buffers are already in read mode.
+            // resetForRead() is for write-mode buffers and would set limit=writePosition.
             buf.position(0)
             combined.write(buf)
         }
@@ -258,6 +328,22 @@ value class CloseCode(
                 code in 1007u..1011u ||
                 code in 3000u..3999u ||
                 code in 4000u..4999u
+
+    /**
+     * Whether this close code is valid to receive from a peer (can be sent on the wire).
+     * Per RFC 6455 Section 7.4.1, codes 1005, 1006, and 1015 MUST NOT be sent on the wire.
+     * They are only used internally to indicate connection state.
+     */
+    val isValidForWire: Boolean
+        get() {
+            // Per RFC 6455 Section 7.4.1:
+            // 1005 (NO_STATUS_RECEIVED), 1006 (ABNORMAL_CLOSURE), and 1015 (TLS_HANDSHAKE)
+            // are reserved and MUST NOT be sent on the wire
+            return isValid &&
+                code != 1005u.toUShort() &&
+                code != 1006u.toUShort() &&
+                code != 1015u.toUShort()
+        }
 
     companion object {
         /** 1000 - Normal closure */

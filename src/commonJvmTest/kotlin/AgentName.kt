@@ -5,3 +5,5 @@ actual fun agentName(): String =
     } catch (e: ClassNotFoundException) {
         "JVM"
     }
+
+actual fun autobahnHost(): String = System.getenv("AUTOBAHN_HOST") ?: "localhost"

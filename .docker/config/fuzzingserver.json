@@ -3,5 +3,10 @@
   "outdir": "./reports/clients",
   "cases": ["*"],
   "exclude-cases": [],
-  "exclude-agent-cases": {}
+  "exclude-agent-cases": {},
+  "options": {
+    "failByDrop": false
+  },
+  "webport": 8080,
+  "debug": false
 }

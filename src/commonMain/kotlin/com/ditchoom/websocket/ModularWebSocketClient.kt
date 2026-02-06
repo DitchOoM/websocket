@@ -448,7 +448,8 @@ class ModularWebSocketClient(
 
         return try {
             // Stream decompress to single buffer - reduces peak memory
-            decompressToBuffer(payload, decompressor)
+            // Use Direct zone so output buffer has NativeMemoryAccess for re-compression
+            decompressToBuffer(payload, decompressor, allocationZone)
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {

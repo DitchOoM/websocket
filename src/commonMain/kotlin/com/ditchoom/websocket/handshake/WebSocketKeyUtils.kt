@@ -2,11 +2,8 @@ package com.ditchoom.websocket.handshake
 
 import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
 
-/**
- * WebSocket key generation and validation utilities.
- *
- * Per RFC 6455 Section 4.1 and 4.2.2.
- */
+// WebSocket key generation and validation utilities.
+// Per RFC 6455 Section 4.1 and 4.2.2.
 
 /**
  * The GUID used in Sec-WebSocket-Accept computation.

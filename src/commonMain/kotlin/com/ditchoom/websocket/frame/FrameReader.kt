@@ -230,6 +230,11 @@ class FrameReader(
                     writableBuffer.position(0)
                     writableBuffer
                 } else {
+                    // Ensure unmasked buffer is ready to read from start
+                    // Contract: ParsedFrame.payload always has position=0, remaining=payloadLength
+                    if (buffer.position() != 0) {
+                        buffer.position(0)
+                    }
                     buffer
                 }
             } else {
@@ -302,7 +307,9 @@ class FrameReader(
             if (payload.hasRemaining()) {
                 try {
                     payload.readString(payload.remaining(), Charset.UTF8)
-                } catch (@Suppress("TooGenericExceptionCaught") e: Throwable) {
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Throwable,
+                ) {
                     // Use Throwable to catch JS TypeError from TextDecoder
                     hasInvalidUtf8 = true
                     ""
@@ -597,7 +604,9 @@ private fun parseClosePayload(
         if (payload.hasRemaining()) {
             try {
                 payload.readString(payload.remaining(), Charset.UTF8)
-            } catch (@Suppress("TooGenericExceptionCaught") e: Throwable) {
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Throwable,
+            ) {
                 // Use Throwable to catch JS TypeError from TextDecoder
                 hasInvalidUtf8 = true
                 ""

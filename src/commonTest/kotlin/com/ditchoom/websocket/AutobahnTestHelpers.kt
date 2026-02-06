@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import agentName
+import autobahnHost
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
@@ -24,7 +25,7 @@ internal suspend fun CoroutineScope.prepareConnection(
 ): WebSocketClient {
     val connectionOptions =
         WebSocketConnectionOptions(
-            name = "localhost",
+            name = autobahnHost(),
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,
@@ -41,9 +42,10 @@ internal suspend fun CoroutineScope.prepareConnection(
 
     if (awaitClose) {
         // Wait for server to close the connection (with timeout)
-        val closed = withTimeoutOrNull(10.seconds) {
-            websocket.connectionState.first { it is ConnectionState.Disconnected }
-        }
+        val closed =
+            withTimeoutOrNull(10.seconds) {
+                websocket.connectionState.first { it is ConnectionState.Disconnected }
+            }
         if (closed == null) {
             // Server didn't close in time, close from client side
             try {
@@ -64,7 +66,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
-            name = "localhost",
+            name = autobahnHost(),
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,
@@ -107,7 +109,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
-            name = "localhost",
+            name = autobahnHost(),
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,
@@ -146,7 +148,7 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
-            name = "localhost",
+            name = autobahnHost(),
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,

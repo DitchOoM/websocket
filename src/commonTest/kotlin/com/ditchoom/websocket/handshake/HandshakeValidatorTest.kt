@@ -16,7 +16,6 @@ import kotlin.test.assertTrue
  *   https://datatracker.ietf.org/doc/html/rfc6455#section-4.1
  */
 class HandshakeValidatorTest {
-
     // Test fixtures
     private val validAcceptKey = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 
@@ -30,10 +29,11 @@ class HandshakeValidatorTest {
     ) = HandshakeResponse(
         statusCode = statusCode,
         statusReason = "Switching Protocols",
-        headers = mapOf(
-            "upgrade" to upgrade,
-            "connection" to connection,
-        ),
+        headers =
+            mapOf(
+                "upgrade" to upgrade,
+                "connection" to connection,
+            ),
         acceptKey = acceptKey,
         protocol = protocol,
         extensions = extensions,
@@ -129,16 +129,17 @@ class HandshakeValidatorTest {
 
     @Test
     fun `RFC 6455 Section 4-1 - missing Upgrade header fails`() {
-        val response = HandshakeResponse(
-            statusCode = 101,
-            statusReason = "Switching Protocols",
-            headers = mapOf("connection" to "Upgrade"),
-            acceptKey = validAcceptKey,
-            protocol = null,
-            extensions = emptyList(),
-            compressionEnabled = false,
-            compressionParams = null,
-        )
+        val response =
+            HandshakeResponse(
+                statusCode = 101,
+                statusReason = "Switching Protocols",
+                headers = mapOf("connection" to "Upgrade"),
+                acceptKey = validAcceptKey,
+                protocol = null,
+                extensions = emptyList(),
+                compressionEnabled = false,
+                compressionParams = null,
+            )
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
 
@@ -197,16 +198,17 @@ class HandshakeValidatorTest {
 
     @Test
     fun `RFC 6455 Section 4-1 - missing Connection header fails`() {
-        val response = HandshakeResponse(
-            statusCode = 101,
-            statusReason = "Switching Protocols",
-            headers = mapOf("upgrade" to "websocket"),
-            acceptKey = validAcceptKey,
-            protocol = null,
-            extensions = emptyList(),
-            compressionEnabled = false,
-            compressionParams = null,
-        )
+        val response =
+            HandshakeResponse(
+                statusCode = 101,
+                statusReason = "Switching Protocols",
+                headers = mapOf("upgrade" to "websocket"),
+                acceptKey = validAcceptKey,
+                protocol = null,
+                extensions = emptyList(),
+                compressionEnabled = false,
+                compressionParams = null,
+            )
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
 
@@ -278,11 +280,12 @@ class HandshakeValidatorTest {
         // the WebSocket Connection."
         val response = validResponse(protocol = "chat")
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredProtocols = listOf("chat", "superchat"),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredProtocols = listOf("chat", "superchat"),
+            )
 
         assertTrue(result.isSuccess)
     }
@@ -291,11 +294,12 @@ class HandshakeValidatorTest {
     fun `RFC 6455 Section 4-1 - selected protocol was not offered - fails`() {
         val response = validResponse(protocol = "unknown")
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredProtocols = listOf("chat", "superchat"),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredProtocols = listOf("chat", "superchat"),
+            )
 
         assertFalse(result.isSuccess)
         assertIs<ValidationResult.Failure>(result)
@@ -306,11 +310,12 @@ class HandshakeValidatorTest {
     fun `RFC 6455 Section 4-1 - no protocol selected when none offered - valid`() {
         val response = validResponse(protocol = null)
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredProtocols = emptyList(),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredProtocols = emptyList(),
+            )
 
         assertTrue(result.isSuccess)
     }
@@ -321,11 +326,12 @@ class HandshakeValidatorTest {
         // (this is a server-initiated protocol)
         val response = validResponse(protocol = "server-protocol")
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredProtocols = emptyList(),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredProtocols = emptyList(),
+            )
 
         assertTrue(result.isSuccess)
     }
@@ -341,30 +347,34 @@ class HandshakeValidatorTest {
         // and this header field indicates the use of an extension that was
         // not present in the client's handshake [...], the client MUST Fail
         // the WebSocket Connection."
-        val response = validResponse(
-            extensions = listOf(ExtensionOffer("permessage-deflate", emptyMap())),
-        )
+        val response =
+            validResponse(
+                extensions = listOf(ExtensionOffer("permessage-deflate", emptyMap())),
+            )
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredExtensions = listOf("permessage-deflate"),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredExtensions = listOf("permessage-deflate"),
+            )
 
         assertTrue(result.isSuccess)
     }
 
     @Test
     fun `RFC 6455 Section 4-1 - extension was not offered - fails`() {
-        val response = validResponse(
-            extensions = listOf(ExtensionOffer("unknown-extension", emptyMap())),
-        )
+        val response =
+            validResponse(
+                extensions = listOf(ExtensionOffer("unknown-extension", emptyMap())),
+            )
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredExtensions = listOf("permessage-deflate"),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredExtensions = listOf("permessage-deflate"),
+            )
 
         assertFalse(result.isSuccess)
         assertIs<ValidationResult.Failure>(result)
@@ -375,11 +385,12 @@ class HandshakeValidatorTest {
     fun `RFC 6455 Section 4-1 - no extensions when none offered - valid`() {
         val response = validResponse(extensions = emptyList())
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredExtensions = emptyList(),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredExtensions = emptyList(),
+            )
 
         assertTrue(result.isSuccess)
     }
@@ -389,15 +400,17 @@ class HandshakeValidatorTest {
         // If client didn't offer extensions, server offering one is actually
         // protocol-compliant (though unusual). The check only applies when
         // client did offer extensions.
-        val response = validResponse(
-            extensions = listOf(ExtensionOffer("permessage-deflate", emptyMap())),
-        )
+        val response =
+            validResponse(
+                extensions = listOf(ExtensionOffer("permessage-deflate", emptyMap())),
+            )
 
-        val result = HandshakeValidator.validate(
-            response,
-            validAcceptKey,
-            offeredExtensions = emptyList(),
-        )
+        val result =
+            HandshakeValidator.validate(
+                response,
+                validAcceptKey,
+                offeredExtensions = emptyList(),
+            )
 
         assertTrue(result.isSuccess)
     }
@@ -408,12 +421,13 @@ class HandshakeValidatorTest {
 
     @Test
     fun `validation stops at first error - status code before headers`() {
-        val response = validResponse(
-            statusCode = 400,
-            upgrade = "invalid",
-            connection = "invalid",
-            acceptKey = "invalid",
-        )
+        val response =
+            validResponse(
+                statusCode = 400,
+                upgrade = "invalid",
+                connection = "invalid",
+                acceptKey = "invalid",
+            )
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
 

@@ -124,7 +124,10 @@ object HandshakeValidator {
      * Tokens in HTTP headers are comma-separated.
      * Per RFC 7230 Section 3.2.6.
      */
-    private fun containsToken(headerValue: String, token: String): Boolean {
+    private fun containsToken(
+        headerValue: String,
+        token: String,
+    ): Boolean {
         val tokens = headerValue.split(',')
         return tokens.any { it.trim().equals(token, ignoreCase = true) }
     }
@@ -147,8 +150,10 @@ sealed class ValidationResult {
     companion object {
         fun success(): ValidationResult = Success
 
-        fun failure(error: ValidationError, message: String): ValidationResult =
-            Failure(error, message)
+        fun failure(
+            error: ValidationError,
+            message: String,
+        ): ValidationResult = Failure(error, message)
     }
 }
 

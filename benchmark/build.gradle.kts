@@ -7,6 +7,7 @@ plugins {
 }
 
 repositories {
+    mavenLocal() // For local buffer library testing
     mavenCentral()
     google()
 }

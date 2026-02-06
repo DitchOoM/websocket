@@ -342,17 +342,17 @@ val validateAutobahnResults =
     }
 // Wire Docker/echo server dependencies only when integration tests are requested
 if (runIntegrationTests) {
-    tasks.forEach { task ->
-        val taskName = task.name
+    tasks.configureEach {
+        val taskName = name
         if ((
                 taskName.contains("test", ignoreCase = true) &&
                     !taskName.contains("clean", ignoreCase = true)
             ) ||
             taskName == "check"
         ) {
-            task.dependsOn(echoWebsocket)
-            task.dependsOn(autobahnContainer)
-            task.finalizedBy(validateAutobahnResults)
+            dependsOn(echoWebsocket)
+            dependsOn(autobahnContainer)
+            finalizedBy(validateAutobahnResults)
         }
     }
 }

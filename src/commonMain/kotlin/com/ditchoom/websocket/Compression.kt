@@ -138,8 +138,11 @@ internal fun combineChunks(
     zone: AllocationZone,
 ): ReadBuffer {
     if (chunks.isEmpty()) return ReadBuffer.EMPTY_BUFFER
-    if (chunks.size == 1) return chunks[0]
+    // Always copy to a new buffer. The single-chunk shortcut (returning chunks[0] directly)
+    // causes use-after-free on Linux when callers do chunks.closeAll() after combining,
+    // since combineChunks would have returned the same object that gets freed.
     val totalSize = chunks.sumOf { it.remaining() }
+    if (totalSize == 0) return ReadBuffer.EMPTY_BUFFER
     val result = PlatformBuffer.allocate(totalSize, zone)
     for (chunk in chunks) {
         result.write(chunk)

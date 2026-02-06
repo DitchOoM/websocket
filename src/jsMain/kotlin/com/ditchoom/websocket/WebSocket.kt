@@ -9,9 +9,14 @@ actual fun WebSocketClient.Companion.allocate(
     pool: BufferPool,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
+    implementation: WebSocketImplementation,
 ): WebSocketClient =
-    try {
-        DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
-    } catch (e: UnsupportedOperationException) {
-        BrowserWebSocketController(connectionOptions, pool, parentScope, allocationZone)
+    when (implementation) {
+        WebSocketImplementation.DEFAULT ->
+            try {
+                DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
+            } catch (e: UnsupportedOperationException) {
+                BrowserWebSocketController(connectionOptions, pool, parentScope, allocationZone)
+            }
+        WebSocketImplementation.MODULAR -> ModularWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
     }

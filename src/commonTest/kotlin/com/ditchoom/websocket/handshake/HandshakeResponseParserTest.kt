@@ -1,14 +1,11 @@
 package com.ditchoom.websocket.handshake
 
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -26,7 +23,6 @@ import kotlin.test.assertTrue
  *   https://datatracker.ietf.org/doc/html/rfc7230
  */
 class HandshakeResponseParserTest {
-
     // ========================================================================
     // RFC 6455 Section 4.2.2 - Server Handshake Response
     // https://datatracker.ietf.org/doc/html/rfc6455#section-4.2.2
@@ -40,13 +36,14 @@ class HandshakeResponseParserTest {
         // 2. An HTTP Upgrade header field with value 'websocket'
         // 3. An HTTP Connection header field with value 'Upgrade'
         // 4. A Sec-WebSocket-Accept header field"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -63,14 +60,15 @@ class HandshakeResponseParserTest {
     fun `RFC 6455 Section 4-2-2 - parse response with Sec-WebSocket-Protocol`() {
         // "Optionally, a |Sec-WebSocket-Protocol| header field, with a value
         // /protocol/ that indicates the subprotocol the server has selected"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
             Sec-WebSocket-Protocol: chat
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -82,14 +80,15 @@ class HandshakeResponseParserTest {
     fun `RFC 6455 Section 4-2-2 - parse response with Sec-WebSocket-Extensions`() {
         // "Optionally, a |Sec-WebSocket-Extensions| header field, with a
         // value /extensions/ indicating the extensions the server accepts"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
             Sec-WebSocket-Extensions: permessage-deflate
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -131,13 +130,14 @@ class HandshakeResponseParserTest {
     @Test
     fun `RFC 7230 Section 3-1-2 - parse HTTP 1-1 status line`() {
         // "status-line = HTTP-version SP status-code SP reason-phrase CRLF"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -149,13 +149,14 @@ class HandshakeResponseParserTest {
     @Test
     fun `RFC 7230 Section 3-1-2 - parse HTTP 1-0 status line`() {
         // HTTP/1.0 is also acceptable per the spec
-        val response = """
+        val response =
+            """
             HTTP/1.0 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -167,13 +168,14 @@ class HandshakeResponseParserTest {
     fun `RFC 7230 Section 3-1-2 - empty reason phrase is valid`() {
         // "A client SHOULD ignore the reason-phrase content."
         // The reason phrase can be empty
-        val response = """
+        val response =
+            """
             HTTP/1.1 101
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -193,11 +195,12 @@ class HandshakeResponseParserTest {
             426 to "Upgrade Required",
             500 to "Internal Server Error",
         )) {
-            val response = """
+            val response =
+                """
                 HTTP/1.1 $code $reason
                 Content-Length: 0
 
-            """.trimIndent().replace("\n", "\r\n")
+                """.trimIndent().replace("\n", "\r\n")
 
             val buffer = response.toReadBuffer(Charset.UTF8)
             val result = HandshakeResponseParser.parse(buffer)
@@ -216,13 +219,14 @@ class HandshakeResponseParserTest {
     @Test
     fun `RFC 7230 Section 3-2 - header names are case-insensitive`() {
         // "Each header field consists of a case-insensitive field name"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             UPGRADE: websocket
             CONNECTION: Upgrade
             SEC-WEBSOCKET-ACCEPT: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -236,13 +240,14 @@ class HandshakeResponseParserTest {
     @Test
     fun `RFC 7230 Section 3-2 - header value with leading whitespace`() {
         // "optional leading whitespace (OWS) [...] before the field value"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade:   websocket
             Connection:		Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -254,13 +259,14 @@ class HandshakeResponseParserTest {
     @Test
     fun `RFC 7230 Section 3-2 - header value with trailing whitespace`() {
         // "optional [...] trailing whitespace (OWS)"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -279,21 +285,22 @@ class HandshakeResponseParserTest {
         // "A server MAY include the 'server_no_context_takeover' extension
         // parameter in an extension negotiation response to indicate that
         // the server will not reuse the LZ77 sliding window"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
 
-        assertNotNull(result.compressionParams)
-        assertTrue(result.compressionParams!!.serverNoContextTakeover)
-        assertFalse(result.compressionParams!!.clientNoContextTakeover)
+        val params = checkNotNull(result.compressionParams)
+        assertTrue(params.serverNoContextTakeover)
+        assertFalse(params.clientNoContextTakeover)
     }
 
     @Test
@@ -301,21 +308,22 @@ class HandshakeResponseParserTest {
         // "A server MAY include the 'client_no_context_takeover' extension
         // parameter in an extension negotiation response to require the
         // client to not reuse the LZ77 sliding window"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate; client_no_context_takeover
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
 
-        assertNotNull(result.compressionParams)
-        assertFalse(result.compressionParams!!.serverNoContextTakeover)
-        assertTrue(result.compressionParams!!.clientNoContextTakeover)
+        val params = checkNotNull(result.compressionParams)
+        assertFalse(params.serverNoContextTakeover)
+        assertTrue(params.clientNoContextTakeover)
     }
 
     @Test
@@ -323,61 +331,64 @@ class HandshakeResponseParserTest {
         // "A server MAY include the 'server_max_window_bits' extension parameter
         // in an extension negotiation response to inform the client of the LZ77
         // sliding window size it will use"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate; server_max_window_bits=12
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
 
-        assertNotNull(result.compressionParams)
-        assertEquals(12, result.compressionParams!!.serverMaxWindowBits)
+        val params = checkNotNull(result.compressionParams)
+        assertEquals(12, params.serverMaxWindowBits)
     }
 
     @Test
     fun `RFC 7692 Section 7-1-2 - client_max_window_bits parameter`() {
         // "A server MAY include the 'client_max_window_bits' extension parameter
         // in an extension negotiation response"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits=10
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
 
-        assertNotNull(result.compressionParams)
-        assertEquals(10, result.compressionParams!!.clientMaxWindowBits)
+        val params = checkNotNull(result.compressionParams)
+        assertEquals(10, params.clientMaxWindowBits)
     }
 
     @Test
     fun `RFC 7692 Section 7 - all compression parameters together`() {
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover; server_max_window_bits=12; client_max_window_bits=10
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
 
-        assertNotNull(result.compressionParams)
-        assertTrue(result.compressionParams!!.serverNoContextTakeover)
-        assertTrue(result.compressionParams!!.clientNoContextTakeover)
-        assertEquals(12, result.compressionParams!!.serverMaxWindowBits)
-        assertEquals(10, result.compressionParams!!.clientMaxWindowBits)
+        val params = checkNotNull(result.compressionParams)
+        assertTrue(params.serverNoContextTakeover)
+        assertTrue(params.clientNoContextTakeover)
+        assertEquals(12, params.serverMaxWindowBits)
+        assertEquals(10, params.clientMaxWindowBits)
     }
 
     // ========================================================================
@@ -389,14 +400,15 @@ class HandshakeResponseParserTest {
     fun `RFC 6455 Section 9-1 - parse multiple extensions`() {
         // "The value of the 'Sec-WebSocket-Extensions' header field consists
         // of a comma-separated list of extension offers"
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
             Sec-WebSocket-Extensions: permessage-deflate, x-custom-ext; param=value
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val result = HandshakeResponseParser.parse(buffer)
@@ -433,13 +445,14 @@ class HandshakeResponseParserTest {
 
     @Test
     fun `zero-copy - buffer position is restored after parsing`() {
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
         val originalPosition = buffer.position()
@@ -451,13 +464,14 @@ class HandshakeResponseParserTest {
 
     @Test
     fun `zero-copy - buffer can be parsed multiple times`() {
-        val response = """
+        val response =
+            """
             HTTP/1.1 101 Switching Protocols
             Upgrade: websocket
             Connection: Upgrade
             Sec-WebSocket-Accept: abc=
 
-        """.trimIndent().replace("\n", "\r\n")
+            """.trimIndent().replace("\n", "\r\n")
 
         val buffer = response.toReadBuffer(Charset.UTF8)
 

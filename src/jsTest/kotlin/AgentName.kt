@@ -7,3 +7,10 @@ actual fun agentName(): String =
     } else {
         "BrowserJS"
     }
+
+actual fun autobahnHost(): String =
+    if (isNodeJs) {
+        js("process.env.AUTOBAHN_HOST || 'localhost'").unsafeCast<String>()
+    } else {
+        "localhost"
+    }

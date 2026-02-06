@@ -4,7 +4,7 @@ import java.security.MessageDigest
 import java.util.Base64
 
 /**
- * JVM implementation of Sec-WebSocket-Accept computation.
+ * JVM/Android implementation of Sec-WebSocket-Accept computation.
  *
  * Per RFC 6455 Section 4.2.2.
  */

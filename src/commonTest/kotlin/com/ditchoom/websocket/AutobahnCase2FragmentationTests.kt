@@ -6,66 +6,68 @@ class AutobahnCase2FragmentationTests {
     @Test
     fun case2_1() =
         runTestNoTimeSkipping {
-            prepareConnection(17)
+            echoMessageAndClose(17)
         }
 
     @Test
     fun case2_2() =
         runTestNoTimeSkipping {
-            prepareConnection(18)
+            echoMessageAndClose(18)
         }
 
     @Test
     fun case2_3() =
         runTestNoTimeSkipping {
-            prepareConnection(19)
+            echoMessageAndClose(19)
         }
 
     @Test
     fun case2_4() =
         runTestNoTimeSkipping {
-            prepareConnection(20)
+            echoMessageAndClose(20)
         }
 
     @Test
     fun case2_5() =
         runTestNoTimeSkipping {
+            // Case 21: Server sends invalid ping (payload > 125 bytes)
+            // Client should reject with close code 1002 - just connect and wait for close
             prepareConnection(21)
         }
 
     @Test
     fun case2_6() =
         runTestNoTimeSkipping {
-            prepareConnection(22)
+            echoMessageAndClose(22)
         }
 
     @Test
     fun case2_7() =
         runTestNoTimeSkipping {
-            prepareConnection(23)
+            echoMessageAndClose(23)
         }
 
     @Test
     fun case2_8() =
         runTestNoTimeSkipping {
-            prepareConnection(24)
+            echoMessageAndClose(24)
         }
 
     @Test
     fun case2_9() =
         runTestNoTimeSkipping {
-            prepareConnection(25)
+            echoMessageAndClose(25)
         }
 
     @Test
     fun case2_10() =
         runTestNoTimeSkipping {
-            prepareConnection(26)
+            echoMessageAndClose(26)
         }
 
     @Test
     fun case2_11() =
         runTestNoTimeSkipping {
-            prepareConnection(27)
+            echoMessageAndClose(27)
         }
 }

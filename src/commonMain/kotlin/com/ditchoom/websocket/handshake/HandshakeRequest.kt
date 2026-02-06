@@ -1,6 +1,5 @@
 package com.ditchoom.websocket.handshake
 
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.allocate
@@ -49,50 +48,51 @@ class HandshakeRequest private constructor(
      * @return ReadBuffer containing the HTTP request bytes
      */
     fun toBuffer(): ReadBuffer {
-        val request = buildString {
-            // Request line: GET /path HTTP/1.1\r\n
-            append("GET ")
-            append(path)
-            append(" HTTP/1.1\r\n")
+        val request =
+            buildString {
+                // Request line: GET /path HTTP/1.1\r\n
+                append("GET ")
+                append(path)
+                append(" HTTP/1.1\r\n")
 
-            // Host header (RFC 6455 Section 4.1 #2)
-            append("Host: ")
-            append(hostHeader())
-            append("\r\n")
+                // Host header (RFC 6455 Section 4.1 #2)
+                append("Host: ")
+                append(hostHeader())
+                append("\r\n")
 
-            // Required headers (RFC 6455 Section 4.1 #3-6)
-            append("Upgrade: websocket\r\n")
-            append("Connection: Upgrade\r\n")
-            append("Sec-WebSocket-Key: ")
-            append(key)
-            append("\r\n")
-            append("Sec-WebSocket-Version: 13\r\n")
+                // Required headers (RFC 6455 Section 4.1 #3-6)
+                append("Upgrade: websocket\r\n")
+                append("Connection: Upgrade\r\n")
+                append("Sec-WebSocket-Key: ")
+                append(key)
+                append("\r\n")
+                append("Sec-WebSocket-Version: 13\r\n")
 
-            // Optional protocol header (RFC 6455 Section 4.1 #8)
-            if (protocols.isNotEmpty()) {
-                append("Sec-WebSocket-Protocol: ")
-                append(protocols.joinToString(", "))
+                // Optional protocol header (RFC 6455 Section 4.1 #8)
+                if (protocols.isNotEmpty()) {
+                    append("Sec-WebSocket-Protocol: ")
+                    append(protocols.joinToString(", "))
+                    append("\r\n")
+                }
+
+                // Optional extensions header (RFC 6455 Section 4.1 #9)
+                if (extensions.isNotEmpty()) {
+                    append("Sec-WebSocket-Extensions: ")
+                    append(extensions.joinToString(", "))
+                    append("\r\n")
+                }
+
+                // Additional headers
+                for ((name, value) in additionalHeaders) {
+                    append(name)
+                    append(": ")
+                    append(value)
+                    append("\r\n")
+                }
+
+                // Empty line terminates headers
                 append("\r\n")
             }
-
-            // Optional extensions header (RFC 6455 Section 4.1 #9)
-            if (extensions.isNotEmpty()) {
-                append("Sec-WebSocket-Extensions: ")
-                append(extensions.joinToString(", "))
-                append("\r\n")
-            }
-
-            // Additional headers
-            for ((name, value) in additionalHeaders) {
-                append(name)
-                append(": ")
-                append(value)
-                append("\r\n")
-            }
-
-            // Empty line terminates headers
-            append("\r\n")
-        }
 
         val bytes = request.encodeToByteArray()
         val buffer = PlatformBuffer.allocate(bytes.size)
@@ -119,7 +119,11 @@ class HandshakeRequest private constructor(
     /**
      * Builder for constructing handshake requests.
      */
-    class Builder(private val host: String, private val port: Int, private val path: String) {
+    class Builder(
+        private val host: String,
+        private val port: Int,
+        private val path: String,
+    ) {
         private var key: String = generateWebSocketKey()
         private var protocols: List<String> = emptyList()
         private var extensions: MutableList<String> = mutableListOf()
@@ -136,9 +140,10 @@ class HandshakeRequest private constructor(
          * Sets the subprotocols to request.
          * Per RFC 6455 Section 4.1 #8.
          */
-        fun protocols(vararg protocols: String) = apply {
-            this.protocols = protocols.toList()
-        }
+        fun protocols(vararg protocols: String) =
+            apply {
+                this.protocols = protocols.toList()
+            }
 
         /**
          * Requests the permessage-deflate compression extension.
@@ -151,52 +156,60 @@ class HandshakeRequest private constructor(
             clientNoContextTakeover: Boolean = true,
             serverNoContextTakeover: Boolean = true,
         ) = apply {
-            val params = buildList {
-                if (clientNoContextTakeover) add("client_no_context_takeover")
-                if (serverNoContextTakeover) add("server_no_context_takeover")
-            }
-            val ext = if (params.isEmpty()) {
-                "permessage-deflate"
-            } else {
-                "permessage-deflate; ${params.joinToString("; ")}"
-            }
+            val params =
+                buildList {
+                    if (clientNoContextTakeover) add("client_no_context_takeover")
+                    if (serverNoContextTakeover) add("server_no_context_takeover")
+                }
+            val ext =
+                if (params.isEmpty()) {
+                    "permessage-deflate"
+                } else {
+                    "permessage-deflate; ${params.joinToString("; ")}"
+                }
             extensions.add(ext)
         }
 
         /**
          * Adds a custom extension request.
          */
-        fun extension(extension: String) = apply {
-            extensions.add(extension)
-        }
+        fun extension(extension: String) =
+            apply {
+                extensions.add(extension)
+            }
 
         /**
          * Adds an additional header.
          */
-        fun header(name: String, value: String) = apply {
+        fun header(
+            name: String,
+            value: String,
+        ) = apply {
             additionalHeaders[name] = value
         }
 
         /**
          * Sets whether TLS is used (affects default port in Host header).
          */
-        fun useTls(useTls: Boolean) = apply {
-            this.useTls = useTls
-        }
+        fun useTls(useTls: Boolean) =
+            apply {
+                this.useTls = useTls
+            }
 
         /**
          * Builds the handshake request.
          */
-        fun build(): HandshakeRequest = HandshakeRequest(
-            host = host,
-            port = port,
-            path = path,
-            key = key,
-            protocols = protocols,
-            extensions = extensions.toList(),
-            additionalHeaders = additionalHeaders.toMap(),
-            useTls = useTls,
-        )
+        fun build(): HandshakeRequest =
+            HandshakeRequest(
+                host = host,
+                port = port,
+                path = path,
+                key = key,
+                protocols = protocols,
+                extensions = extensions.toList(),
+                additionalHeaders = additionalHeaders.toMap(),
+                useTls = useTls,
+            )
     }
 
     companion object {
@@ -207,7 +220,10 @@ class HandshakeRequest private constructor(
          * @param port The server port
          * @param path The WebSocket endpoint path (e.g., "/ws" or "/chat")
          */
-        fun builder(host: String, port: Int, path: String): Builder =
-            Builder(host, port, path)
+        fun builder(
+            host: String,
+            port: Int,
+            path: String,
+        ): Builder = Builder(host, port, path)
     }
 }

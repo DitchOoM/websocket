@@ -35,6 +35,16 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 
+/**
+ * Original WebSocket client implementation.
+ *
+ * @deprecated Use [ModularWebSocketClient] instead for better performance and RFC compliance.
+ * This class will be removed in a future release.
+ */
+@Deprecated(
+    "Use ModularWebSocketClient for better performance",
+    ReplaceWith("ModularWebSocketClient(connectionOptions, pool, parentScope, allocationZone)"),
+)
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     private val pool: BufferPool,
@@ -162,15 +172,17 @@ class DefaultWebSocketClient(
                 response.contains("permessage-deflate", ignoreCase = true)
             ) {
                 enableCompression = true
-                outgoingCompressor = SuspendingStreamingCompressor.create(
-                    CompressionAlgorithm.Raw,
-                    CompressionLevel.Default,
-                    BufferAllocator.Heap,
-                )
-                incomingDecompressor = SuspendingStreamingDecompressor.create(
-                    CompressionAlgorithm.Raw,
-                    BufferAllocator.Direct,
-                )
+                outgoingCompressor =
+                    SuspendingStreamingCompressor.create(
+                        CompressionAlgorithm.Raw,
+                        CompressionLevel.Default,
+                        BufferAllocator.Heap,
+                    )
+                incomingDecompressor =
+                    SuspendingStreamingDecompressor.create(
+                        CompressionAlgorithm.Raw,
+                        BufferAllocator.Direct,
+                    )
             }
             connectionStateFlow.value = ConnectionState.Connected
             processIncomingMessages(streamProcessor)
@@ -261,10 +273,11 @@ class DefaultWebSocketClient(
     ): Int =
         try {
             val frame = Frame(true, opcode, MaskingKey.FourByteMaskingKey(), payloadData)
-            val frameBuffer = frame.toBuffer(
-                attemptDeflate = enableCompression,
-                compressor = outgoingCompressor,
-            )
+            val frameBuffer =
+                frame.toBuffer(
+                    attemptDeflate = enableCompression,
+                    compressor = outgoingCompressor,
+                )
             frameBuffer.resetForRead()
             val remainingBytes = frameBuffer.remaining()
             while (frameBuffer.hasRemaining()) {
@@ -276,9 +289,6 @@ class DefaultWebSocketClient(
             -1
         }
 
-    /**
-     * Read from socket and append to the processor.
-     */
     private suspend fun readIntoProcessor(processor: SuspendingStreamProcessor) {
         val readBuffer = socket.read(connectionOptions.readTimeout)
         readBuffer.resetForRead()
@@ -327,6 +337,8 @@ class DefaultWebSocketClient(
                             for (buf in payloadBuffers) {
                                 combined.write(buf)
                             }
+                            // Clear references to allow GC to reclaim fragment buffers
+                            payloadBuffers.clear()
                             combined.resetForRead()
                             combined
                         }
@@ -336,14 +348,15 @@ class DefaultWebSocketClient(
                             try {
                                 val utf8StringRead =
                                     if (firstFrame.rsv1 && enableCompression) {
-                                        val decompressed = if (incomingDecompressor != null) {
-                                            val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                        if (incomingDecompressor != null) {
+                                            // Stream decompress directly to string - reduces peak memory
+                                            val result = decompressToString(payload, incomingDecompressor!!)
                                             incomingDecompressor!!.reset()
-                                            combineChunks(chunks, AllocationZone.Direct)
+                                            result
                                         } else {
-                                            payload.decompressWebsocketBuffer()
+                                            val decompressed = payload.decompressWebsocketBuffer()
+                                            decompressed.readString(decompressed.remaining())
                                         }
-                                        decompressed.readString(decompressed.remaining())
                                     } else {
                                         payload.readString(payload.remaining())
                                     }
@@ -354,17 +367,19 @@ class DefaultWebSocketClient(
                             }
                         }
                         Opcode.Binary -> {
-                            val binaryPayload = if (firstFrame.rsv1 && enableCompression) {
-                                if (incomingDecompressor != null) {
-                                    val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
-                                    incomingDecompressor!!.reset()
-                                    combineChunks(chunks, AllocationZone.Direct)
+                            val binaryPayload =
+                                if (firstFrame.rsv1 && enableCompression) {
+                                    if (incomingDecompressor != null) {
+                                        // Stream decompress to single buffer - reduces peak memory
+                                        val result = decompressToBuffer(payload, incomingDecompressor!!)
+                                        incomingDecompressor!!.reset()
+                                        result
+                                    } else {
+                                        payload.decompressWebsocketBuffer()
+                                    }
                                 } else {
-                                    payload.decompressWebsocketBuffer()
+                                    payload
                                 }
-                            } else {
-                                payload
-                            }
                             incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
                         }
                         else -> {
@@ -443,6 +458,8 @@ class DefaultWebSocketClient(
                         for (buf in payloadBuffers) {
                             combined.write(buf)
                         }
+                        // Clear references to allow GC to reclaim fragment buffers
+                        payloadBuffers.clear()
                         combined.resetForRead()
                         combined
                     }
@@ -452,14 +469,15 @@ class DefaultWebSocketClient(
                         try {
                             val utf8StringRead =
                                 if (firstFrame.rsv1 && enableCompression) {
-                                    val decompressed = if (incomingDecompressor != null) {
-                                        val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
+                                    if (incomingDecompressor != null) {
+                                        // Stream decompress directly to string - reduces peak memory
+                                        val result = decompressToString(payload, incomingDecompressor!!)
                                         incomingDecompressor!!.reset()
-                                        combineChunks(chunks, AllocationZone.Direct)
+                                        result
                                     } else {
-                                        payload.decompressWebsocketBuffer()
+                                        val decompressed = payload.decompressWebsocketBuffer()
+                                        decompressed.readString(decompressed.remaining())
                                     }
-                                    decompressed.readString(decompressed.remaining())
                                 } else {
                                     payload.readString(payload.remaining())
                                 }
@@ -470,17 +488,19 @@ class DefaultWebSocketClient(
                         }
                     }
                     Opcode.Binary -> {
-                        val binaryPayload = if (firstFrame.rsv1 && enableCompression) {
-                            if (incomingDecompressor != null) {
-                                val chunks = decompressWithStreamingDecompressor(payload, incomingDecompressor!!)
-                                incomingDecompressor!!.reset()
-                                combineChunks(chunks, AllocationZone.Direct)
+                        val binaryPayload =
+                            if (firstFrame.rsv1 && enableCompression) {
+                                if (incomingDecompressor != null) {
+                                    // Stream decompress to single buffer - reduces peak memory
+                                    val result = decompressToBuffer(payload, incomingDecompressor!!)
+                                    incomingDecompressor!!.reset()
+                                    result
+                                } else {
+                                    payload.decompressWebsocketBuffer()
+                                }
                             } else {
-                                payload.decompressWebsocketBuffer()
+                                payload
                             }
-                        } else {
-                            payload
-                        }
                         incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
                     }
                     else -> {
