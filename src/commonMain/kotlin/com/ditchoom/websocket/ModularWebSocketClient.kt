@@ -416,14 +416,22 @@ class ModularWebSocketClient(
                     ) {
                         // Use Throwable to catch JS TypeError from TextDecoder on invalid UTF-8
                         sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
+                        message.payload.closeIfNeeded()
                         return
                     }
+                // Free the compressed/raw payload after extracting text
+                message.payload.closeIfNeeded()
                 incomingMessageSharedFlow.emit(WebSocketMessage.Text(text))
             }
             Opcode.Binary -> {
                 val payload =
                     if (message.compressed && compressionEnabled) {
-                        decompressPayload(message.payload)
+                        val decompressed = decompressPayload(message.payload)
+                        // Free compressed payload after decompression (decompressed is a new buffer)
+                        if (decompressed !== message.payload) {
+                            message.payload.closeIfNeeded()
+                        }
+                        decompressed
                     } else {
                         message.payload
                     }
@@ -444,7 +452,8 @@ class ModularWebSocketClient(
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {
-            // Always reset decompressor to ensure clean state for next message
+            // Reset decompressor state for next message.
+            // The buffer library uses inflateReset() to avoid native heap churn.
             try {
                 decompressor.reset()
             } catch (_: Exception) {
@@ -466,7 +475,8 @@ class ModularWebSocketClient(
             // Stream decompress directly to string - reduces peak memory
             decompressToString(payload, decompressor)
         } finally {
-            // Always reset decompressor to ensure clean state for next message
+            // Reset decompressor state for next message.
+            // The buffer library uses inflateReset() to avoid native heap churn.
             try {
                 decompressor.reset()
             } catch (_: Exception) {
@@ -479,24 +489,28 @@ class ModularWebSocketClient(
         val writer = frameWriter ?: return
         val frameBuffer = writer.writeTextFrame(string)
         writeToSocket(frameBuffer)
+        frameBuffer.closeIfNeeded() // Free native frame buffer after sending
     }
 
     override suspend fun write(buffer: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writeBinaryFrame(buffer)
         writeToSocket(frameBuffer)
+        frameBuffer.closeIfNeeded() // Free native frame buffer after sending
     }
 
     override suspend fun ping(payloadData: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writePingFrame(payloadData)
         writeToSocket(frameBuffer)
+        frameBuffer.closeIfNeeded()
     }
 
     private suspend fun writePongFrame(payloadData: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writePongFrame(payloadData)
         writeToSocket(frameBuffer)
+        frameBuffer.closeIfNeeded()
     }
 
     private suspend fun sendCloseFrame(
@@ -507,6 +521,7 @@ class ModularWebSocketClient(
         try {
             val frameBuffer = writer.writeCloseFrame(code, reason)
             writeToSocket(frameBuffer)
+            frameBuffer.closeIfNeeded()
         } catch (e: Exception) {
             // Ignore errors when sending close
         }
