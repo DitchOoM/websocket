@@ -66,7 +66,7 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
         // GitHub Actions runners have 7GB, so 8GB limit is safe with swap
         val process = ProcessBuilder(
             "docker", "run", "-d", "--rm",
-            "--memory=8g", "--memory-swap=10g",
+            "--memory=8g", "--memory-swap=14g",
             "-v", "${parameters.projectDir.absolutePath}/.docker/config:/config",
             "-v", "${parameters.projectDir.absolutePath}/.docker/reports:/reports",
             "-p", "$port:9001",

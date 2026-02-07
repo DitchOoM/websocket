@@ -263,6 +263,69 @@ class MessageAssemblerTest {
     }
 
     // ========================================================================
+    // Fragment Buffer Cleanup (Linux NativeBuffer leak regression tests)
+    // ========================================================================
+
+    @Test
+    fun `multi-fragment assembly returns fragments for cleanup`() {
+        val assembler = MessageAssembler()
+
+        val frag1 = textFrame("Hello ", fin = false)
+        val frag2 = continuationFrame("World")
+
+        assembler.addFrame(frag1)
+        val result = assembler.addFrame(frag2)
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        // Multi-fragment: combineBuffers() copies data, originals need cleanup
+        assertEquals(2, result.fragmentsToClose.size)
+        assertTrue(result.fragmentsToClose[0] === frag1.payload, "Should be same buffer object")
+        assertTrue(result.fragmentsToClose[1] === frag2.payload, "Should be same buffer object")
+    }
+
+    @Test
+    fun `three-fragment assembly returns all fragments for cleanup`() {
+        val assembler = MessageAssembler()
+
+        val frag1 = textFrame("A", fin = false)
+        val frag2 = continuationFrame("B", fin = false)
+        val frag3 = continuationFrame("C")
+
+        assembler.addFrame(frag1)
+        assembler.addFrame(frag2)
+        val result = assembler.addFrame(frag3)
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertEquals(3, result.fragmentsToClose.size)
+    }
+
+    @Test
+    fun `single frame message returns empty fragments to close`() {
+        val assembler = MessageAssembler()
+        val result = assembler.addFrame(textFrame("Hello"))
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertTrue(result.fragmentsToClose.isEmpty(), "Single frame should have no fragments to close")
+    }
+
+    @Test
+    fun `assembled message payload is independent of fragment buffers`() {
+        val assembler = MessageAssembler()
+
+        assembler.addFrame(textFrame("Hello ", fin = false))
+        val result = assembler.addFrame(continuationFrame("World"))
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        // The combined payload should be a separate buffer from the fragments
+        val payload = result.message.payload
+        assertEquals("Hello World", payload.readString(11, Charset.UTF8))
+        // Fragments are the originals, not the combined buffer
+        for (frag in result.fragmentsToClose) {
+            assertTrue(frag !== payload, "Fragment should not be the same object as combined payload")
+        }
+    }
+
+    // ========================================================================
     // Reset
     // ========================================================================
 

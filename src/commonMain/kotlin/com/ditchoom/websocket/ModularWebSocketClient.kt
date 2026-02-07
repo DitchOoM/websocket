@@ -257,15 +257,24 @@ class ModularWebSocketClient(
         // This buffer will be owned by the processor after append.
         val buffer = PlatformBuffer.allocate(readBufferSize, allocationZone)
 
-        // Zero-copy: socket writes directly into our buffer
-        val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
+        try {
+            // Zero-copy: socket writes directly into our buffer
+            val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
 
-        if (bytesRead > 0) {
-            // Buffer was written at position 0..bytesRead, position is now at bytesRead
-            // Set limit to bytesRead and position to 0 for reading
-            buffer.setLimit(buffer.position())
-            buffer.position(0)
-            processor.append(buffer)
+            if (bytesRead > 0) {
+                // Buffer was written at position 0..bytesRead, position is now at bytesRead
+                // Set limit to bytesRead and position to 0 for reading
+                buffer.setLimit(buffer.position())
+                buffer.position(0)
+                processor.append(buffer)
+            } else {
+                // EOF or no data - free the unused buffer (Linux NativeBuffer leak fix)
+                buffer.closeIfNeeded()
+            }
+        } catch (e: Exception) {
+            // Socket error - free the unused buffer (Linux NativeBuffer leak fix)
+            buffer.closeIfNeeded()
+            throw e
         }
     }
 
@@ -307,6 +316,10 @@ class ModularWebSocketClient(
                         }
                         is AssemblyResult.CompleteMessage -> {
                             emitMessage(result.message)
+                            // Free fragment NativeBuffers after processing (Linux native heap).
+                            // For multi-fragment messages, combineBuffers() copied data to a new
+                            // buffer, so originals can be freed. Empty for single-frame messages.
+                            result.fragmentsToClose.closeAll()
                         }
                         is AssemblyResult.NeedMoreFrames -> {
                             // Continue reading
@@ -565,6 +578,8 @@ class ModularWebSocketClient(
         } catch (e: Exception) {
             // Ignore join failures
         }
+        // Free all pooled NativeBuffers (no-op on JVM/JS)
+        pool.clear()
         // Atomic state update to avoid race with read loop
         connectionStateFlow.update { current ->
             if (current !is ConnectionState.Disconnected) {

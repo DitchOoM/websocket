@@ -221,10 +221,15 @@ class MessageAssembler(
             return AssemblyResult.NeedMoreFrames
         }
 
-        // Final fragment - assemble the message
+        // Final fragment - assemble the message.
+        // Save fragment buffers before reset clears the list. For multi-fragment messages,
+        // combineBuffers() copies data to a new Heap buffer, so the original fragment
+        // NativeBuffers must be freed by the caller (Linux has no GC for native heap).
+        // For single-fragment messages, the payload IS the fragment (no copy), so no cleanup needed.
+        val fragments = if (fragmentBuffers.size > 1) fragmentBuffers.toList() else emptyList()
         val message = assembleMessage()
         reset()
-        return AssemblyResult.CompleteMessage(message)
+        return AssemblyResult.CompleteMessage(message, fragments)
     }
 
     private fun assembleMessage(): AssembledMessage {
@@ -270,9 +275,15 @@ sealed interface AssemblyResult {
 
     /**
      * A complete message has been assembled.
+     *
+     * @property fragmentsToClose Fragment payload buffers that should be closed after processing.
+     *   For multi-fragment messages, combineBuffers() copies data to a new buffer, but the
+     *   original fragment NativeBuffers must be explicitly freed on Linux (no GC for native heap).
+     *   Empty for single-frame messages where the payload IS the fragment buffer.
      */
     data class CompleteMessage(
         val message: AssembledMessage,
+        val fragmentsToClose: List<ReadBuffer> = emptyList(),
     ) : AssemblyResult
 
     /**

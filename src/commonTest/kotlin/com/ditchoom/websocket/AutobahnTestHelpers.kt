@@ -130,6 +130,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         ws.incomingMessages.take(count).collect {
             val m = it as WebSocketMessage.Binary
             ws.write(m.value)
+            m.value.closeIfNeeded() // Free NativeBuffer after echo
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
