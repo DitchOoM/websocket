@@ -8,6 +8,8 @@ import com.ditchoom.buffer.SuspendCloseable
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
+import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
 import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
 import com.ditchoom.buffer.compression.compressAsync
@@ -191,6 +193,174 @@ suspend fun decompressWithStreamingDecompressor(
     chunks.addAll(decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER))
     chunks.addAll(decompressor.finish())
     return chunks
+}
+
+// ---- Sync (non-suspend) compression functions ----
+// These use callback-based StreamingCompressor/StreamingDecompressor to avoid
+// coroutine suspend/resume overhead (futex calls on Linux K/N).
+
+/**
+ * Compresses a buffer using a sync streaming compressor for WebSocket permessage-deflate.
+ *
+ * Same logic as [compressWithStreamingCompressor] but without suspend overhead.
+ * Uses the callback-based [StreamingCompressor] API directly.
+ */
+internal fun compressSync(
+    buffer: ReadBuffer,
+    compressor: StreamingCompressor,
+    zone: AllocationZone = AllocationZone.Heap,
+): List<ReadBuffer> {
+    val chunks = mutableListOf<ReadBuffer>()
+    compressor.compress(buffer) { chunks.add(it) }
+    compressor.flush { chunks.add(it) }
+
+    if (chunks.isEmpty()) return emptyList()
+
+    // Strip sync flush marker (4 bytes: 00 00 FF FF) from end
+    // Try to do this without combining buffers
+    val lastChunk = chunks.last()
+    if (lastChunk.remaining() >= 4) {
+        val pos = lastChunk.position()
+        val endPos = pos + lastChunk.remaining()
+        lastChunk.position(endPos - 4)
+        val marker = lastChunk.readInt()
+        if (marker == SYNC_FLUSH_MARKER) {
+            lastChunk.position(pos)
+            lastChunk.setLimit(endPos - 4)
+            if (lastChunk.remaining() == 0) {
+                chunks.removeLast()
+            }
+            return chunks
+        }
+        lastChunk.position(pos)
+    }
+
+    // Marker spans multiple chunks or doesn't match - need to combine and strip
+    val combined = combineChunks(chunks, zone)
+    chunks.freeAll()
+    return listOf(stripSyncFlushMarkerInPlace(combined))
+}
+
+/**
+ * Decompresses a buffer directly to a String using a sync streaming decompressor.
+ *
+ * Same hybrid strategy as [decompressToString] but without suspend overhead.
+ */
+internal fun decompressToStringSync(
+    buffer: ReadBuffer,
+    decompressor: StreamingDecompressor,
+): String {
+    var totalSize = 0
+    val chunks = mutableListOf<ReadBuffer>()
+
+    fun addChunk(chunk: ReadBuffer) {
+        if (chunk.position() != 0) {
+            chunk.position(0)
+        }
+        val remaining = chunk.remaining()
+        if (remaining > 0) {
+            totalSize += remaining
+            chunks.add(chunk)
+        }
+    }
+
+    // Collect all decompressed chunks
+    decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
+
+    // Append sync marker and decompress - this flushes all pending output
+    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+
+    // Finish decompression to flush any remaining buffered data
+    decompressor.finish { chunk -> addChunk(chunk) }
+
+    // Fast path: empty result
+    if (totalSize == 0) {
+        chunks.freeAll()
+        return ""
+    }
+
+    // Fast path: single chunk - zero copy
+    if (chunks.size == 1) {
+        val chunk = chunks[0]
+        val result = chunk.readString(chunk.remaining(), Charset.UTF8)
+        chunk.freeIfNeeded()
+        return result
+    }
+
+    // For small messages: combine into single buffer first, then decode once
+    if (totalSize <= COMBINE_THRESHOLD_BYTES) {
+        val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Heap)
+        for (chunk in chunks) {
+            chunk.position(0)
+            combined.write(chunk)
+        }
+        chunks.freeAll()
+        combined.resetForRead()
+        return combined.readString(totalSize, Charset.UTF8)
+    }
+
+    // For large messages: use streaming to limit peak memory
+    val sb = StringBuilder(totalSize)
+    var pendingBoundary: Utf8Boundary = Utf8Boundary.EMPTY
+
+    for ((index, chunk) in chunks.withIndex()) {
+        val isLast = index == chunks.lastIndex
+        chunk.position(0)
+        pendingBoundary = appendChunkToStringBuilder(chunk, sb, pendingBoundary, isLast)
+    }
+    chunks.freeAll()
+
+    return sb.toString()
+}
+
+/**
+ * Decompresses a buffer directly to a single output buffer using a sync streaming decompressor.
+ *
+ * Same logic as [decompressToBuffer] but without suspend overhead.
+ */
+internal fun decompressToBufferSync(
+    buffer: ReadBuffer,
+    decompressor: StreamingDecompressor,
+    zone: AllocationZone = AllocationZone.Heap,
+): ReadBuffer {
+    var totalSize = 0
+    val chunks = mutableListOf<ReadBuffer>()
+
+    fun addChunk(chunk: ReadBuffer) {
+        if (chunk.position() != 0) {
+            chunk.position(0)
+        }
+        totalSize += chunk.remaining()
+        chunks.add(chunk)
+    }
+
+    decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
+
+    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+
+    decompressor.finish { chunk -> addChunk(chunk) }
+
+    // Single chunk optimization - no copy needed
+    if (chunks.size == 1) {
+        return chunks[0]
+    }
+
+    if (totalSize == 0) {
+        chunks.freeAll()
+        return ReadBuffer.EMPTY_BUFFER
+    }
+
+    // Combine chunks into final output
+    val output = PlatformBuffer.allocate(totalSize, zone)
+    for (chunk in chunks) {
+        chunk.position(0)
+        output.write(chunk)
+    }
+    chunks.freeAll()
+    output.resetForRead()
+    return output
 }
 
 // Threshold for using combine-first strategy vs streaming.
@@ -629,5 +799,23 @@ internal suspend fun ReadBuffer.closeIfNeeded() {
 internal suspend fun List<ReadBuffer>.closeAll() {
     for (buffer in this) {
         buffer.closeIfNeeded()
+    }
+}
+
+/**
+ * Frees a buffer's native memory without requiring suspend context.
+ * Uses PlatformBuffer.freeNativeMemory() which is sync on all platforms.
+ * On Linux, frees the underlying malloc'd memory. On JVM/JS, this is a no-op.
+ */
+internal fun ReadBuffer.freeIfNeeded() {
+    (this as? PlatformBuffer)?.freeNativeMemory()
+}
+
+/**
+ * Frees all buffers' native memory without requiring suspend context.
+ */
+internal fun List<ReadBuffer>.freeAll() {
+    for (buffer in this) {
+        buffer.freeIfNeeded()
     }
 }

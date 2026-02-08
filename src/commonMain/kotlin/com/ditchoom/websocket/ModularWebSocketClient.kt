@@ -9,8 +9,8 @@ import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
-import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
-import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
+import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -88,8 +88,8 @@ class ModularWebSocketClient(
     // Note: These are set once during connect() and cleared during close().
     // The nullable checks (e.g., frameWriter ?: return) provide defensive access.
     private var frameWriter: FrameWriter? = null
-    private var outgoingCompressor: SuspendingStreamingCompressor? = null
-    private var incomingDecompressor: SuspendingStreamingDecompressor? = null
+    private var outgoingCompressor: StreamingCompressor? = null
+    private var incomingDecompressor: StreamingDecompressor? = null
     private var compressionEnabled = false
 
     // Use StateFlow for thread-safe access between read loop and close()
@@ -194,13 +194,13 @@ class ModularWebSocketClient(
     private fun setupCompression() {
         compressionEnabled = true
         outgoingCompressor =
-            SuspendingStreamingCompressor.create(
+            StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
                 BufferAllocator.Direct, // Linux requires NativeMemoryAccess for zlib
             )
         incomingDecompressor =
-            SuspendingStreamingDecompressor.create(
+            StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
                 BufferAllocator.Direct,
             )
@@ -269,11 +269,11 @@ class ModularWebSocketClient(
                 processor.append(buffer)
             } else {
                 // EOF or no data - free the unused buffer (Linux NativeBuffer leak fix)
-                buffer.closeIfNeeded()
+                buffer.freeIfNeeded()
             }
         } catch (e: Exception) {
             // Socket error - free the unused buffer (Linux NativeBuffer leak fix)
-            buffer.closeIfNeeded()
+            buffer.freeIfNeeded()
             throw e
         }
     }
@@ -319,7 +319,7 @@ class ModularWebSocketClient(
                             // Free fragment NativeBuffers after processing (Linux native heap).
                             // For multi-fragment messages, combineBuffers() copied data to a new
                             // buffer, so originals can be freed. Empty for single-frame messages.
-                            result.fragmentsToClose.closeAll()
+                            result.fragmentsToClose.freeAll()
                         }
                         is AssemblyResult.NeedMoreFrames -> {
                             // Continue reading
@@ -429,11 +429,11 @@ class ModularWebSocketClient(
                     ) {
                         // Use Throwable to catch JS TypeError from TextDecoder on invalid UTF-8
                         sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
-                        message.payload.closeIfNeeded()
+                        message.payload.freeIfNeeded()
                         return
                     }
                 // Free the compressed/raw payload after extracting text
-                message.payload.closeIfNeeded()
+                message.payload.freeIfNeeded()
                 incomingMessageSharedFlow.emit(WebSocketMessage.Text(text))
             }
             Opcode.Binary -> {
@@ -442,7 +442,7 @@ class ModularWebSocketClient(
                         val decompressed = decompressPayload(message.payload)
                         // Free compressed payload after decompression (decompressed is a new buffer)
                         if (decompressed !== message.payload) {
-                            message.payload.closeIfNeeded()
+                            message.payload.freeIfNeeded()
                         }
                         decompressed
                     } else {
@@ -456,13 +456,13 @@ class ModularWebSocketClient(
         }
     }
 
-    private suspend fun decompressPayload(payload: ReadBuffer): ReadBuffer {
+    private fun decompressPayload(payload: ReadBuffer): ReadBuffer {
         val decompressor = incomingDecompressor ?: return payload
 
         return try {
             // Stream decompress to single buffer - reduces peak memory
             // Use Direct zone so output buffer has NativeMemoryAccess for re-compression
-            decompressToBuffer(payload, decompressor, allocationZone)
+            decompressToBufferSync(payload, decompressor, allocationZone)
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {
@@ -480,14 +480,14 @@ class ModularWebSocketClient(
      * Decompresses payload directly to string with streaming UTF-8 handling.
      * Reduces peak memory by not holding all decompressed chunks at once.
      */
-    private suspend fun decompressPayloadToString(payload: ReadBuffer): String {
+    private fun decompressPayloadToString(payload: ReadBuffer): String {
         val decompressor =
             incomingDecompressor
                 ?: return payload.readString(payload.remaining(), Charset.UTF8)
 
         return try {
             // Stream decompress directly to string - reduces peak memory
-            decompressToString(payload, decompressor)
+            decompressToStringSync(payload, decompressor)
         } finally {
             // Reset decompressor state for next message.
             // The buffer library uses inflateReset() to avoid native heap churn.
@@ -503,28 +503,28 @@ class ModularWebSocketClient(
         val writer = frameWriter ?: return
         val frameBuffer = writer.writeTextFrame(string)
         writeToSocket(frameBuffer)
-        frameBuffer.closeIfNeeded() // Free native frame buffer after sending
+        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
     }
 
     override suspend fun write(buffer: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writeBinaryFrame(buffer)
         writeToSocket(frameBuffer)
-        frameBuffer.closeIfNeeded() // Free native frame buffer after sending
+        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
     }
 
     override suspend fun ping(payloadData: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writePingFrame(payloadData)
         writeToSocket(frameBuffer)
-        frameBuffer.closeIfNeeded()
+        frameBuffer.freeIfNeeded()
     }
 
     private suspend fun writePongFrame(payloadData: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writePongFrame(payloadData)
         writeToSocket(frameBuffer)
-        frameBuffer.closeIfNeeded()
+        frameBuffer.freeIfNeeded()
     }
 
     private suspend fun sendCloseFrame(
@@ -535,7 +535,7 @@ class ModularWebSocketClient(
         try {
             val frameBuffer = writer.writeCloseFrame(code, reason)
             writeToSocket(frameBuffer)
-            frameBuffer.closeIfNeeded()
+            frameBuffer.freeIfNeeded()
         } catch (e: Exception) {
             // Ignore errors when sending close
         }

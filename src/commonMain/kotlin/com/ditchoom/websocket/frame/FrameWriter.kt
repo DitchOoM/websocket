@@ -7,14 +7,13 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.allocate
-import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
+import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
-import com.ditchoom.websocket.closeAll
-import com.ditchoom.websocket.closeIfNeeded
 import com.ditchoom.websocket.combineChunks
-import com.ditchoom.websocket.compressWebsocketBuffer
-import com.ditchoom.websocket.compressWithStreamingCompressor
+import com.ditchoom.websocket.compressSync
+import com.ditchoom.websocket.freeAll
+import com.ditchoom.websocket.freeIfNeeded
 import com.ditchoom.websocket.totalRemaining
 import kotlin.jvm.JvmInline
 
@@ -108,7 +107,7 @@ internal value class PackedFrameHeader(
  * - Value classes for header packing - no object allocation
  */
 class FrameWriter(
-    private val compressor: SuspendingStreamingCompressor? = null,
+    private val compressor: StreamingCompressor? = null,
     private val compressionEnabled: Boolean = false,
     private val clientMode: Boolean = true,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
@@ -119,7 +118,7 @@ class FrameWriter(
      * Single allocation: calculates UTF-8 size, allocates one buffer for
      * header + payload, writes string directly, applies mask in-place.
      */
-    suspend fun writeTextFrame(
+    fun writeTextFrame(
         text: String,
         fin: Boolean = true,
     ): ReadBuffer {
@@ -138,7 +137,7 @@ class FrameWriter(
             payload.writeString(text, Charset.UTF8)
             payload.resetForRead()
             val frame = writeFrame(Opcode.Text, payload, fin)
-            payload.closeIfNeeded() // Free temp payload after frame serialization
+            payload.freeIfNeeded() // Free temp payload after frame serialization
             return frame
         }
 
@@ -183,7 +182,7 @@ class FrameWriter(
     /**
      * Writes a binary frame.
      */
-    suspend fun writeBinaryFrame(
+    fun writeBinaryFrame(
         data: ReadBuffer,
         fin: Boolean = true,
     ): ReadBuffer = writeFrame(Opcode.Binary, data, fin)
@@ -191,7 +190,7 @@ class FrameWriter(
     /**
      * Writes a continuation frame.
      */
-    suspend fun writeContinuationFrame(
+    fun writeContinuationFrame(
         data: ReadBuffer,
         fin: Boolean,
     ): ReadBuffer = writeFrame(Opcode.Continuation, data, fin)
@@ -201,7 +200,7 @@ class FrameWriter(
      *
      * For small payloads (status code + short reason), uses single allocation.
      */
-    suspend fun writeCloseFrame(
+    fun writeCloseFrame(
         statusCode: UShort? = null,
         reason: String? = null,
     ): ReadBuffer {
@@ -272,7 +271,7 @@ class FrameWriter(
     /**
      * Writes a ping frame.
      */
-    suspend fun writePingFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
+    fun writePingFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
         val truncated =
             if (data.remaining() > 125) {
                 data.readBytes(125)
@@ -285,7 +284,7 @@ class FrameWriter(
     /**
      * Writes a pong frame.
      */
-    suspend fun writePongFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
+    fun writePongFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
         val truncated =
             if (data.remaining() > 125) {
                 data.readBytes(125)
@@ -343,7 +342,7 @@ class FrameWriter(
     /**
      * Writes a data frame with optional compression.
      */
-    suspend fun writeFrame(
+    fun writeFrame(
         opcode: Opcode,
         payload: ReadBuffer,
         fin: Boolean = true,
@@ -356,32 +355,19 @@ class FrameWriter(
 
         if (shouldCompress && compressor != null) {
             val originalSize = payload.remaining()
-            val chunks = compressWithStreamingCompressor(payload, compressor)
+            val chunks = compressSync(payload, compressor)
             val compressedSize = totalRemaining(chunks)
 
             if (compressedSize < originalSize) {
                 rsv1 = true
                 compressor.reset()
                 finalPayload = combineChunks(chunks, allocationZone)
-                chunks.closeAll() // Free original compressed chunks after combining
+                chunks.freeAll() // Free original compressed chunks after combining
                 createdPayload = true
             } else {
                 payload.resetForRead()
                 compressor.reset()
-                chunks.closeAll() // Free unused compressed chunks
-                finalPayload = payload
-            }
-        } else if (shouldCompress) {
-            val originalSize = payload.remaining()
-            val compressed = payload.compressWebsocketBuffer()
-
-            if (compressed.remaining() < originalSize) {
-                rsv1 = true
-                finalPayload = compressed
-                createdPayload = true
-            } else {
-                compressed.closeIfNeeded() // Free unused compressed buffer
-                payload.resetForRead()
+                chunks.freeAll() // Free unused compressed chunks
                 finalPayload = payload
             }
         } else {
@@ -390,7 +376,7 @@ class FrameWriter(
 
         val frame = serializeFrame(fin, rsv1, opcode, finalPayload)
         if (createdPayload) {
-            finalPayload.closeIfNeeded() // Free temp compressed payload after serialization
+            finalPayload.freeIfNeeded() // Free temp compressed payload after serialization
         }
         return frame
     }
