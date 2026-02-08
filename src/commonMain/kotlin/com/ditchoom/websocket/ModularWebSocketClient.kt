@@ -556,6 +556,9 @@ class ModularWebSocketClient(
         if (connectionState.value is ConnectionState.Connected && !serverInitiatedClose.value) {
             sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
         }
+        // Clear frameWriter to prevent writes after close (avoids infinite loop
+        // when socket.write returns -1 on a closed socket)
+        frameWriter = null
         // Clean up compression resources
         outgoingCompressor?.close()
         outgoingCompressor = null
@@ -567,16 +570,16 @@ class ModularWebSocketClient(
         // Then close socket (causes SocketClosedException if read is still in progress)
         try {
             socket.close()
-        } catch (e: Exception) {
-            // Ignore - socket may already be closed
+        } catch (_: Exception) {
+            // Ignore close errors
         }
         // Wait for cleanup with increased timeout for reliable close handshake
         try {
             kotlinx.coroutines.withTimeoutOrNull(1000) {
                 clientJob.join()
             }
-        } catch (e: Exception) {
-            // Ignore join failures
+        } catch (_: Exception) {
+            // Ignore join errors
         }
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()

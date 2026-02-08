@@ -1,15 +1,13 @@
-@file:OptIn(ExperimentalCoroutinesApi::class)
-
 package com.ditchoom.websocket
 
 import com.ditchoom.socket.NetworkCapabilities.FULL_SOCKET_ACCESS
 import com.ditchoom.socket.NetworkCapabilities.WEBSOCKETS_ONLY
 import com.ditchoom.socket.getNetworkCapabilities
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -21,14 +19,15 @@ private val heavyCompressionTimeout = 120.seconds
 
 internal fun runTestNoTimeSkipping1(
     count: Int = 1,
-    block: suspend TestScope.() -> Unit,
-) = runTest(timeout = testTimeout) {
+    block: suspend CoroutineScope.() -> Unit,
+) = runBlocking {
     try {
-        withContext(Dispatchers.Default) {
-            block()
+        withTimeout(testTimeout) {
+            withContext(Dispatchers.Default) {
+                block()
+            }
         }
     } catch (e: UnsupportedOperationException) {
-        // ignore
         when (getNetworkCapabilities()) {
             FULL_SOCKET_ACCESS -> throw e
             WEBSOCKETS_ONLY -> {} // ignore, expected on browsers
@@ -39,14 +38,15 @@ internal fun runTestNoTimeSkipping1(
 internal fun runTestNoTimeSkipping(
     count: Int = 1,
     timeout: Duration = testTimeout,
-    block: suspend TestScope.() -> Unit,
-) = runTest(timeout = timeout) {
+    block: suspend CoroutineScope.() -> Unit,
+) = runBlocking {
     try {
-        withContext(Dispatchers.Default.limitedParallelism(count)) {
-            block()
+        withTimeout(timeout) {
+            withContext(Dispatchers.Default.limitedParallelism(count)) {
+                block()
+            }
         }
     } catch (e: UnsupportedOperationException) {
-        // ignore
         when (getNetworkCapabilities()) {
             FULL_SOCKET_ACCESS -> throw e
             WEBSOCKETS_ONLY -> {} // ignore, expected on browsers
@@ -60,7 +60,7 @@ internal fun runTestNoTimeSkipping(
  */
 internal fun runHeavyCompressionTest(
     count: Int = 1,
-    block: suspend TestScope.() -> Unit,
+    block: suspend CoroutineScope.() -> Unit,
 ) = runTestNoTimeSkipping(count = count, timeout = heavyCompressionTimeout, block = block)
 
 /**
@@ -69,7 +69,9 @@ internal fun runHeavyCompressionTest(
  */
 internal fun runStrictTest(
     timeout: Duration = 10.seconds,
-    block: suspend TestScope.() -> Unit,
-) = runTest(timeout = timeout) {
-    withContext(Dispatchers.Default) { block() }
+    block: suspend CoroutineScope.() -> Unit,
+) = runBlocking {
+    withTimeout(timeout) {
+        withContext(Dispatchers.Default) { block() }
+    }
 }
