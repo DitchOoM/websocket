@@ -15,7 +15,6 @@ import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
 import com.ditchoom.buffer.compression.compressAsync
 import com.ditchoom.buffer.compression.decompressAsync
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.pool.PooledBuffer
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
 private const val SYNC_FLUSH_MARKER = 0x0000FFFF
@@ -816,10 +815,7 @@ internal suspend fun List<ReadBuffer>.closeAll() {
  * On Linux, frees the underlying malloc'd memory. On JVM/JS, this is a no-op.
  */
 internal fun ReadBuffer.freeIfNeeded() {
-    when (this) {
-        is PooledBuffer -> release()
-        is PlatformBuffer -> freeNativeMemory()
-    }
+    (this as? PlatformBuffer)?.freeNativeMemory()
 }
 
 /**

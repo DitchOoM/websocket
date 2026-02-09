@@ -25,11 +25,10 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
@@ -71,8 +70,8 @@ class DefaultWebSocketClient(
     private var hasServerInitiatedClose = false
     internal val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
-    override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
+    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    override val incomingMessages = incomingMessageChannel.receiveAsFlow()
     val outgoingMessages = Channel<WebSocketMessage>()
     internal var enableCompression = false
     private var outgoingCompressor: SuspendingStreamingCompressor? = null
@@ -360,7 +359,7 @@ class DefaultWebSocketClient(
                                     } else {
                                         payload.readString(payload.remaining())
                                     }
-                                incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
+                                incomingMessageChannel.trySend(WebSocketMessage.Text(utf8StringRead))
                             } catch (e: Throwable) {
                                 sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
                                 return@launch
@@ -380,7 +379,7 @@ class DefaultWebSocketClient(
                                 } else {
                                     payload
                                 }
-                            incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
+                            incomingMessageChannel.trySend(WebSocketMessage.Binary(binaryPayload))
                         }
                         else -> {
                             sendCloseFrame(1002u, "Invalid opcode for frame")
@@ -481,7 +480,7 @@ class DefaultWebSocketClient(
                                 } else {
                                     payload.readString(payload.remaining())
                                 }
-                            incomingMessageSharedFlow.emit(WebSocketMessage.Text(utf8StringRead))
+                            incomingMessageChannel.trySend(WebSocketMessage.Text(utf8StringRead))
                         } catch (e: Throwable) {
                             sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
                             return@launch
@@ -501,7 +500,7 @@ class DefaultWebSocketClient(
                             } else {
                                 payload
                             }
-                        incomingMessageSharedFlow.emit(WebSocketMessage.Binary(binaryPayload))
+                        incomingMessageChannel.trySend(WebSocketMessage.Binary(binaryPayload))
                     }
                     else -> {
                         sendCloseFrame(1002u, "Invalid opcode for frame")
@@ -532,11 +531,11 @@ class DefaultWebSocketClient(
         when (frame.opcode) {
             Opcode.Ping -> {
                 // Buffer is already in read mode from processor.readBuffer()
-                incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payloadData))
+                incomingMessageChannel.trySend(WebSocketMessage.Ping(frame.payloadData))
             }
             Opcode.Pong -> {
                 // Buffer is already in read mode from processor.readBuffer()
-                incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payloadData))
+                incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payloadData))
             }
             Opcode.Close -> {
                 if (frame.payloadData.hasRemaining()) {
@@ -558,9 +557,9 @@ class DefaultWebSocketClient(
                         } else {
                             ""
                         }
-                    incomingMessageSharedFlow.emit(WebSocketMessage.Close(code, reason))
+                    incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
                 } else {
-                    incomingMessageSharedFlow.emit(WebSocketMessage.Close(0u, "No Close Message"))
+                    incomingMessageChannel.trySend(WebSocketMessage.Close(0u, "No Close Message"))
                 }
                 return false
             }
@@ -848,7 +847,7 @@ class DefaultWebSocketClient(
                 closeBuffer.resetForRead()
                 writeWebsocketFrame(Opcode.Close, closeBuffer, connectionOptions.writeTimeout)
             } finally {
-                closeBuffer.release()
+                pool.release(closeBuffer)
             }
         } finally {
             cleanupResources()

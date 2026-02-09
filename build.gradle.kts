@@ -128,17 +128,20 @@ val integrationTestPatterns =
         "com.ditchoom.websocket.WebSocketTests",
     )
 
-// ProfilingTest is excluded from CI - it's a diagnostic tool for local profiling,
-// not a conformance test. Run manually with: ./gradlew jvmTest --tests "*ProfilingTest*"
-val profilingTestPattern = "com.ditchoom.websocket.ProfilingTest"
+// Profiling tests are excluded from CI - they're diagnostic tools for local profiling,
+// not conformance tests. Run manually with: ./gradlew jvmTest --tests "*ProfilingTest*"
+val profilingTestPatterns = listOf(
+    "com.ditchoom.websocket.ProfilingTest",
+    "com.ditchoom.websocket.TimingProfilingTest",
+)
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
 // Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
-    // Always exclude ProfilingTest from CI - run manually when needed
+    // Always exclude profiling tests from CI - run manually when needed
     filter {
-        excludeTestsMatching(profilingTestPattern)
+        profilingTestPatterns.forEach { excludeTestsMatching(it) }
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
@@ -153,8 +156,8 @@ tasks.withType<Test>().configureEach {
 
 // Filter Kotlin/Native tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
-    // Always exclude ProfilingTest from CI
-    this.filter.excludeTestsMatching(profilingTestPattern)
+    // Always exclude profiling tests from CI
+    profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
@@ -163,8 +166,8 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
 
 // Filter Kotlin/JS tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
-    // Always exclude ProfilingTest from CI
-    this.filter.excludeTestsMatching(profilingTestPattern)
+    // Always exclude profiling tests from CI
+    profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
@@ -337,6 +340,56 @@ val validateAutobahnResults =
                 } catch (e: Exception) {
                     println("Warning: Could not update reports for agent $agent: ${e.message}")
                 }
+            }
+
+            // Read index.json from the container via docker exec (avoids file permission issues)
+            var indexJson: String? = null
+            try {
+                val execProcess =
+                    ProcessBuilder("docker", "exec", "fuzzingserver", "cat", "/reports/clients/index.json")
+                        .start()
+                indexJson = execProcess.inputStream.bufferedReader().readText()
+                val exitCode = execProcess.waitFor()
+                if (exitCode != 0 || indexJson.isNullOrBlank()) {
+                    val err = execProcess.errorStream.bufferedReader().readText()
+                    println("Warning: Could not read index.json from container (exit=$exitCode): $err")
+                    indexJson = null
+                }
+            } catch (e: Exception) {
+                println("Warning: Could not read index.json from container: ${e.message}")
+            }
+            // Fall back to host file if container read failed
+            if (indexJson == null) {
+                val hostFile = File(file(".docker/reports/clients"), "index.json")
+                if (hostFile.exists()) {
+                    indexJson = hostFile.readText()
+                }
+            }
+
+            // Parse results and fail on failures
+            if (!indexJson.isNullOrBlank()) {
+                @Suppress("UNCHECKED_CAST")
+                val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
+                val failures = mutableListOf<String>()
+                json.forEach { (agent, cases) ->
+                    @Suppress("UNCHECKED_CAST")
+                    (cases as? Map<String, Any>)?.forEach { (caseId, result) ->
+                        @Suppress("UNCHECKED_CAST")
+                        val r = result as? Map<String, Any>
+                        if (r?.get("behavior") == "FAILED") {
+                            failures.add("$agent case $caseId: behaviorClose=${r["behaviorClose"]}")
+                        }
+                    }
+                }
+                if (failures.isNotEmpty()) {
+                    throw GradleException(
+                        "Autobahn test failures (${failures.size}):\n" +
+                            failures.joinToString("\n") { "  - $it" },
+                    )
+                }
+                println("All Autobahn tests passed!")
+            } else {
+                println("Warning: No Autobahn report index.json found")
             }
         }
     }

@@ -41,7 +41,7 @@ class ProfilingTest {
                 )
             val ws = WebSocketClient.allocate(connectionOptions, AllocationZone.Heap)
             ws.connect()
-            ws.connectionState.first { it is ConnectionState.Connected }
+            ws.awaitConnected()
 
             // Force GC before measurement
             forceGc()
@@ -92,7 +92,7 @@ class ProfilingTest {
                     )
                 val ws = WebSocketClient.allocate(connectionOptions, AllocationZone.Direct)
                 ws.connect()
-                ws.connectionState.first { it is ConnectionState.Connected }
+                ws.awaitConnected()
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
                 withTimeoutOrNull(10.seconds) {
@@ -210,7 +210,7 @@ class ProfilingTest {
             )
         val ws = WebSocketClient.allocate(connectionOptions, zone)
         ws.connect()
-        ws.connectionState.first { it is ConnectionState.Connected }
+        ws.awaitConnected()
         val connectTime = connectMark.elapsedNow()
 
         // Echo loop - measure write and read separately

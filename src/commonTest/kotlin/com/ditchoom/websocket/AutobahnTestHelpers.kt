@@ -18,6 +18,18 @@ import kotlin.time.Duration.Companion.seconds
 
 private val testImplementation = WebSocketImplementation.MODULAR
 
+/**
+ * Await connection, failing fast if the connection is refused or the server is down.
+ * Without this, `connectionState.first { it is Connected }` hangs until the outer
+ * test timeout (30-120s) when the server is unreachable.
+ */
+internal suspend fun WebSocketClient.awaitConnected() {
+    val state = connectionState.first { it is ConnectionState.Connected || it is ConnectionState.Disconnected }
+    if (state is ConnectionState.Disconnected) {
+        throw IllegalStateException("Connection failed: ${state.t?.message ?: state.reason ?: "unknown"}")
+    }
+}
+
 internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
@@ -38,7 +50,7 @@ internal suspend fun CoroutineScope.prepareConnection(
             testImplementation,
         )
     websocket.connect()
-    websocket.connectionState.first { it is ConnectionState.Connected }
+    websocket.awaitConnected()
 
     if (awaitClose) {
         // Wait for server to close the connection (with timeout)
@@ -79,10 +91,8 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             this,
             testImplementation,
         )
-    ws.scope.launch {
-        ws.connect()
-        ws.connectionState.first { it is ConnectionState.Connected }
-    }
+    ws.connect()
+    ws.awaitConnected()
     try {
         ws.incomingMessages.take(count).collect {
             val m = it as WebSocketMessage.Text
@@ -122,10 +132,8 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             this + CoroutineName(case.toString()),
             testImplementation,
         )
-    ws.scope.launch {
-        ws.connect()
-        ws.connectionState.first { it is ConnectionState.Connected }
-    }
+    ws.connect()
+    ws.awaitConnected()
     try {
         ws.incomingMessages.take(count).collect {
             val m = it as WebSocketMessage.Binary
@@ -136,6 +144,11 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
+    // Give the read loop a chance to process the server's close frame naturally.
+    // Without this delay, ws.close() cancels the read loop while an io_uring recv
+    // may still be in-flight, causing the buffer to be freed while the kernel is
+    // still writing to it (heap corruption on Linux K/N).
+    kotlinx.coroutines.delay(100)
     try {
         ws.close()
     } catch (_: Exception) {
@@ -161,10 +174,8 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
             this + CoroutineName(case.toString()),
             testImplementation,
         )
-    ws.scope.launch {
-        ws.connect()
-        ws.connectionState.first { it is ConnectionState.Connected }
-    }
+    ws.connect()
+    ws.awaitConnected()
     try {
         val msg = ws.incomingMessages.first { it is WebSocketMessage.Text } as WebSocketMessage.Text
         ws.write(msg.value)
@@ -172,6 +183,8 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
+    // Give the read loop a chance to process the server's close frame naturally.
+    kotlinx.coroutines.delay(100)
     try {
         ws.close()
     } catch (_: Exception) {

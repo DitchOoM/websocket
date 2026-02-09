@@ -12,7 +12,6 @@ import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlin.test.Test
@@ -137,10 +136,8 @@ class TimingProfilingTest {
 
             // Connect
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.scope.launch {
-                ws.connect()
-                ws.connectionState.first { it is ConnectionState.Connected }
-            }
+            ws.connect()
+            ws.awaitConnected()
 
             var writeTotal = Duration.ZERO
             var readTotal = Duration.ZERO
@@ -196,10 +193,8 @@ class TimingProfilingTest {
             val ws = WebSocketClient.allocate(connectionOptions, AllocationZone.Heap, this)
 
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.scope.launch {
-                ws.connect()
-                ws.connectionState.first { it is ConnectionState.Connected }
-            }
+            ws.connect()
+            ws.awaitConnected()
 
             var writeTotal = Duration.ZERO
 

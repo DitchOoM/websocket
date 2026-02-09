@@ -22,7 +22,7 @@ class WebSocketTests {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory, this)
             websocket.connect()
-            websocket.connectionState.first { it is ConnectionState.Connected }
+            websocket.awaitConnected()
             val string1 = "test"
             launch(Dispatchers.Default) { websocket.write(string1) }
             val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text

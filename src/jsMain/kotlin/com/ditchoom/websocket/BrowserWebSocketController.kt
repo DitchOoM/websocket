@@ -9,11 +9,11 @@ import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
@@ -57,8 +57,8 @@ class BrowserWebSocketController(
 
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
-    override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
+    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    override val incomingMessages = incomingMessageChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
     private val useSharedMemory = allocationZone == AllocationZone.SharedMemory
@@ -114,12 +114,12 @@ class BrowserWebSocketController(
                             jsBuffer.slice()
                         }
                     scope.launch {
-                        incomingMessageSharedFlow.emit(WebSocketMessage.Binary(buffer))
+                        incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
                     }
                 }
                 is String ->
                     scope.launch {
-                        incomingMessageSharedFlow.emit(WebSocketMessage.Text(data))
+                        incomingMessageChannel.trySend(WebSocketMessage.Text(data))
                     }
                 else -> throw IllegalArgumentException("Received invalid message type!")
             }
