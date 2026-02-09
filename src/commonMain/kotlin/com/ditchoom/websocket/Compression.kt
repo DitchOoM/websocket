@@ -5,6 +5,8 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.SuspendCloseable
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
@@ -809,20 +811,3 @@ internal suspend fun List<ReadBuffer>.closeAll() {
     }
 }
 
-/**
- * Frees a buffer's native memory without requiring suspend context.
- * Handles both pooled buffers (returns to pool) and platform buffers (frees native memory).
- * On Linux, frees the underlying malloc'd memory. On JVM/JS, this is a no-op.
- */
-internal fun ReadBuffer.freeIfNeeded() {
-    (this as? PlatformBuffer)?.freeNativeMemory()
-}
-
-/**
- * Frees all buffers' native memory without requiring suspend context.
- */
-internal fun List<ReadBuffer>.freeAll() {
-    for (buffer in this) {
-        buffer.freeIfNeeded()
-    }
-}

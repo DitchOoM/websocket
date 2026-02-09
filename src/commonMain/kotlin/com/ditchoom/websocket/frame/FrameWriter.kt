@@ -13,8 +13,8 @@ import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import com.ditchoom.websocket.combineChunks
 import com.ditchoom.websocket.compressSync
-import com.ditchoom.websocket.freeAll
-import com.ditchoom.websocket.freeIfNeeded
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.websocket.totalRemaining
 import kotlin.jvm.JvmInline
 
