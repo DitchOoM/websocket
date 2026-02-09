@@ -8,6 +8,7 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import com.ditchoom.websocket.combineChunks
@@ -111,7 +112,11 @@ class FrameWriter(
     private val compressionEnabled: Boolean = false,
     private val clientMode: Boolean = true,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val pool: BufferPool? = null,
 ) {
+    private fun allocateBuffer(size: Int): ReadWriteBuffer =
+        pool?.acquire(size) ?: (PlatformBuffer.allocate(size, allocationZone) as ReadWriteBuffer)
+
     /**
      * Writes a text frame with zero intermediate allocations.
      *
@@ -133,7 +138,7 @@ class FrameWriter(
         // Check if compression would help
         if (compressionEnabled && compressor != null && payloadSize > 0) {
             // Need intermediate buffer for compression comparison
-            val payload = PlatformBuffer.allocate(payloadSize, allocationZone)
+            val payload = allocateBuffer(payloadSize)
             payload.writeString(text, Charset.UTF8)
             payload.resetForRead()
             val frame = writeFrame(Opcode.Text, payload, fin)
@@ -151,7 +156,7 @@ class FrameWriter(
         val headerSize = header.headerSize(payloadSize, clientMode)
         val frameSize = headerSize + payloadSize
 
-        val buffer = PlatformBuffer.allocate(frameSize, allocationZone) as ReadWriteBuffer
+        val buffer = allocateBuffer(frameSize)
 
         // Write header
         buffer.writeShort(header.packed)
@@ -227,7 +232,7 @@ class FrameWriter(
         val headerSize = header.headerSize(payloadSize, clientMode)
         val frameSize = headerSize + payloadSize
 
-        val buffer = PlatformBuffer.allocate(frameSize, allocationZone) as ReadWriteBuffer
+        val buffer = allocateBuffer(frameSize)
 
         // Write header
         buffer.writeShort(header.packed)
@@ -313,7 +318,7 @@ class FrameWriter(
         val headerSize = header.headerSize(payloadSize, clientMode)
         val frameSize = headerSize + payloadSize
 
-        val buffer = PlatformBuffer.allocate(frameSize, allocationZone) as ReadWriteBuffer
+        val buffer = allocateBuffer(frameSize)
 
         buffer.writeShort(header.packed)
 
@@ -355,13 +360,13 @@ class FrameWriter(
 
         if (shouldCompress && compressor != null) {
             val originalSize = payload.remaining()
-            val chunks = compressSync(payload, compressor)
+            val chunks = compressSync(payload, compressor, pool = pool)
             val compressedSize = totalRemaining(chunks)
 
             if (compressedSize < originalSize) {
                 rsv1 = true
                 compressor.reset()
-                finalPayload = combineChunks(chunks, allocationZone)
+                finalPayload = combineChunks(chunks, allocationZone, pool)
                 chunks.freeAll() // Free original compressed chunks after combining
                 createdPayload = true
             } else {
@@ -401,7 +406,7 @@ class FrameWriter(
         val headerSize = header.headerSize(payloadSize, clientMode)
         val frameSize = headerSize + payloadSize
 
-        val buffer = PlatformBuffer.allocate(frameSize, allocationZone) as ReadWriteBuffer
+        val buffer = allocateBuffer(frameSize)
 
         // Write header
         buffer.writeShort(header.packed)

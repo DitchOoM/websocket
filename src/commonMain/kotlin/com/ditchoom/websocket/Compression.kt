@@ -14,6 +14,8 @@ import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
 import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
 import com.ditchoom.buffer.compression.compressAsync
 import com.ditchoom.buffer.compression.decompressAsync
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.PooledBuffer
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
 private const val SYNC_FLUSH_MARKER = 0x0000FFFF
@@ -134,10 +136,12 @@ internal fun totalRemaining(chunks: List<ReadBuffer>): Int = chunks.sumOf { it.r
 
 /**
  * Helper to combine multiple buffers into a single buffer.
+ * When [pool] is provided, allocates from the pool for buffer reuse.
  */
 internal fun combineChunks(
     chunks: List<ReadBuffer>,
     zone: AllocationZone,
+    pool: BufferPool? = null,
 ): ReadBuffer {
     if (chunks.isEmpty()) return ReadBuffer.EMPTY_BUFFER
     // Always copy to a new buffer. The single-chunk shortcut (returning chunks[0] directly)
@@ -145,7 +149,7 @@ internal fun combineChunks(
     // since combineChunks would have returned the same object that gets freed.
     val totalSize = chunks.sumOf { it.remaining() }
     if (totalSize == 0) return ReadBuffer.EMPTY_BUFFER
-    val result = PlatformBuffer.allocate(totalSize, zone)
+    val result = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, zone)
     for (chunk in chunks) {
         result.write(chunk)
     }
@@ -209,6 +213,7 @@ internal fun compressSync(
     buffer: ReadBuffer,
     compressor: StreamingCompressor,
     zone: AllocationZone = AllocationZone.Heap,
+    pool: BufferPool? = null,
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
     compressor.compress(buffer) { chunks.add(it) }
@@ -236,7 +241,7 @@ internal fun compressSync(
     }
 
     // Marker spans multiple chunks or doesn't match - need to combine and strip
-    val combined = combineChunks(chunks, zone)
+    val combined = combineChunks(chunks, zone, pool)
     chunks.freeAll()
     return listOf(stripSyncFlushMarkerInPlace(combined))
 }
@@ -249,6 +254,7 @@ internal fun compressSync(
 internal fun decompressToStringSync(
     buffer: ReadBuffer,
     decompressor: StreamingDecompressor,
+    pool: BufferPool? = null,
 ): String {
     var totalSize = 0
     val chunks = mutableListOf<ReadBuffer>()
@@ -290,14 +296,16 @@ internal fun decompressToStringSync(
 
     // For small messages: combine into single buffer first, then decode once
     if (totalSize <= COMBINE_THRESHOLD_BYTES) {
-        val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Heap)
+        val combined = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, AllocationZone.Heap)
         for (chunk in chunks) {
             chunk.position(0)
             combined.write(chunk)
         }
         chunks.freeAll()
         combined.resetForRead()
-        return combined.readString(totalSize, Charset.UTF8)
+        val result = combined.readString(totalSize, Charset.UTF8)
+        combined.freeIfNeeded()
+        return result
     }
 
     // For large messages: use streaming to limit peak memory
@@ -804,11 +812,14 @@ internal suspend fun List<ReadBuffer>.closeAll() {
 
 /**
  * Frees a buffer's native memory without requiring suspend context.
- * Uses PlatformBuffer.freeNativeMemory() which is sync on all platforms.
+ * Handles both pooled buffers (returns to pool) and platform buffers (frees native memory).
  * On Linux, frees the underlying malloc'd memory. On JVM/JS, this is a no-op.
  */
 internal fun ReadBuffer.freeIfNeeded() {
-    (this as? PlatformBuffer)?.freeNativeMemory()
+    when (this) {
+        is PooledBuffer -> release()
+        is PlatformBuffer -> freeNativeMemory()
+    }
 }
 
 /**

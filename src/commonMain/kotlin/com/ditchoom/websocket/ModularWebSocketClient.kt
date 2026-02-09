@@ -2,10 +2,8 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
@@ -34,10 +32,10 @@ import com.ditchoom.websocket.handshake.ValidationResult
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -81,8 +79,8 @@ class ModularWebSocketClient(
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
-    override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
+    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    override val incomingMessages = incomingMessageChannel.receiveAsFlow()
 
     // Components initialized during connect()
     // Note: These are set once during connect() and cleared during close().
@@ -172,6 +170,7 @@ class ModularWebSocketClient(
                             compressionEnabled = compressionEnabled,
                             clientMode = true,
                             allocationZone = allocationZone,
+                            pool = pool,
                         )
 
                     connectionStateFlow.value = ConnectionState.Connected
@@ -193,16 +192,17 @@ class ModularWebSocketClient(
 
     private fun setupCompression() {
         compressionEnabled = true
+        val allocator = BufferAllocator.FromPool(pool)
         outgoingCompressor =
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                BufferAllocator.Direct, // Linux requires NativeMemoryAccess for zlib
+                allocator,
             )
         incomingDecompressor =
             StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
-                BufferAllocator.Direct,
+                allocator,
             )
     }
 
@@ -218,7 +218,7 @@ class ModularWebSocketClient(
             if (available < 12) continue // Minimum: "HTTP/1.1 101"
 
             // Read available data for parsing
-            val buffer = PlatformBuffer.allocate(available, AllocationZone.Heap)
+            val buffer = pool.acquire(available)
             for (i in 0 until available) {
                 buffer.writeByte(processor.peekByte(i))
             }
@@ -255,7 +255,7 @@ class ModularWebSocketClient(
     private suspend fun readIntoProcessor(processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
         // Allocate buffer that we own (not from socket's internal pool).
         // This buffer will be owned by the processor after append.
-        val buffer = PlatformBuffer.allocate(readBufferSize, allocationZone)
+        val buffer = pool.acquire(readBufferSize)
 
         try {
             // Zero-copy: socket writes directly into our buffer
@@ -271,6 +271,13 @@ class ModularWebSocketClient(
                 // EOF or no data - free the unused buffer (Linux NativeBuffer leak fix)
                 buffer.freeIfNeeded()
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Do NOT free the buffer on cancellation. The kernel io_uring recv operation
+            // may still be writing to this buffer — freeing it causes use-after-free heap
+            // corruption. The buffer (64KB) is intentionally leaked on cancellation.
+            // socket.close() will close the fd, causing the kernel to cancel the recv,
+            // but we cannot safely free the buffer until that completes.
+            throw e
         } catch (e: Exception) {
             // Socket error - free the unused buffer (Linux NativeBuffer leak fix)
             buffer.freeIfNeeded()
@@ -387,10 +394,10 @@ class ModularWebSocketClient(
                 if (frame.payloadLength > 0) {
                     frame.payload.position(0)
                 }
-                incomingMessageSharedFlow.emit(WebSocketMessage.Ping(frame.payload))
+                incomingMessageChannel.trySend(WebSocketMessage.Ping(frame.payload))
             }
             Opcode.Pong -> {
-                incomingMessageSharedFlow.emit(WebSocketMessage.Pong(frame.payload))
+                incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payload))
             }
             Opcode.Close -> {
                 serverInitiatedClose.value = true
@@ -401,10 +408,18 @@ class ModularWebSocketClient(
 
                 // Send close response if we haven't already
                 if (connectionState.value is ConnectionState.Connected) {
-                    sendCloseFrame(code, reason)
+                    // If our parser detected a protocol error (e.g., 1-byte close payload),
+                    // respond with the error code. Otherwise, respond with 1000 Normal Closure.
+                    val responseCode =
+                        if (closeFrame.closeCode == CloseCode.PROTOCOL_ERROR) {
+                            CloseCode.PROTOCOL_ERROR.code
+                        } else {
+                            CloseCode.NORMAL.code
+                        }
+                    sendCloseFrame(responseCode, reason)
                 }
 
-                incomingMessageSharedFlow.emit(WebSocketMessage.Close(code, reason))
+                incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
                 connectionStateFlow.value = ConnectionState.Disconnected(code = code, reason = reason)
             }
             else -> {
@@ -419,7 +434,6 @@ class ModularWebSocketClient(
                 val text =
                     try {
                         if (message.compressed && compressionEnabled) {
-                            // Stream decompressed chunks directly to string to avoid intermediate buffer
                             decompressPayloadToString(message.payload)
                         } else {
                             message.payload.readString(message.payload.remaining(), Charset.UTF8)
@@ -434,7 +448,7 @@ class ModularWebSocketClient(
                     }
                 // Free the compressed/raw payload after extracting text
                 message.payload.freeIfNeeded()
-                incomingMessageSharedFlow.emit(WebSocketMessage.Text(text))
+                incomingMessageChannel.trySend(WebSocketMessage.Text(text))
             }
             Opcode.Binary -> {
                 val payload =
@@ -448,7 +462,7 @@ class ModularWebSocketClient(
                     } else {
                         message.payload
                     }
-                incomingMessageSharedFlow.emit(WebSocketMessage.Binary(payload))
+                incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
             }
             else -> {
                 // Unexpected opcode for assembled message
@@ -487,7 +501,7 @@ class ModularWebSocketClient(
 
         return try {
             // Stream decompress directly to string - reduces peak memory
-            decompressToStringSync(payload, decompressor)
+            decompressToStringSync(payload, decompressor, pool)
         } finally {
             // Reset decompressor state for next message.
             // The buffer library uses inflateReset() to avoid native heap churn.
@@ -559,6 +573,8 @@ class ModularWebSocketClient(
         // Clear frameWriter to prevent writes after close (avoids infinite loop
         // when socket.write returns -1 on a closed socket)
         frameWriter = null
+        // Close the incoming message channel so collectors complete
+        incomingMessageChannel.close()
         // Clean up compression resources
         outgoingCompressor?.close()
         outgoingCompressor = null
