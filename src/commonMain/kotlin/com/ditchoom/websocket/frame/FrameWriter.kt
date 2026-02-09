@@ -11,7 +11,6 @@ import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
-import com.ditchoom.websocket.combineChunks
 import com.ditchoom.websocket.compressSync
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
@@ -325,16 +324,8 @@ class FrameWriter(
         if (clientMode) {
             val mask = MaskingKey.FourByteMaskingKey()
             buffer.writeInt(mask.packed)
-            val payloadStart = buffer.position()
             payload.position(0)
-            buffer.write(payload)
-            val payloadEnd = buffer.position()
-
-            buffer.position(payloadStart)
-            buffer.setLimit(payloadEnd)
-            buffer.xorMask(mask.packed)
-            buffer.position(payloadEnd)
-            buffer.setLimit(buffer.capacity)
+            buffer.xorMaskCopy(payload, mask.packed)
         } else {
             payload.position(0)
             buffer.write(payload)
@@ -354,9 +345,6 @@ class FrameWriter(
         compress: Boolean = compressionEnabled,
     ): ReadBuffer {
         val shouldCompress = compress && !opcode.isControlFrame() && payload.remaining() > 0
-        var rsv1 = false
-        var createdPayload = false // Track if we created a new buffer for finalPayload
-        val finalPayload: ReadBuffer
 
         if (shouldCompress && compressor != null) {
             val originalSize = payload.remaining()
@@ -364,30 +352,24 @@ class FrameWriter(
             val compressedSize = totalRemaining(chunks)
 
             if (compressedSize < originalSize) {
-                rsv1 = true
                 compressor.reset()
-                finalPayload = combineChunks(chunks, allocationZone, pool)
-                chunks.freeAll() // Free original compressed chunks after combining
-                createdPayload = true
+                // Serialize directly from chunks — no intermediate combineChunks buffer
+                val frame = serializeFrameFromChunks(fin, rsv1 = true, opcode, chunks, compressedSize)
+                chunks.freeAll()
+                return frame
             } else {
                 payload.resetForRead()
                 compressor.reset()
-                chunks.freeAll() // Free unused compressed chunks
-                finalPayload = payload
+                chunks.freeAll()
+                return serializeFrame(fin, rsv1 = false, opcode, payload)
             }
-        } else {
-            finalPayload = payload
         }
 
-        val frame = serializeFrame(fin, rsv1, opcode, finalPayload)
-        if (createdPayload) {
-            finalPayload.freeIfNeeded() // Free temp compressed payload after serialization
-        }
-        return frame
+        return serializeFrame(fin, rsv1 = false, opcode, payload)
     }
 
     /**
-     * Serializes a frame with single allocation.
+     * Serializes a frame from a single payload buffer with fused copy + mask.
      */
     private fun serializeFrame(
         fin: Boolean,
@@ -412,24 +394,62 @@ class FrameWriter(
         buffer.writeShort(header.packed)
         writeExtendedLength(buffer, payloadSize)
 
-        // Write mask and payload
+        // Write payload with fused copy + mask (single pass)
         if (clientMode) {
             val mask = MaskingKey.FourByteMaskingKey()
             buffer.writeInt(mask.packed)
-            val payloadStart = buffer.position()
             payload.position(0)
-            buffer.write(payload)
-            val payloadEnd = buffer.position()
-
-            // Apply SIMD-accelerated XOR mask in-place
-            buffer.position(payloadStart)
-            buffer.setLimit(payloadEnd)
-            buffer.xorMask(mask.packed)
-            buffer.position(payloadEnd)
-            buffer.setLimit(buffer.capacity)
+            buffer.xorMaskCopy(payload, mask.packed)
         } else {
             payload.position(0)
             buffer.write(payload)
+        }
+
+        buffer.resetForRead()
+        return buffer
+    }
+
+    /**
+     * Serializes a frame directly from compressed chunks with fused copy + mask.
+     * Eliminates the intermediate combineChunks() buffer — chunks go directly
+     * into the frame buffer with masking applied in a single pass per chunk.
+     */
+    private fun serializeFrameFromChunks(
+        fin: Boolean,
+        rsv1: Boolean,
+        opcode: Opcode,
+        chunks: List<ReadBuffer>,
+        payloadSize: Int,
+    ): ReadBuffer {
+        val header =
+            if (clientMode) {
+                PackedFrameHeader.forClient(fin, rsv1, opcode, payloadSize)
+            } else {
+                PackedFrameHeader.forServer(fin, rsv1, opcode, payloadSize)
+            }
+        val headerSize = header.headerSize(payloadSize, clientMode)
+        val frameSize = headerSize + payloadSize
+
+        val buffer = allocateBuffer(frameSize)
+
+        // Write header
+        buffer.writeShort(header.packed)
+        writeExtendedLength(buffer, payloadSize)
+
+        // Write each chunk with fused copy + mask, tracking mask offset
+        if (clientMode) {
+            val mask = MaskingKey.FourByteMaskingKey()
+            buffer.writeInt(mask.packed)
+            var maskOffset = 0
+            for (chunk in chunks) {
+                val chunkSize = chunk.remaining()
+                buffer.xorMaskCopy(chunk, mask.packed, maskOffset)
+                maskOffset += chunkSize
+            }
+        } else {
+            for (chunk in chunks) {
+                buffer.write(chunk)
+            }
         }
 
         buffer.resetForRead()
