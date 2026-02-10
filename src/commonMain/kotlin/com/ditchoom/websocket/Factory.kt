@@ -46,7 +46,7 @@ fun WebSocketClient.Companion.allocate(
     allocate(
         connectionOptions,
         BufferPool(
-            threadingMode = ThreadingMode.SingleThreaded,
+            threadingMode = ThreadingMode.MultiThreaded,
             defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
             allocationZone = zone,
         ),

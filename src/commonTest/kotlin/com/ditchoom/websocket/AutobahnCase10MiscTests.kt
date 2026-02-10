@@ -4,7 +4,7 @@ import kotlin.test.Test
 
 class AutobahnCase10MiscTests {
     @Test
-    fun case10_1_1() =
+    fun category10() =
         runTestNoTimeSkipping {
             echoMessageAndClose(301)
         }

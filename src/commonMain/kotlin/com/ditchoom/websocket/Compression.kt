@@ -5,8 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.SuspendCloseable
-import com.ditchoom.buffer.freeAll
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
@@ -16,6 +14,8 @@ import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
 import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
 import com.ditchoom.buffer.compression.compressAsync
 import com.ditchoom.buffer.compression.decompressAsync
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
@@ -810,4 +810,3 @@ internal suspend fun List<ReadBuffer>.closeAll() {
         buffer.closeIfNeeded()
     }
 }
-

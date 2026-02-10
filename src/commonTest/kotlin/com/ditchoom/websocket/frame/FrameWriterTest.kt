@@ -31,6 +31,11 @@ import kotlin.test.assertTrue
  */
 class FrameWriterTest {
     private val pool = BufferPool(allocationZone = AllocationZone.Heap)
+    // Use pool-allocated FrameWriter so parseFrame's StreamProcessor doesn't
+    // prematurely free NativeBuffers passed to append(). In production, the
+    // read loop only appends pool buffers to the StreamProcessor.
+    private fun createWriter(clientMode: Boolean = false, compressionEnabled: Boolean = false) =
+        FrameWriter(clientMode = clientMode, compressionEnabled = compressionEnabled, pool = pool)
 
     // ========================================================================
     // RFC 6455 Section 5.2 - Data Frame Writing
@@ -40,7 +45,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-2 - write text frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer = writer.writeTextFrame("Hello")
 
@@ -54,7 +59,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-2 - write binary frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val data = byteArrayOf(0x01, 0x02, 0x03, 0x04)
 
             val frameBuffer = writer.writeBinaryFrame(createBuffer(data))
@@ -68,7 +73,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-2 - write continuation frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer =
                 writer.writeContinuationFrame(
@@ -85,7 +90,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-2 - write frame with 16-bit length`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val data = ByteArray(200) { it.toByte() }
 
             val frameBuffer = writer.writeBinaryFrame(createBuffer(data))
@@ -98,7 +103,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-2 - write frame with 64-bit length`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val data = ByteArray(70000) { (it % 256).toByte() }
 
             val frameBuffer = writer.writeBinaryFrame(createBuffer(data))
@@ -117,7 +122,7 @@ class FrameWriterTest {
     fun `RFC 6455 Section 5-3 - client frames are masked`() =
         runTest {
             // "All frames sent from client to server have this bit set to 1"
-            val writer = FrameWriter(clientMode = true, compressionEnabled = false)
+            val writer = createWriter(clientMode = true)
 
             val frameBuffer = writer.writeTextFrame("Hello")
 
@@ -130,7 +135,7 @@ class FrameWriterTest {
     fun `RFC 6455 Section 5-3 - server frames are not masked`() =
         runTest {
             // "A server MUST NOT mask any frames that it sends to the client"
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer = writer.writeTextFrame("Hello")
 
@@ -142,7 +147,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-3 - masked data is correctly unmasked`() =
         runTest {
-            val writer = FrameWriter(clientMode = true, compressionEnabled = false)
+            val writer = createWriter(clientMode = true)
             val originalText = "The quick brown fox jumps over the lazy dog"
 
             val frameBuffer = writer.writeTextFrame(originalText)
@@ -161,7 +166,7 @@ class FrameWriterTest {
     fun `RFC 6455 Section 5-5 - control frames have FIN set`() =
         runTest {
             // "All control frames MUST have the FIN bit set"
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val closeFrame = parseFrame(writer.writeCloseFrame(1000u))
             val pingFrame = parseFrame(writer.writePingFrame())
@@ -179,7 +184,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-5-1 - write close frame with status code`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer = writer.writeCloseFrame(1000u, "Normal closure")
 
@@ -196,7 +201,7 @@ class FrameWriterTest {
     fun `RFC 6455 Section 5-5-1 - close frame reason truncated to 123 bytes`() =
         runTest {
             // Control frames max 125 bytes, minus 2 for status code = 123 for reason
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val longReason = "x".repeat(200)
 
             val frameBuffer = writer.writeCloseFrame(1000u, longReason)
@@ -210,7 +215,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-5-2 - write ping frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val pingData = "ping".encodeToByteArray()
 
             val frameBuffer = writer.writePingFrame(createBuffer(pingData))
@@ -224,7 +229,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-5-2 - ping payload truncated to 125 bytes`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val longData = ByteArray(200) { it.toByte() }
 
             val frameBuffer = writer.writePingFrame(createBuffer(longData))
@@ -237,7 +242,7 @@ class FrameWriterTest {
     @Test
     fun `RFC 6455 Section 5-5-3 - write pong frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
             val pongData = "pong".encodeToByteArray()
 
             val frameBuffer = writer.writePongFrame(createBuffer(pongData))
@@ -254,7 +259,7 @@ class FrameWriterTest {
     @Test
     fun `write fragmented message`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             // First fragment
             val frame1 = parseFrame(writer.writeFrame(Opcode.Text, createBuffer("Hello ".encodeToByteArray()), fin = false))
@@ -276,7 +281,7 @@ class FrameWriterTest {
     @Test
     fun `write empty text frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer = writer.writeTextFrame("")
 
@@ -289,7 +294,7 @@ class FrameWriterTest {
     @Test
     fun `write empty close frame`() =
         runTest {
-            val writer = FrameWriter(clientMode = false, compressionEnabled = false)
+            val writer = createWriter(clientMode = false)
 
             val frameBuffer = writer.writeCloseFrame()
 
@@ -306,7 +311,7 @@ class FrameWriterTest {
     @Test
     fun `round-trip - text frame preserves content`() =
         runTest {
-            val writer = FrameWriter(clientMode = true, compressionEnabled = false)
+            val writer = createWriter(clientMode = true)
             val originalText = "Hello, WebSocket! 你好世界 🌍"
 
             val frameBuffer = writer.writeTextFrame(originalText)
@@ -319,7 +324,7 @@ class FrameWriterTest {
     @Test
     fun `round-trip - binary frame preserves content`() =
         runTest {
-            val writer = FrameWriter(clientMode = true, compressionEnabled = false)
+            val writer = createWriter(clientMode = true)
             val originalData = ByteArray(256) { it.toByte() }
 
             val frameBuffer = writer.writeBinaryFrame(createBuffer(originalData))

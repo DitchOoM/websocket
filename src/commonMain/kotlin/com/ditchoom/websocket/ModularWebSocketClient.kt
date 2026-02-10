@@ -4,20 +4,21 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.freeAll
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
+import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.allocate
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.frame.AssemblyResult
@@ -77,7 +78,7 @@ class ModularWebSocketClient(
                 ),
         )
 
-    private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
+    private val socket = ClientSocket.allocate(allocationZone)
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
@@ -131,8 +132,10 @@ class ModularWebSocketClient(
             clientKey = handshakeRequest.key
 
             // Open socket connection
+            val socketOptions =
+                if (connectionOptions.tls) SocketOptions.tlsDefault() else SocketOptions.LOW_LATENCY
             withTimeout(connectionOptions.connectionTimeout) {
-                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name, socketOptions)
             }
 
             // Send handshake request

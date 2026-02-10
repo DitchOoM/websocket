@@ -8,12 +8,12 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import com.ditchoom.websocket.compressSync
-import com.ditchoom.buffer.freeAll
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.websocket.totalRemaining
 import kotlin.jvm.JvmInline
 

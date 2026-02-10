@@ -37,26 +37,41 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
             return
         }
 
-        // Check if local server is already running and healthy
-        if (isServerReady("127.0.0.1", port)) {
-            println("Autobahn fuzzing server already running on port $port")
-            return
-        }
+        // Always restart the container with clean reports.
+        // Gradle executes this task once per invocation, so multiple platforms
+        // (JVM + Linux) share the same fresh container within a single build.
 
-        // Stop and remove existing container if it exists
+        // 1. Stop and remove existing container (if any)
         try {
             ProcessBuilder("docker", "stop", containerName)
                 .redirectErrorStream(true)
                 .start()
                 .waitFor()
+        } catch (e: Exception) { /* container may not exist */ }
+        try {
             ProcessBuilder("docker", "rm", containerName)
                 .redirectErrorStream(true)
                 .start()
                 .waitFor()
+        } catch (e: Exception) { /* container may not exist */ }
+
+        // 2. Clean stale reports (files owned by root from Docker bind mount)
+        val reportsDir = "${parameters.projectDir.absolutePath}/.docker/reports"
+        try {
+            val cleanProcess = ProcessBuilder(
+                "docker", "run", "--rm",
+                "-v", "$reportsDir:/reports",
+                "alpine", "sh", "-c", "rm -rf /reports/clients/*"
+            )
+                .redirectErrorStream(true)
+                .start()
+            cleanProcess.waitFor()
+            println("Cleaned stale Autobahn reports")
         } catch (e: Exception) {
-            // Container might not exist, ignore
+            println("Warning: Could not clean reports: ${e.message}")
         }
 
+        // 3. Start fresh container
         println("Starting Autobahn fuzzing server...")
         println("  config: ${parameters.projectDir.absolutePath}/.docker/config:/config")
         println("  reports: ${parameters.projectDir.absolutePath}/.docker/reports:/reports")

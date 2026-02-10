@@ -2,72 +2,17 @@ package com.ditchoom.websocket
 
 import kotlin.test.Test
 
+/**
+ * Autobahn Category 2: Ping/Pong tests.
+ *
+ * The server sends Ping frames; the client framework auto-responds with Pong.
+ * No text/binary data messages are exchanged — just connect and let the
+ * framework handle pings, then the server closes the connection.
+ */
 class AutobahnCase2FragmentationTests {
     @Test
-    fun case2_1() =
+    fun category2() =
         runTestNoTimeSkipping {
-            echoMessageAndClose(17)
-        }
-
-    @Test
-    fun case2_2() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(18)
-        }
-
-    @Test
-    fun case2_3() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(19)
-        }
-
-    @Test
-    fun case2_4() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(20)
-        }
-
-    @Test
-    fun case2_5() =
-        runTestNoTimeSkipping {
-            // Case 21: Server sends invalid ping (payload > 125 bytes)
-            // Client should reject with close code 1002 - just connect and wait for close
-            prepareConnection(21)
-        }
-
-    @Test
-    fun case2_6() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(22)
-        }
-
-    @Test
-    fun case2_7() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(23)
-        }
-
-    @Test
-    fun case2_8() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(24)
-        }
-
-    @Test
-    fun case2_9() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(25)
-        }
-
-    @Test
-    fun case2_10() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(26)
-        }
-
-    @Test
-    fun case2_11() =
-        runTestNoTimeSkipping {
-            echoMessageAndClose(27)
+            for (case in 17..27) prepareConnection(case)
         }
 }

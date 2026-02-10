@@ -8,9 +8,9 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
@@ -94,7 +94,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     ws.connect()
     ws.awaitConnected()
     try {
-        ws.incomingMessages.take(count).collect {
+        ws.incomingMessages.filter { it is WebSocketMessage.Text }.take(count).collect {
             val m = it as WebSocketMessage.Text
             ws.write(m.value)
         }
@@ -135,7 +135,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     ws.connect()
     ws.awaitConnected()
     try {
-        ws.incomingMessages.take(count).collect {
+        ws.incomingMessages.filter { it is WebSocketMessage.Binary }.take(count).collect {
             val m = it as WebSocketMessage.Binary
             ws.write(m.value)
             m.value.closeIfNeeded() // Free NativeBuffer after echo

@@ -27,8 +27,10 @@ kotlin {
         nodejs()
     }
 
-    macosArm64()
-    macosX64()
+    if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
+        macosArm64()
+        macosX64()
+    }
 
     sourceSets {
         commonMain {
@@ -44,8 +46,10 @@ benchmark {
     targets {
         register("jvm")
         register("js")
-        register("macosArm64")
-        register("macosX64")
+        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
+            register("macosArm64")
+            register("macosX64")
+        }
     }
     configurations {
         named("main") {

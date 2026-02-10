@@ -20,6 +20,7 @@ import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
+import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.allocate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +67,7 @@ class DefaultWebSocketClient(
                         ": ${connectionOptions.name}:${connectionOptions.port}",
                 )
         }
-    private val socket = ClientSocket.allocate(connectionOptions.tls, allocationZone)
+    private val socket = ClientSocket.allocate(allocationZone)
     private var hasServerInitiatedClose = false
     internal val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
@@ -129,8 +130,10 @@ class DefaultWebSocketClient(
                     "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
                     "\r\n"
 
+            val socketOptions =
+                if (connectionOptions.tls) SocketOptions.tlsDefault() else SocketOptions.LOW_LATENCY
             withTimeout(connectionOptions.connectionTimeout) {
-                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name)
+                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name, socketOptions)
             }
             socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
 

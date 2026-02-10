@@ -4,224 +4,27 @@ import kotlin.test.Test
 
 class AutobahnCase7CloseTests {
     @Test
-    fun case7_1_1() =
+    fun category7() =
         runTestNoTimeSkipping {
+            // 7.1.1: Echo message then close
             echoMessageAndClose(210)
-        }
-
-    @Test
-    fun case7_1_2() =
-        runTestNoTimeSkipping {
-            prepareConnection(211)
-        }
-
-    @Test
-    fun case7_1_3() =
-        runTestNoTimeSkipping {
-            prepareConnection(212)
-        }
-
-    @Test
-    fun case7_1_4() =
-        runTestNoTimeSkipping {
-            prepareConnection(213)
-        }
-
-    @Test
-    fun case7_1_5() =
-        runTestNoTimeSkipping {
-            prepareConnection(214)
-        }
-
-    @Test
-    fun case7_1_6() =
-        runTestNoTimeSkipping {
-            prepareConnection(215)
-        }
-
-    @Test
-    fun case7_3_1() =
-        runTestNoTimeSkipping {
+            // 7.1.2-7.1.6: Server-driven close scenarios
+            for (case in 211..215) prepareConnection(case)
+            // 7.3.1: Client-initiated close (no code)
             closeConnection(prepareConnection(216, awaitClose = false))
-        }
-
-    @Test
-    fun case7_3_2() =
-        runTestNoTimeSkipping {
+            // 7.3.2: Invalid 1-byte close payload
             prepareConnection(217)
-        }
-
-    @Test
-    fun case7_3_3() =
-        runTestNoTimeSkipping {
-            closeConnection(prepareConnection(218, awaitClose = false))
-        }
-
-    @Test
-    fun case7_3_4() =
-        runTestNoTimeSkipping {
-            closeConnection(prepareConnection(219, awaitClose = false))
-        }
-
-    @Test
-    fun case7_3_5() =
-        runTestNoTimeSkipping {
-            closeConnection(prepareConnection(220, awaitClose = false))
-        }
-
-    @Test
-    fun case7_3_6() =
-        runTestNoTimeSkipping {
+            // 7.3.3-7.3.5: Client-initiated close with code/reason
+            for (case in 218..220) closeConnection(prepareConnection(case, awaitClose = false))
+            // 7.3.6: Oversized close payload
             prepareConnection(221)
-        }
-
-    @Test
-    fun case7_5() =
-        runTestNoTimeSkipping {
+            // 7.5: Invalid UTF-8 in close reason
             prepareConnection(222)
-        }
-
-    @Test
-    fun case7_7_1() =
-        runTestNoTimeSkipping {
-            prepareConnection(223)
-        }
-
-    @Test
-    fun case7_7_2() =
-        runTestNoTimeSkipping {
-            prepareConnection(224)
-        }
-
-    @Test
-    fun case7_7_3() =
-        runTestNoTimeSkipping {
-            prepareConnection(225)
-        }
-
-    @Test
-    fun case7_7_4() =
-        runTestNoTimeSkipping {
-            prepareConnection(226)
-        }
-
-    @Test
-    fun case7_7_5() =
-        runTestNoTimeSkipping {
-            prepareConnection(227)
-        }
-
-    @Test
-    fun case7_7_6() =
-        runTestNoTimeSkipping {
-            prepareConnection(228)
-        }
-
-    @Test
-    fun case7_7_7() =
-        runTestNoTimeSkipping {
-            prepareConnection(229)
-        }
-
-    @Test
-    fun case7_7_8() =
-        runTestNoTimeSkipping {
-            prepareConnection(230)
-        }
-
-    @Test
-    fun case7_7_9() =
-        runTestNoTimeSkipping {
-            prepareConnection(231)
-        }
-
-    @Test
-    fun case7_7_10() =
-        runTestNoTimeSkipping {
-            prepareConnection(232)
-        }
-
-    @Test
-    fun case7_7_11() =
-        runTestNoTimeSkipping {
-            prepareConnection(233)
-        }
-
-    @Test
-    fun case7_7_12() =
-        runTestNoTimeSkipping {
-            prepareConnection(234)
-        }
-
-    @Test
-    fun case7_7_13() =
-        runTestNoTimeSkipping {
-            prepareConnection(235)
-        }
-
-    @Test
-    fun case7_9_1() =
-        runTestNoTimeSkipping {
-            prepareConnection(236)
-        }
-
-    @Test
-    fun case7_9_2() =
-        runTestNoTimeSkipping {
-            prepareConnection(237)
-        }
-
-    @Test
-    fun case7_9_3() =
-        runTestNoTimeSkipping {
-            prepareConnection(238)
-        }
-
-    @Test
-    fun case7_9_4() =
-        runTestNoTimeSkipping {
-            prepareConnection(239)
-        }
-
-    @Test
-    fun case7_9_5() =
-        runTestNoTimeSkipping {
-            prepareConnection(240)
-        }
-
-    @Test
-    fun case7_9_6() =
-        runTestNoTimeSkipping {
-            prepareConnection(241)
-        }
-
-    @Test
-    fun case7_9_7() =
-        runTestNoTimeSkipping {
-            prepareConnection(242)
-        }
-
-    @Test
-    fun case7_9_8() =
-        runTestNoTimeSkipping {
-            prepareConnection(243)
-        }
-
-    @Test
-    fun case7_9_9() =
-        runTestNoTimeSkipping {
-            prepareConnection(244)
-        }
-
-    @Test
-    fun case7_13_1() =
-        runTestNoTimeSkipping {
-            prepareConnection(245)
-        }
-
-    @Test
-    fun case7_13_2() =
-        runTestNoTimeSkipping {
-            prepareConnection(246)
+            // 7.7: Valid close codes
+            for (case in 223..235) prepareConnection(case)
+            // 7.9: Invalid close codes
+            for (case in 236..244) prepareConnection(case)
+            // 7.13: Out-of-range close codes
+            for (case in 245..246) prepareConnection(case)
         }
 }
