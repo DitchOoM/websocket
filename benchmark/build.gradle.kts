@@ -17,6 +17,8 @@ allOpen {
     annotation("kotlinx.benchmark.State")
 }
 
+val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
+
 kotlin {
     jvmToolchain(21)
 
@@ -32,11 +34,17 @@ kotlin {
         macosX64()
     }
 
+    if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
+        linuxX64()
+    }
+
     sourceSets {
         commonMain {
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
                 implementation(libs.buffer)
+                implementation(libs.buffer.compression)
+                implementation(project(":"))
             }
         }
     }
@@ -49,6 +57,9 @@ benchmark {
         if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
             register("macosArm64")
             register("macosX64")
+        }
+        if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
+            register("linuxX64")
         }
     }
     configurations {

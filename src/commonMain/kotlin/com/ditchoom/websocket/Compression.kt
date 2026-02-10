@@ -21,9 +21,12 @@ import com.ditchoom.buffer.pool.BufferPool
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
 private const val SYNC_FLUSH_MARKER = 0x0000FFFF
 
-// Pre-allocated sync marker buffer to avoid allocation on every decompression
+// Pre-allocated sync marker buffer to avoid allocation on every decompression.
+// Uses Direct zone so that on Linux K/N, this is a NativeBuffer with direct pointer
+// access. Heap zone would create a ByteArrayBuffer requiring pin/unpin (futex) on
+// every withInputPointer() call in the zlib decompressor.
 private val SYNC_FLUSH_MARKER_BUFFER: ReadBuffer by lazy {
-    val buffer = PlatformBuffer.allocate(4, AllocationZone.Heap)
+    val buffer = PlatformBuffer.allocate(4, AllocationZone.Direct)
     buffer.writeInt(SYNC_FLUSH_MARKER)
     buffer.resetForRead()
     buffer

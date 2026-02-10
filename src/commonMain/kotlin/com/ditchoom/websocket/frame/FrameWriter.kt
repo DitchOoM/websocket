@@ -116,11 +116,20 @@ class FrameWriter(
     private fun allocateBuffer(size: Int): ReadWriteBuffer =
         pool?.acquire(size) ?: (PlatformBuffer.allocate(size, allocationZone) as ReadWriteBuffer)
 
+    private fun releaseBuffer(buffer: ReadBuffer) {
+        if (pool != null && buffer is ReadWriteBuffer) {
+            pool.release(buffer)
+        } else {
+            buffer.freeIfNeeded()
+        }
+    }
+
     /**
-     * Writes a text frame with zero intermediate allocations.
+     * Writes a text frame.
      *
-     * Single allocation: calculates UTF-8 size, allocates one buffer for
-     * header + payload, writes string directly, applies mask in-place.
+     * Encodes the string to a temp pool buffer (single O(n) pass), then
+     * serializes the frame with fused copy+mask via xorMaskCopy (second O(n) pass).
+     * Avoids the previous 3-pass approach (byteSize + writeString + xorMask).
      */
     fun writeTextFrame(
         text: String,
@@ -131,56 +140,14 @@ class FrameWriter(
             return writeFrame(Opcode.Text, EMPTY_BUFFER, fin)
         }
 
-        // Calculate UTF-8 byte size (O(n) but no allocation)
-        val payloadSize = Utf8.byteSize(text)
-
-        // Check if compression would help
-        if (compressionEnabled && compressor != null && payloadSize > 0) {
-            // Need intermediate buffer for compression comparison
-            val payload = allocateBuffer(payloadSize)
-            payload.writeString(text, Charset.UTF8)
-            payload.resetForRead()
-            val frame = writeFrame(Opcode.Text, payload, fin)
-            payload.freeIfNeeded() // Free temp payload after frame serialization
-            return frame
-        }
-
-        // Zero-copy path: single allocation for header + payload
-        val header =
-            if (clientMode) {
-                PackedFrameHeader.forClient(fin, false, Opcode.Text, payloadSize)
-            } else {
-                PackedFrameHeader.forServer(fin, false, Opcode.Text, payloadSize)
-            }
-        val headerSize = header.headerSize(payloadSize, clientMode)
-        val frameSize = headerSize + payloadSize
-
-        val buffer = allocateBuffer(frameSize)
-
-        // Write header
-        buffer.writeShort(header.packed)
-        writeExtendedLength(buffer, payloadSize)
-
-        // Write mask and payload
-        if (clientMode) {
-            val mask = MaskingKey.FourByteMaskingKey()
-            buffer.writeInt(mask.packed)
-            val payloadStart = buffer.position()
-            buffer.writeString(text, Charset.UTF8)
-            val payloadEnd = buffer.position()
-
-            // Apply SIMD-accelerated XOR mask in-place
-            buffer.position(payloadStart)
-            buffer.setLimit(payloadEnd)
-            buffer.xorMask(mask.packed)
-            buffer.position(payloadEnd)
-            buffer.setLimit(buffer.capacity)
-        } else {
-            buffer.writeString(text, Charset.UTF8)
-        }
-
-        buffer.resetForRead()
-        return buffer
+        // Encode to temp buffer — single O(n) pass, no Utf8.byteSize scan needed.
+        // text.length * 3 is a safe upper bound (worst case: all 3-byte BMP chars).
+        val payload = allocateBuffer(text.length * 3)
+        payload.writeString(text, Charset.UTF8)
+        payload.resetForRead()
+        val frame = writeFrame(Opcode.Text, payload, fin)
+        releaseBuffer(payload)
+        return frame
     }
 
     /**
