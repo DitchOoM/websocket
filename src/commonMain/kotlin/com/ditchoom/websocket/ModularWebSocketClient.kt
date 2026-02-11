@@ -4,6 +4,7 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
@@ -95,6 +96,9 @@ class ModularWebSocketClient(
     private var outgoingCompressionEnabled = false
     private var serverNoContextTakeover = false
     private var clientNoContextTakeover = false
+
+    // Reusable decoder for streaming UTF-8 decoding of decompressed text messages
+    private val stringDecoder = StreamingStringDecoder()
 
     // Use StateFlow for thread-safe access between read loop and close()
     private val serverInitiatedClose = MutableStateFlow(false)
@@ -542,7 +546,7 @@ class ModularWebSocketClient(
 
         return try {
             // Stream decompress directly to string - reduces peak memory
-            decompressToStringSync(payload, decompressor, pool)
+            decompressToStringSync(payload, decompressor, stringDecoder)
         } catch (e: Throwable) {
             throw e
         } finally {

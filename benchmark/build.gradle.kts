@@ -75,5 +75,12 @@ benchmark {
             iterationTime = 500
             iterationTimeUnit = "ms"
         }
+        register("decompress") {
+            iterations = 5
+            warmups = 3
+            iterationTime = 1000
+            iterationTimeUnit = "ms"
+            include("decompress|fullRoundTrip")
+        }
     }
 }

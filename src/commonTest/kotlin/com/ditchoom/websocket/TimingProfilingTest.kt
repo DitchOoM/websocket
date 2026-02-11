@@ -5,6 +5,7 @@ import autobahnHost
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -51,6 +52,7 @@ class TimingProfilingTest {
                         CompressionAlgorithm.Raw,
                         BufferAllocator.Direct,
                     )
+                val decoder = StreamingStringDecoder()
 
                 // Warmup
                 repeat(10) {
@@ -61,7 +63,7 @@ class TimingProfilingTest {
                     compressor.reset()
                     val combined = combineChunks(compressed, AllocationZone.Heap)
                     compressed.freeAll()
-                    val decompressedStr = decompressToStringSync(combined, decompressor)
+                    val decompressedStr = decompressToStringSync(combined, decompressor, decoder)
                     combined.freeIfNeeded()
                     decompressor.reset()
                     buf.freeIfNeeded()
@@ -95,7 +97,7 @@ class TimingProfilingTest {
 
                     // Decompress to string (includes string decode)
                     mark = TimeSource.Monotonic.markNow()
-                    val decompressedStr = decompressToStringSync(combined, decompressor)
+                    val decompressedStr = decompressToStringSync(combined, decompressor, decoder)
                     decompressor.reset()
                     decompressTotal += mark.elapsedNow()
 

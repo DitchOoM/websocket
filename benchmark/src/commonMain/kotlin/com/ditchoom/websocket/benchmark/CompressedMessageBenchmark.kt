@@ -5,6 +5,7 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
+import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -40,6 +41,7 @@ class CompressedMessageBenchmark {
     // Streaming compressor/decompressor (public API from buffer-compression)
     private lateinit var compressor: StreamingCompressor
     private lateinit var decompressor: StreamingDecompressor
+    private lateinit var decoder: StreamingStringDecoder
 
     // Buffer pool matching production ModularWebSocketClient pattern
     private lateinit var pool: BufferPool
@@ -62,10 +64,15 @@ class CompressedMessageBenchmark {
     private val text1m: String by lazy { generateAsciiText(1024 * 1024) }
     private val text16m: String by lazy { generateAsciiText(16 * 1024 * 1024) }
 
-    // Pre-compressed payloads for decompression benchmarks
+    // Pre-compressed payloads for decompression benchmarks (without marker — production format)
     private lateinit var smallCompressed: ReadBuffer
     private lateinit var mediumCompressed: ReadBuffer
     private lateinit var largeCompressed: ReadBuffer
+
+    // Pre-compressed payloads WITH marker appended (for inline marker benchmark)
+    private lateinit var smallCompressedWithMarker: ReadBuffer
+    private lateinit var mediumCompressedWithMarker: ReadBuffer
+    private lateinit var largeCompressedWithMarker: ReadBuffer
 
     // Pre-allocated buffers for xorMask isolation benchmarks
     private lateinit var xorMaskBuf: ReadWriteBuffer
@@ -82,6 +89,7 @@ class CompressedMessageBenchmark {
     fun setup() {
         compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+        decoder = StreamingStringDecoder()
         pool = BufferPool()
 
         compressedWriter = FrameWriter(
@@ -112,6 +120,11 @@ class CompressedMessageBenchmark {
         smallCompressed = compressForDecompBench(smallText)
         mediumCompressed = compressForDecompBench(mediumText)
         largeCompressed = compressForDecompBench(largeText)
+
+        // Same but with marker appended (for inline marker benchmark — avoids copy in hot loop)
+        smallCompressedWithMarker = appendMarker(smallCompressed)
+        mediumCompressedWithMarker = appendMarker(mediumCompressed)
+        largeCompressedWithMarker = appendMarker(largeCompressed)
     }
 
     @TearDown
@@ -119,6 +132,9 @@ class CompressedMessageBenchmark {
         smallCompressed.freeIfNeeded()
         mediumCompressed.freeIfNeeded()
         largeCompressed.freeIfNeeded()
+        smallCompressedWithMarker.freeIfNeeded()
+        mediumCompressedWithMarker.freeIfNeeded()
+        largeCompressedWithMarker.freeIfNeeded()
         xorMaskBuf.freeIfNeeded()
         xorMaskCopySrc.freeIfNeeded()
         compressor.close()
@@ -339,6 +355,51 @@ class CompressedMessageBenchmark {
         pool.release(buf)
     }
 
+    // --- Decompress with inline marker (single zlib call) ---
+    // Instead of a separate decompress(markerBuffer), marker is pre-appended to input
+
+    @Benchmark
+    fun decompressInlineMarkerSmall(bh: Blackhole) {
+        smallCompressedWithMarker.position(0)
+        val str = decompressSingleCall(smallCompressedWithMarker, decompressor)
+        bh.consume(str)
+        decompressor.reset()
+    }
+
+    @Benchmark
+    fun decompressInlineMarkerMedium(bh: Blackhole) {
+        mediumCompressedWithMarker.position(0)
+        val str = decompressSingleCall(mediumCompressedWithMarker, decompressor)
+        bh.consume(str)
+        decompressor.reset()
+    }
+
+    @Benchmark
+    fun decompressInlineMarkerLarge(bh: Blackhole) {
+        largeCompressedWithMarker.position(0)
+        val str = decompressSingleCall(largeCompressedWithMarker, decompressor)
+        bh.consume(str)
+        decompressor.reset()
+    }
+
+    // --- Decompress with streaming string decode (no combineChunks) ---
+
+    @Benchmark
+    fun decompressStreamingDecodeMedium(bh: Blackhole) {
+        mediumCompressed.position(0)
+        val str = decompressToStringStreaming(mediumCompressed, decompressor)
+        bh.consume(str)
+        decompressor.reset()
+    }
+
+    @Benchmark
+    fun decompressStreamingDecodeLarge(bh: Blackhole) {
+        largeCompressed.position(0)
+        val str = decompressToStringStreaming(largeCompressed, decompressor)
+        bh.consume(str)
+        decompressor.reset()
+    }
+
     // --- Full round-trip: compress via FrameWriter → decompress + UTF-8 decode ---
 
     @Benchmark
@@ -405,18 +466,19 @@ class CompressedMessageBenchmark {
     }
 
     /**
-     * Reproduces the websocket decompress-to-string pipeline using public StreamingDecompressor API:
-     * decompress → append sync flush marker → finish → readString
+     * Reproduces the websocket decompress-to-string pipeline using public StreamingDecompressor API
+     * with StreamingStringDecoder for platform-optimized UTF-8 decoding.
      */
     private fun decompressToString(
         buffer: ReadBuffer,
         decomp: StreamingDecompressor,
     ): String {
-        val chunks = mutableListOf<ReadBuffer>()
+        val sb = StringBuilder()
 
         decomp.decompress(buffer) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
         }
 
         // Append sync marker and decompress (flushes pending output)
@@ -425,38 +487,20 @@ class CompressedMessageBenchmark {
         marker.resetForRead()
         decomp.decompress(marker) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
         }
         marker.freeIfNeeded()
 
         decomp.finish { chunk ->
             if (chunk.position() != 0) chunk.position(0)
-            if (chunk.remaining() > 0) chunks.add(chunk)
-        }
-
-        if (chunks.isEmpty()) return ""
-
-        // Single chunk fast path
-        if (chunks.size == 1) {
-            val chunk = chunks[0]
-            val result = chunk.readString(chunk.remaining(), Charset.UTF8)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
-            return result
         }
 
-        // Combine chunks and decode
-        var totalSize = 0
-        for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Heap)
-        for (chunk in chunks) {
-            chunk.position(0)
-            combined.write(chunk)
-        }
-        chunks.freeAll()
-        combined.resetForRead()
-        val result = combined.readString(totalSize, Charset.UTF8)
-        combined.freeIfNeeded()
-        return result
+        decoder.finish(sb)
+        decoder.reset()
+        return sb.toString()
     }
 
     /**
@@ -497,6 +541,81 @@ class CompressedMessageBenchmark {
         }
 
         return payload
+    }
+
+    /**
+     * Decompresses using a single decompress() call — the marker is already in the buffer.
+     * Eliminates the second decompress(markerBuffer) call.
+     */
+    private fun decompressSingleCall(
+        bufferWithMarker: ReadBuffer,
+        decomp: StreamingDecompressor,
+    ): String {
+        val sb = StringBuilder()
+        // Single decompress call — marker is part of the input
+        decomp.decompress(bufferWithMarker) { chunk ->
+            if (chunk.position() != 0) chunk.position(0)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
+        }
+        decomp.flush { chunk ->
+            if (chunk.position() != 0) chunk.position(0)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
+        }
+
+        decoder.finish(sb)
+        decoder.reset()
+        return sb.toString()
+    }
+
+    /**
+     * Decompresses and decodes each chunk directly to StringBuilder using StreamingStringDecoder.
+     * Same as decompressToString but uses the two-call decompress pattern with explicit marker.
+     */
+    private fun decompressToStringStreaming(
+        buffer: ReadBuffer,
+        decomp: StreamingDecompressor,
+    ): String {
+        val sb = StringBuilder()
+
+        decomp.decompress(buffer) { chunk ->
+            if (chunk.position() != 0) chunk.position(0)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
+        }
+
+        val marker = PlatformBuffer.allocate(4, AllocationZone.Direct)
+        marker.writeInt(SYNC_FLUSH_MARKER)
+        marker.resetForRead()
+        decomp.decompress(marker) { chunk ->
+            if (chunk.position() != 0) chunk.position(0)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
+        }
+        marker.freeIfNeeded()
+
+        decomp.flush { chunk ->
+            if (chunk.position() != 0) chunk.position(0)
+            if (chunk.remaining() > 0) decoder.decode(chunk, sb)
+            chunk.freeIfNeeded()
+        }
+
+        decoder.finish(sb)
+        decoder.reset()
+        return sb.toString()
+    }
+
+    /** Creates a new buffer with the compressed payload + 4-byte SYNC_FLUSH marker appended. */
+    private fun appendMarker(compressed: ReadBuffer): ReadBuffer {
+        val size = compressed.remaining()
+        val withMarker = PlatformBuffer.allocate(size + 4, AllocationZone.Direct)
+        compressed.position(0)
+        withMarker.write(compressed)
+        compressed.position(0) // restore
+        withMarker.writeInt(SYNC_FLUSH_MARKER)
+        withMarker.resetForRead()
+        return withMarker
     }
 
     private fun textToBuffer(text: String): ReadBuffer {

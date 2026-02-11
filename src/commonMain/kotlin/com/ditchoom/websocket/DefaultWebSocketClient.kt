@@ -5,6 +5,7 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -77,6 +78,7 @@ class DefaultWebSocketClient(
     internal var enableCompression = false
     private var outgoingCompressor: SuspendingStreamingCompressor? = null
     private var incomingDecompressor: SuspendingStreamingDecompressor? = null
+    private val stringDecoder = StreamingStringDecoder()
 
     fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
 
@@ -352,7 +354,7 @@ class DefaultWebSocketClient(
                                     if (firstFrame.rsv1 && enableCompression) {
                                         if (incomingDecompressor != null) {
                                             // Stream decompress directly to string - reduces peak memory
-                                            val result = decompressToString(payload, incomingDecompressor!!)
+                                            val result = decompressToString(payload, incomingDecompressor!!, stringDecoder)
                                             incomingDecompressor!!.reset()
                                             result
                                         } else {
@@ -473,7 +475,7 @@ class DefaultWebSocketClient(
                                 if (firstFrame.rsv1 && enableCompression) {
                                     if (incomingDecompressor != null) {
                                         // Stream decompress directly to string - reduces peak memory
-                                        val result = decompressToString(payload, incomingDecompressor!!)
+                                        val result = decompressToString(payload, incomingDecompressor!!, stringDecoder)
                                         incomingDecompressor!!.reset()
                                         result
                                     } else {
