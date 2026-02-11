@@ -57,16 +57,19 @@ class CompressedMessageBenchmark {
     private lateinit var mediumText: String // 4KB
     private lateinit var text16k: String // 16KB
     private lateinit var largeText: String // 64KB
-    private lateinit var text1m: String // 1MB
-    private lateinit var text16m: String // 16MB
+
+    // Large payloads allocated lazily to avoid OOMing JS
+    private val text1m: String by lazy { generateAsciiText(1024 * 1024) }
+    private val text16m: String by lazy { generateAsciiText(16 * 1024 * 1024) }
 
     // Pre-compressed payloads for decompression benchmarks
     private lateinit var smallCompressed: ReadBuffer
     private lateinit var mediumCompressed: ReadBuffer
     private lateinit var largeCompressed: ReadBuffer
 
-    // Pre-allocated buffer for xorMask isolation benchmark
+    // Pre-allocated buffers for xorMask isolation benchmarks
     private lateinit var xorMaskBuf: ReadWriteBuffer
+    private lateinit var xorMaskCopySrc: ReadWriteBuffer // pre-populated source for pure xorMaskCopy
 
     companion object {
         private const val SMALL_SIZE = 16
@@ -95,12 +98,15 @@ class CompressedMessageBenchmark {
         mediumText = generateAsciiText(MEDIUM_SIZE)
         text16k = generateAsciiText(16 * 1024)
         largeText = generateAsciiText(LARGE_SIZE)
-        text1m = generateAsciiText(1024 * 1024)
-        text16m = generateAsciiText(16 * 1024 * 1024)
 
         // Pre-allocate buffer for xorMask benchmark
         xorMaskBuf = PlatformBuffer.allocate(MEDIUM_SIZE, AllocationZone.Direct) as ReadWriteBuffer
         repeat(MEDIUM_SIZE) { xorMaskBuf.writeByte(it.toByte()) }
+
+        // Pre-populated 4KB source for pure xorMaskCopy benchmark (no writeString cost)
+        xorMaskCopySrc = PlatformBuffer.allocate(MEDIUM_SIZE, AllocationZone.Direct) as ReadWriteBuffer
+        xorMaskCopySrc.writeString(mediumText, Charset.UTF8)
+        xorMaskCopySrc.resetForRead()
 
         // Pre-compress payloads for decompression benchmarks
         smallCompressed = compressForDecompBench(smallText)
@@ -114,6 +120,7 @@ class CompressedMessageBenchmark {
         mediumCompressed.freeIfNeeded()
         largeCompressed.freeIfNeeded()
         xorMaskBuf.freeIfNeeded()
+        xorMaskCopySrc.freeIfNeeded()
         compressor.close()
         decompressor.close()
         pool.clear()
@@ -297,6 +304,32 @@ class CompressedMessageBenchmark {
         xorMaskBuf.position(0)
         xorMaskBuf.setLimit(MEDIUM_SIZE)
         xorMaskBuf.xorMask(0x12345678)
+    }
+
+    @Benchmark
+    fun xorMaskCopyMedium(bh: Blackhole) {
+        // Includes writeString + pool + xorMaskCopy (matches full writeTextFrame pipeline)
+        val src = pool.acquire(MEDIUM_SIZE)
+        src.writeString(mediumText, Charset.UTF8)
+        src.resetForRead()
+        // Dest has 8-byte header offset (2 header + 2 ext len + 4 mask) to match real frames
+        val dst = pool.acquire(MEDIUM_SIZE + 8)
+        dst.position(8)
+        dst.xorMaskCopy(src, 0x12345678)
+        bh.consume(dst)
+        pool.release(src)
+        pool.release(dst)
+    }
+
+    @Benchmark
+    fun xorMaskCopyPureMedium(bh: Blackhole) {
+        // Pure copy+mask only — pre-populated source, no writeString cost
+        xorMaskCopySrc.position(0)
+        val dst = pool.acquire(MEDIUM_SIZE + 8)
+        dst.position(8)
+        dst.xorMaskCopy(xorMaskCopySrc, 0x12345678)
+        bh.consume(dst)
+        pool.release(dst)
     }
 
     @Benchmark

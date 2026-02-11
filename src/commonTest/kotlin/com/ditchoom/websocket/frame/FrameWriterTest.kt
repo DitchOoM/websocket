@@ -31,11 +31,14 @@ import kotlin.test.assertTrue
  */
 class FrameWriterTest {
     private val pool = BufferPool(allocationZone = AllocationZone.Heap)
+
     // Use pool-allocated FrameWriter so parseFrame's StreamProcessor doesn't
     // prematurely free NativeBuffers passed to append(). In production, the
     // read loop only appends pool buffers to the StreamProcessor.
-    private fun createWriter(clientMode: Boolean = false, compressionEnabled: Boolean = false) =
-        FrameWriter(clientMode = clientMode, compressionEnabled = compressionEnabled, pool = pool)
+    private fun createWriter(
+        clientMode: Boolean = false,
+        compressionEnabled: Boolean = false,
+    ) = FrameWriter(clientMode = clientMode, compressionEnabled = compressionEnabled, pool = pool)
 
     // ========================================================================
     // RFC 6455 Section 5.2 - Data Frame Writing

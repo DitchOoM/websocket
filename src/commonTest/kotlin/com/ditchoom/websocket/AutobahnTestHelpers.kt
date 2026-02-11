@@ -75,6 +75,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     case: Int,
     count: Int = 1,
     requestCompression: Boolean = false,
+    compressionOptions: CompressionOptions = CompressionOptions(),
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
@@ -82,6 +83,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,
+            compressionOptions = compressionOptions,
         )
     val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
     val ws =
@@ -116,6 +118,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     case: Int,
     count: Int = 1,
     requestCompression: Boolean = false,
+    compressionOptions: CompressionOptions = CompressionOptions(),
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
@@ -123,6 +126,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             port = 9001,
             websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
             requestCompression = requestCompression,
+            compressionOptions = compressionOptions,
         )
     val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
     val ws =

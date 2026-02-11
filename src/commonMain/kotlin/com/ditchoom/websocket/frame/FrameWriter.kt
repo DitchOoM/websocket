@@ -112,6 +112,7 @@ class FrameWriter(
     private val clientMode: Boolean = true,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
     private val pool: BufferPool? = null,
+    private val resetCompressorPerMessage: Boolean = true,
 ) {
     private fun allocateBuffer(size: Int): ReadWriteBuffer =
         pool?.acquire(size) ?: (PlatformBuffer.allocate(size, allocationZone) as ReadWriteBuffer)
@@ -318,8 +319,12 @@ class FrameWriter(
             val chunks = compressSync(payload, compressor, pool = pool)
             val compressedSize = totalRemaining(chunks)
 
-            if (compressedSize < originalSize) {
-                compressor.reset()
+            // With context takeover (!resetCompressorPerMessage), always send compressed
+            // even if larger. Falling back to uncompressed would desync the LZ77 windows:
+            // the compressor's window includes this message, but the server's decompressor
+            // never processes the uncompressed frame, so future back-references break.
+            if (compressedSize < originalSize || !resetCompressorPerMessage) {
+                if (resetCompressorPerMessage) compressor.reset()
                 // Serialize directly from chunks — no intermediate combineChunks buffer
                 val frame = serializeFrameFromChunks(fin, rsv1 = true, opcode, chunks, compressedSize)
                 chunks.freeAll()

@@ -197,9 +197,9 @@ suspend fun decompressWithStreamingDecompressor(
     val chunks = mutableListOf<ReadBuffer>()
     chunks.addAll(decompressor.decompress(buffer))
     // Append sync marker (4 bytes: 00 00 FF FF) and decompress it
-    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    SYNC_FLUSH_MARKER_BUFFER.position(0)
     chunks.addAll(decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER))
-    chunks.addAll(decompressor.finish())
+    chunks.addAll(decompressor.flush())
     return chunks
 }
 
@@ -277,12 +277,14 @@ internal fun decompressToStringSync(
     // Collect all decompressed chunks
     decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
 
-    // Append sync marker and decompress - this flushes all pending output
-    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    // Append sync marker and decompress - this flushes all pending output.
+    // Per RFC 7692, the sync marker (00 00 FF FF) is stripped from the wire format
+    // and must be re-appended before decompression.
+    SYNC_FLUSH_MARKER_BUFFER.position(0)
     decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-
-    // Finish decompression to flush any remaining buffered data
-    decompressor.finish { chunk -> addChunk(chunk) }
+    // Emit any partial output buffered by the decompressor. Unlike finish(),
+    // flush() does not set streamEnded, so context takeover continues working.
+    decompressor.flush { chunk -> addChunk(chunk) }
 
     // Fast path: empty result
     if (totalSize == 0) {
@@ -349,10 +351,10 @@ internal fun decompressToBufferSync(
 
     decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
 
-    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    // Sync marker flush — see decompressToStringSync for rationale
+    SYNC_FLUSH_MARKER_BUFFER.position(0)
     decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-
-    decompressor.finish { chunk -> addChunk(chunk) }
+    decompressor.flush { chunk -> addChunk(chunk) }
 
     // Single chunk optimization - no copy needed
     if (chunks.size == 1) {
@@ -413,11 +415,9 @@ suspend fun decompressToString(
     decompressor.decompress(buffer).forEach { chunk -> addChunk(chunk) }
 
     // Append sync marker and decompress - this flushes all pending output
-    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    SYNC_FLUSH_MARKER_BUFFER.position(0)
     decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER).forEach { chunk -> addChunk(chunk) }
-
-    // Finish decompression to flush any remaining buffered data
-    decompressor.finish().forEach { chunk -> addChunk(chunk) }
+    decompressor.flush().forEach { chunk -> addChunk(chunk) }
 
     // Fast path: empty result
     if (totalSize == 0) {
@@ -487,10 +487,9 @@ suspend fun decompressToBuffer(
 
     decompressor.decompress(buffer).forEach { chunk -> addChunk(chunk) }
 
-    SYNC_FLUSH_MARKER_BUFFER.resetForRead()
+    SYNC_FLUSH_MARKER_BUFFER.position(0)
     decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER).forEach { chunk -> addChunk(chunk) }
-
-    decompressor.finish().forEach { chunk -> addChunk(chunk) }
+    decompressor.flush().forEach { chunk -> addChunk(chunk) }
 
     // Single chunk optimization - no copy needed (caller takes ownership)
     if (chunks.size == 1) {

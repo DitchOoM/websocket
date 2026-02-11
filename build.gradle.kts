@@ -408,6 +408,10 @@ val validateAutobahnResultsLinuxX64 =
     tasks.register("validateAutobahnResultsLinuxX64") {
         doLast(createAutobahnValidationAction(setOf("LinuxX64")))
     }
+val validateAutobahnResultsJs =
+    tasks.register("validateAutobahnResultsJs") {
+        doLast(createAutobahnValidationAction(setOf("NodeJS")))
+    }
 // Validates all agents (used by the convenience integrationTest task)
 val validateAutobahnResults =
     tasks.register("validateAutobahnResults") {
@@ -426,6 +430,11 @@ if (runIntegrationTests) {
         dependsOn(echoWebsocket)
         dependsOn(autobahnContainer)
         finalizedBy(validateAutobahnResultsLinuxX64)
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResultsJs)
     }
     tasks.named("check") {
         dependsOn(echoWebsocket)

@@ -255,6 +255,93 @@ class HandshakeRequestTest {
         assertTrue(text.contains("server_no_context_takeover"))
     }
 
+    @Test
+    fun `RFC 7692 Section 7-1-2 - server_max_window_bits parameter`() {
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(
+                    clientNoContextTakeover = false,
+                    serverNoContextTakeover = false,
+                    serverMaxWindowBits = 8,
+                ).build()
+        val buffer = request.toBuffer()
+        val text = buffer.readString(buffer.remaining(), Charset.UTF8)
+
+        assertTrue(text.contains("server_max_window_bits=8"))
+        assertFalse(text.contains("client_no_context_takeover"))
+        assertFalse(text.contains("server_no_context_takeover"))
+        assertFalse(text.contains("client_max_window_bits"))
+    }
+
+    @Test
+    fun `RFC 7692 Section 7-1-2 - client_max_window_bits parameter`() {
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(
+                    clientNoContextTakeover = false,
+                    serverNoContextTakeover = false,
+                    clientMaxWindowBits = 12,
+                ).build()
+        val buffer = request.toBuffer()
+        val text = buffer.readString(buffer.remaining(), Charset.UTF8)
+
+        assertTrue(text.contains("client_max_window_bits=12"))
+        assertFalse(text.contains("server_max_window_bits"))
+    }
+
+    @Test
+    fun `RFC 7692 Section 7-1-2 - all compression parameters combined`() {
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(
+                    clientNoContextTakeover = true,
+                    serverNoContextTakeover = true,
+                    serverMaxWindowBits = 8,
+                    clientMaxWindowBits = 15,
+                ).build()
+        val buffer = request.toBuffer()
+        val text = buffer.readString(buffer.remaining(), Charset.UTF8)
+
+        assertTrue(text.contains("client_no_context_takeover"))
+        assertTrue(text.contains("server_no_context_takeover"))
+        assertTrue(text.contains("server_max_window_bits=8"))
+        assertTrue(text.contains("client_max_window_bits=15"))
+    }
+
+    @Test
+    fun `RFC 7692 Section 7-1-2 - client_max_window_bits without value`() {
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(
+                    clientNoContextTakeover = false,
+                    serverNoContextTakeover = false,
+                    clientMaxWindowBits = -1,
+                ).build()
+        val buffer = request.toBuffer()
+        val text = buffer.readString(buffer.remaining(), Charset.UTF8)
+
+        assertTrue(text.contains("client_max_window_bits"))
+        assertFalse(text.contains("client_max_window_bits="))
+    }
+
+    @Test
+    fun `RFC 7692 Section 7-1-2 - window bits 0 means not included`() {
+        val request =
+            HandshakeRequest
+                .builder("example.com", 80, "/ws")
+                .requestCompression(serverMaxWindowBits = 0, clientMaxWindowBits = 0)
+                .build()
+        val buffer = request.toBuffer()
+        val text = buffer.readString(buffer.remaining(), Charset.UTF8)
+
+        assertFalse(text.contains("server_max_window_bits"))
+        assertFalse(text.contains("client_max_window_bits"))
+    }
+
     // ========================================================================
     // Additional Headers
     // ========================================================================

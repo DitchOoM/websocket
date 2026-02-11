@@ -92,6 +92,9 @@ class ModularWebSocketClient(
     private var outgoingCompressor: StreamingCompressor? = null
     private var incomingDecompressor: StreamingDecompressor? = null
     private var compressionEnabled = false
+    private var outgoingCompressionEnabled = false
+    private var serverNoContextTakeover = false
+    private var clientNoContextTakeover = false
 
     // Use StateFlow for thread-safe access between read loop and close()
     private val serverInitiatedClose = MutableStateFlow(false)
@@ -125,7 +128,17 @@ class ModularWebSocketClient(
                             protocols(*connectionOptions.protocols.toTypedArray())
                         }
                         if (connectionOptions.requestCompression) {
-                            requestCompression()
+                            val opts = connectionOptions.compressionOptions
+                            // On platforms without context takeover support (JS Node.js),
+                            // always include no_context_takeover in the offer so the server
+                            // doesn't use back-references to prior messages.
+                            val forceNoCtx = !supportsDeflateContextTakeover
+                            requestCompression(
+                                clientNoContextTakeover = opts.clientNoContextTakeover || forceNoCtx,
+                                serverNoContextTakeover = opts.serverNoContextTakeover || forceNoCtx,
+                                serverMaxWindowBits = opts.serverMaxWindowBits,
+                                clientMaxWindowBits = opts.clientMaxWindowBits,
+                            )
                         }
                     }.build()
 
@@ -165,17 +178,29 @@ class ModularWebSocketClient(
                 is ValidationResult.Success -> {
                     // Setup compression if negotiated
                     if (response.compressionEnabled) {
-                        setupCompression()
+                        val negotiatedClientWindowBits =
+                            response.compressionParams?.clientMaxWindowBits ?: 0
+                        setupCompression(negotiatedClientWindowBits)
+                        response.compressionParams?.let {
+                            serverNoContextTakeover = it.serverNoContextTakeover
+                        }
+                        // client_no_context_takeover is a unilateral client promise
+                        // (RFC 7692 Section 7.1.1.2): the client must honor it regardless
+                        // of whether the server echoes it. Also honor if the server requires it.
+                        clientNoContextTakeover =
+                            connectionOptions.compressionOptions.clientNoContextTakeover ||
+                            (response.compressionParams?.clientNoContextTakeover ?: false)
                     }
 
                     // Initialize frame writer
                     frameWriter =
                         FrameWriter(
                             compressor = outgoingCompressor,
-                            compressionEnabled = compressionEnabled,
+                            compressionEnabled = outgoingCompressionEnabled,
                             clientMode = true,
                             allocationZone = allocationZone,
                             pool = pool,
+                            resetCompressorPerMessage = clientNoContextTakeover,
                         )
 
                     connectionStateFlow.value = ConnectionState.Connected
@@ -195,15 +220,23 @@ class ModularWebSocketClient(
         return this
     }
 
-    private fun setupCompression() {
-        compressionEnabled = true
+    private fun setupCompression(clientWindowBits: Int = 0) {
         val allocator = BufferAllocator.FromPool(pool)
-        outgoingCompressor =
-            StreamingCompressor.create(
-                CompressionAlgorithm.Raw,
-                CompressionLevel.Default,
-                allocator,
-            )
+        compressionEnabled = true
+        // Disable outgoing compression when the server negotiated client_max_window_bits < 15
+        // and the platform can't honor it (JVM Deflater only supports window=15).
+        // Incoming decompression still works (Inflater handles any window size).
+        val needsCustomWindowBits = clientWindowBits in 8..14
+        outgoingCompressionEnabled = !needsCustomWindowBits || supportsCustomDeflateWindowBits
+        if (outgoingCompressionEnabled) {
+            outgoingCompressor =
+                StreamingCompressor.create(
+                    algorithm = CompressionAlgorithm.Raw,
+                    level = CompressionLevel.Default,
+                    allocator = allocator,
+                    windowBits = if (clientWindowBits in 8..15) -clientWindowBits else 0,
+                )
+        }
         incomingDecompressor =
             StreamingDecompressor.create(
                 CompressionAlgorithm.Raw,
@@ -485,12 +518,15 @@ class ModularWebSocketClient(
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {
-            // Reset decompressor state for next message.
-            // The buffer library uses inflateReset() to avoid native heap churn.
-            try {
-                decompressor.reset()
-            } catch (_: Exception) {
-                // Ignore reset failures
+            // Reset decompressor state for next message when server_no_context_takeover
+            // was negotiated. Without it, the server maintains its LZ77 sliding window
+            // across messages and the client must do the same for decompression.
+            if (serverNoContextTakeover) {
+                try {
+                    decompressor.reset()
+                } catch (_: Exception) {
+                    // Ignore reset failures
+                }
             }
         }
     }
@@ -507,13 +543,15 @@ class ModularWebSocketClient(
         return try {
             // Stream decompress directly to string - reduces peak memory
             decompressToStringSync(payload, decompressor, pool)
+        } catch (e: Throwable) {
+            throw e
         } finally {
-            // Reset decompressor state for next message.
-            // The buffer library uses inflateReset() to avoid native heap churn.
-            try {
-                decompressor.reset()
-            } catch (_: Exception) {
-                // Ignore reset failures
+            if (serverNoContextTakeover) {
+                try {
+                    decompressor.reset()
+                } catch (_: Exception) {
+                    // Ignore reset failures
+                }
             }
         }
     }

@@ -151,15 +151,29 @@ class HandshakeRequest private constructor(
          *
          * @param clientNoContextTakeover If true, client won't reuse LZ77 window
          * @param serverNoContextTakeover If true, request server not reuse LZ77 window
+         * @param serverMaxWindowBits If set (8-15), request server use at most this window size
+         * @param clientMaxWindowBits If set (8-15), indicate client will use at most this window size.
+         *   Use -1 to include the parameter without a value (indicates willingness to accept
+         *   any server-chosen value per RFC 7692 Section 7.1.2.2).
          */
         fun requestCompression(
             clientNoContextTakeover: Boolean = true,
             serverNoContextTakeover: Boolean = true,
+            serverMaxWindowBits: Int = 0,
+            clientMaxWindowBits: Int = 0,
         ) = apply {
             val params =
                 buildList {
                     if (clientNoContextTakeover) add("client_no_context_takeover")
                     if (serverNoContextTakeover) add("server_no_context_takeover")
+                    if (serverMaxWindowBits in 8..15) {
+                        add("server_max_window_bits=$serverMaxWindowBits")
+                    }
+                    if (clientMaxWindowBits == -1) {
+                        add("client_max_window_bits")
+                    } else if (clientMaxWindowBits in 8..15) {
+                        add("client_max_window_bits=$clientMaxWindowBits")
+                    }
                 }
             val ext =
                 if (params.isEmpty()) {
