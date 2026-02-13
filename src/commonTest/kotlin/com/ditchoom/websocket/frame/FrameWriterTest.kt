@@ -216,6 +216,126 @@ class FrameWriterTest {
         }
 
     @Test
+    fun `close frame with no status code produces empty payload`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            val frame = parseFrame(writer.writeCloseFrame())
+            assertNotNull(frame)
+            assertEquals(Opcode.Close, frame.opcode)
+            assertEquals(0, frame.payloadLength)
+        }
+
+    @Test
+    fun `close frame with status code only and no reason`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            val frame = parseFrame(writer.writeCloseFrame(1001u))
+            assertNotNull(frame)
+            assertEquals(2, frame.payloadLength)
+            assertEquals(1001, frame.payload.readShort().toInt() and 0xFFFF)
+        }
+
+    @Test
+    fun `close frame with null reason`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, null))
+            assertNotNull(frame)
+            assertEquals(2, frame.payloadLength)
+        }
+
+    @Test
+    fun `close frame with empty reason`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, ""))
+            assertNotNull(frame)
+            assertEquals(2, frame.payloadLength)
+        }
+
+    @Test
+    fun `close frame preserves short ASCII reason`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, "Normal closure"))
+            assertNotNull(frame)
+            val statusCode = frame.payload.readShort().toInt() and 0xFFFF
+            assertEquals(1000, statusCode)
+            val reason = frame.payload.readString(frame.payloadLength - 2, Charset.UTF8)
+            assertEquals("Normal closure", reason)
+        }
+
+    @Test
+    fun `close frame with exactly 123 ASCII bytes`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val reason = "x".repeat(123)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, reason))
+            assertNotNull(frame)
+            assertEquals(125, frame.payloadLength, "2 status + 123 reason = 125")
+            frame.payload.readShort() // skip status
+            assertEquals(reason, frame.payload.readString(123, Charset.UTF8))
+        }
+
+    @Test
+    fun `close frame with 124 ASCII bytes truncates to 123`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val reason = "x".repeat(124)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, reason))
+            assertNotNull(frame)
+            assertTrue(frame.payloadLength <= 125)
+            frame.payload.readShort() // skip status
+            val readReason = frame.payload.readString(frame.payloadLength - 2, Charset.UTF8)
+            assertEquals(123, readReason.length)
+        }
+
+    @Test
+    fun `close frame with multibyte chars stays within 125 bytes`() =
+        runTest {
+            // CJK chars are 3 bytes each in UTF-8
+            val writer = createWriter(clientMode = false)
+            val reason = "\u4F60\u597D".repeat(50) // 100 CJK chars = 300 UTF-8 bytes
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, reason))
+            assertNotNull(frame)
+            assertTrue(frame.payloadLength <= 125, "Payload was ${frame.payloadLength}, must be <= 125")
+        }
+
+    @Test
+    fun `close frame with emoji stays within 125 bytes`() =
+        runTest {
+            // Emoji (surrogate pairs) are 4 bytes each in UTF-8
+            val writer = createWriter(clientMode = false)
+            val reason = "\uD83D\uDE00".repeat(50) // 50 emoji = 200 UTF-8 bytes
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, reason))
+            assertNotNull(frame)
+            assertTrue(frame.payloadLength <= 125, "Payload was ${frame.payloadLength}, must be <= 125")
+        }
+
+    @Test
+    fun `close frame with masked client mode`() =
+        runTest {
+            val writer = createWriter(clientMode = true)
+
+            val frame = parseFrame(writer.writeCloseFrame(1000u, "Going away"))
+            assertNotNull(frame)
+            assertTrue(frame.masked)
+            val statusCode = frame.payload.readShort().toInt() and 0xFFFF
+            assertEquals(1000, statusCode)
+            val reason = frame.payload.readString(frame.payloadLength - 2, Charset.UTF8)
+            assertEquals("Going away", reason)
+        }
+
+    @Test
     fun `RFC 6455 Section 5-5-2 - write ping frame`() =
         runTest {
             val writer = createWriter(clientMode = false)

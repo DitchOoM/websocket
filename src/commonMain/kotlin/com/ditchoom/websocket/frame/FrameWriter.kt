@@ -141,7 +141,6 @@ class FrameWriter(
             return writeFrame(Opcode.Text, EMPTY_BUFFER, fin)
         }
 
-        // Encode to temp buffer — single O(n) pass, no Utf8.byteSize scan needed.
         // text.length * 3 is a safe upper bound (worst case: all 3-byte BMP chars).
         val payload = allocateBuffer(text.length * 3)
         payload.writeString(text, Charset.UTF8)
@@ -170,7 +169,7 @@ class FrameWriter(
     /**
      * Writes a close frame.
      *
-     * For small payloads (status code + short reason), uses single allocation.
+     * Close frame payload: 2-byte status code + UTF-8 reason (max 123 bytes per RFC 6455).
      */
     fun writeCloseFrame(
         statusCode: UShort? = null,
@@ -180,64 +179,19 @@ class FrameWriter(
             return writeControlFrame(Opcode.Close, EMPTY_BUFFER)
         }
 
-        // Calculate payload size: 2 bytes for code + reason (max 123 bytes)
-        val reasonSize =
-            if (reason != null) {
-                Utf8.byteSize(reason).coerceAtMost(123)
-            } else {
-                0
-            }
-        val payloadSize = 2 + reasonSize
-
-        // Single allocation for entire frame
-        val header =
-            if (clientMode) {
-                PackedFrameHeader.forClient(true, false, Opcode.Close, payloadSize)
-            } else {
-                PackedFrameHeader.forServer(true, false, Opcode.Close, payloadSize)
-            }
-        val headerSize = header.headerSize(payloadSize, clientMode)
-        val frameSize = headerSize + payloadSize
-
-        val buffer = allocateBuffer(frameSize)
-
-        // Write header
-        buffer.writeShort(header.packed)
-        // No extended length for control frames (max 125 bytes)
-
-        // Write mask and payload
-        if (clientMode) {
-            val mask = MaskingKey.FourByteMaskingKey()
-            buffer.writeInt(mask.packed)
-            val payloadStart = buffer.position()
-
-            // Write status code
-            buffer.writeShort(statusCode.toShort())
-
-            // Write reason directly (truncated to fit)
-            if (reason != null && reasonSize > 0) {
-                val truncated = Utf8.truncateToByteSize(reason, 123)
-                buffer.writeString(truncated, Charset.UTF8)
-            }
-
-            val payloadEnd = buffer.position()
-
-            // Apply SIMD-accelerated XOR mask in-place
-            buffer.position(payloadStart)
-            buffer.setLimit(payloadEnd)
-            buffer.xorMask(mask.packed)
-            buffer.position(payloadEnd)
-            buffer.setLimit(buffer.capacity)
-        } else {
-            buffer.writeShort(statusCode.toShort())
-            if (reason != null && reasonSize > 0) {
-                val truncated = Utf8.truncateToByteSize(reason, 123)
-                buffer.writeString(truncated, Charset.UTF8)
-            }
+        // Pre-truncate to 123 chars; for ASCII (typical close reasons) chars == bytes
+        val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
+        val payload = allocateBuffer(2 + (truncated?.length ?: 0) * 3)
+        payload.writeShort(statusCode.toShort())
+        if (truncated != null && truncated.isNotEmpty()) {
+            payload.writeString(truncated, Charset.UTF8)
         }
-
-        buffer.resetForRead()
-        return buffer
+        // Cap at 125 bytes total (2 status + max 123 reason) per RFC 6455
+        if (payload.position() > 125) payload.position(125)
+        payload.resetForRead()
+        val frame = writeControlFrame(Opcode.Close, payload)
+        releaseBuffer(payload)
+        return frame
     }
 
     /**
@@ -440,101 +394,3 @@ class FrameWriter(
     }
 }
 
-/**
- * UTF-8 utilities using only primitives - no allocations.
- */
-internal object Utf8 {
-    /**
-     * Calculates the UTF-8 byte size of a string without allocation.
-     * Uses a lookup approach based on Unicode code point ranges.
-     */
-    fun byteSize(text: String): Int {
-        var size = 0
-        var i = 0
-        val len = text.length
-
-        while (i < len) {
-            val c = text[i].code
-            when {
-                // ASCII (most common case first)
-                c <= 0x7F -> {
-                    size += 1
-                    i++
-                }
-                // 2-byte UTF-8
-                c <= 0x7FF -> {
-                    size += 2
-                    i++
-                }
-                // Check for surrogate pair (4-byte UTF-8)
-                c in 0xD800..0xDBFF && i + 1 < len -> {
-                    val next = text[i + 1].code
-                    if (next in 0xDC00..0xDFFF) {
-                        // Valid surrogate pair
-                        size += 4
-                        i += 2
-                    } else {
-                        // Invalid surrogate, encode as 3 bytes
-                        size += 3
-                        i++
-                    }
-                }
-                // 3-byte UTF-8 (BMP character)
-                else -> {
-                    size += 3
-                    i++
-                }
-            }
-        }
-        return size
-    }
-
-    /**
-     * Truncates a string to fit within maxBytes UTF-8 bytes.
-     * Returns the original string if it fits, avoiding allocation.
-     */
-    fun truncateToByteSize(
-        text: String,
-        maxBytes: Int,
-    ): String {
-        var size = 0
-        var i = 0
-        val len = text.length
-
-        while (i < len) {
-            val c = text[i].code
-            val charBytes: Int
-            val advance: Int
-
-            when {
-                c <= 0x7F -> {
-                    charBytes = 1
-                    advance = 1
-                }
-                c <= 0x7FF -> {
-                    charBytes = 2
-                    advance = 1
-                }
-                c in 0xD800..0xDBFF && i + 1 < len && text[i + 1].code in 0xDC00..0xDFFF -> {
-                    charBytes = 4
-                    advance = 2
-                }
-                else -> {
-                    charBytes = 3
-                    advance = 1
-                }
-            }
-
-            if (size + charBytes > maxBytes) {
-                // Return truncated - this allocates, but only when truncation is needed
-                return text.substring(0, i)
-            }
-
-            size += charBytes
-            i += advance
-        }
-
-        // Fits entirely - return original reference (no allocation)
-        return text
-    }
-}
