@@ -2,148 +2,54 @@ package com.ditchoom.websocket
 
 import kotlin.test.Test
 
+/**
+ * Autobahn Category 13: Compression window bits negotiation.
+ *
+ * All subcategories echo 1000 text messages with compression enabled.
+ * Each subcategory covers 18 cases (3 payload sizes × 6 variants).
+ *
+ * Subcategories:
+ * - 13.1 (392-409): Default compression options
+ * - 13.2 (410-427): Default compression options
+ * - 13.3 (428-445): server_max_window_bits=9, context takeover, client offers clientMaxWindowBits
+ * - 13.4 (446-463): server_max_window_bits=15, context takeover, client offers clientMaxWindowBits
+ * - 13.5 (464-481): server_max_window_bits=9, no-context-takeover, client offers clientMaxWindowBits
+ * - 13.6 (482-499): server_max_window_bits=15, no-context-takeover, client offers clientMaxWindowBits
+ * - 13.7 (500-517): Default compression options
+ */
 class AutobahnCase13CompressionTests {
-    @Test
-    fun category13_1_a() =
-        runHeavyCompressionTest {
-            for (case in 392..397) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    private val windowBitsOpts =
+        CompressionOptions(
+            clientNoContextTakeover = false,
+            serverNoContextTakeover = false,
+            clientMaxWindowBits = -1,
+        )
+    private val windowBitsNoContextOpts = CompressionOptions(clientMaxWindowBits = -1)
 
-    @Test
-    fun category13_1_b() =
-        runHeavyCompressionTest {
-            for (case in 398..403) echoMessageAndClose(case, 1000, requestCompression = true)
+    private fun echoBatch(
+        caseRange: IntRange,
+        opts: CompressionOptions = CompressionOptions(),
+    ) = runHeavyCompressionTest {
+        for (case in caseRange) {
+            echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
         }
+    }
 
-    @Test
-    fun category13_1_c() =
-        runHeavyCompressionTest {
-            for (case in 404..409) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    // 13.1-13.2: Default options (cases 392-427)
+    @Test fun category13_1() = echoBatch(392..409)
 
-    @Test
-    fun category13_2_a() =
-        runHeavyCompressionTest {
-            for (case in 410..415) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    @Test fun category13_2() = echoBatch(410..427)
 
-    @Test
-    fun category13_2_b() =
-        runHeavyCompressionTest {
-            for (case in 416..421) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    // 13.3-13.4: Window bits, context takeover (cases 428-463)
+    @Test fun category13_3() = echoBatch(428..445, windowBitsOpts)
 
-    @Test
-    fun category13_2_c() =
-        runHeavyCompressionTest {
-            for (case in 422..427) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    @Test fun category13_4() = echoBatch(446..463, windowBitsOpts)
 
-    // 13.3: server sets client_max_window_bits=9, no context takeover flags.
-    // Client offers client_max_window_bits (no value = willingness to accept any limit).
-    // Server responds with client_max_window_bits=9. Both sides maintain LZ77 context.
-    @Test
-    fun category13_3_a() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 428..433) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
+    // 13.5-13.6: Window bits, no context takeover (cases 464-499)
+    @Test fun category13_5() = echoBatch(464..481, windowBitsNoContextOpts)
 
-    @Test
-    fun category13_3_b() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 434..439) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
+    @Test fun category13_6() = echoBatch(482..499, windowBitsNoContextOpts)
 
-    @Test
-    fun category13_3_c() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 440..445) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    // 13.4: server sets client_max_window_bits=15, no context takeover flags.
-    @Test
-    fun category13_4_a() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 446..451) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_4_b() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 452..457) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_4_c() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientNoContextTakeover = false, serverNoContextTakeover = false, clientMaxWindowBits = -1)
-            for (case in 458..463) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    // 13.5: server sets client_max_window_bits=9 + both context takeover flags.
-    @Test
-    fun category13_5_a() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 464..469) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_5_b() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 470..475) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_5_c() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 476..481) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    // 13.6: server sets client_max_window_bits=15 + both context takeover flags.
-    @Test
-    fun category13_6_a() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 482..487) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_6_b() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 488..493) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_6_c() =
-        runHeavyCompressionTest {
-            val opts = CompressionOptions(clientMaxWindowBits = -1)
-            for (case in 494..499) echoMessageAndClose(case, 1000, requestCompression = true, compressionOptions = opts)
-        }
-
-    @Test
-    fun category13_7_a() =
-        runHeavyCompressionTest {
-            for (case in 500..505) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
-
-    @Test
-    fun category13_7_b() =
-        runHeavyCompressionTest {
-            for (case in 506..511) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
-
-    @Test
-    fun category13_7_c() =
-        runHeavyCompressionTest {
-            for (case in 512..517) echoMessageAndClose(case, 1000, requestCompression = true)
-        }
+    // 13.7: Default options (cases 500-517)
+    @Test fun category13_7() = echoBatch(500..517)
 }

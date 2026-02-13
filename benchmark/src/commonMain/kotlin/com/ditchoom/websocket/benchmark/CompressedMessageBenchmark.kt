@@ -4,7 +4,6 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -29,7 +28,6 @@ import kotlinx.benchmark.TearDown
 /**
  * Benchmarks for the WebSocket compression pipeline.
  *
- * Isolates each layer to identify where LinuxX64 is slower than JVM:
  * 1. Raw compress/decompress via streaming API (websocket-level: flush + marker strip)
  * 2. FrameWriter with compression (compress + frame header + masking)
  * 3. Full round-trip (compress via FrameWriter → decompress + UTF-8 decode)
@@ -38,31 +36,18 @@ import kotlinx.benchmark.TearDown
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(BenchmarkTimeUnit.SECONDS)
 class CompressedMessageBenchmark {
-    // Streaming compressor/decompressor (public API from buffer-compression)
     private lateinit var compressor: StreamingCompressor
     private lateinit var decompressor: StreamingDecompressor
     private lateinit var decoder: StreamingStringDecoder
-
-    // Buffer pool matching production DefaultWebSocketClient pattern
     private lateinit var pool: BufferPool
 
-    // FrameWriter with compression enabled
     private lateinit var compressedWriter: FrameWriter
-
-    // FrameWriter without compression (baseline)
     private lateinit var uncompressedWriter: FrameWriter
 
     // Test payloads
     private lateinit var smallText: String // 16B
-    private lateinit var text256: String // 256B
-    private lateinit var text1k: String // 1KB
     private lateinit var mediumText: String // 4KB
-    private lateinit var text16k: String // 16KB
     private lateinit var largeText: String // 64KB
-
-    // Large payloads allocated lazily to avoid OOMing JS
-    private val text1m: String by lazy { generateAsciiText(1024 * 1024) }
-    private val text16m: String by lazy { generateAsciiText(16 * 1024 * 1024) }
 
     // Pre-compressed payloads for decompression benchmarks (without marker — production format)
     private lateinit var smallCompressed: ReadBuffer
@@ -73,10 +58,6 @@ class CompressedMessageBenchmark {
     private lateinit var smallCompressedWithMarker: ReadBuffer
     private lateinit var mediumCompressedWithMarker: ReadBuffer
     private lateinit var largeCompressedWithMarker: ReadBuffer
-
-    // Pre-allocated buffers for xorMask isolation benchmarks
-    private lateinit var xorMaskBuf: ReadWriteBuffer
-    private lateinit var xorMaskCopySrc: ReadWriteBuffer // pre-populated source for pure xorMaskCopy
 
     companion object {
         private const val SMALL_SIZE = 16
@@ -99,29 +80,16 @@ class CompressedMessageBenchmark {
         )
         uncompressedWriter = FrameWriter(pool = pool)
 
-        // Generate ASCII test strings at each size
         smallText = generateAsciiText(SMALL_SIZE)
-        text256 = generateAsciiText(256)
-        text1k = generateAsciiText(1024)
         mediumText = generateAsciiText(MEDIUM_SIZE)
-        text16k = generateAsciiText(16 * 1024)
         largeText = generateAsciiText(LARGE_SIZE)
-
-        // Pre-allocate buffer for xorMask benchmark
-        xorMaskBuf = PlatformBuffer.allocate(MEDIUM_SIZE, AllocationZone.Direct) as ReadWriteBuffer
-        repeat(MEDIUM_SIZE) { xorMaskBuf.writeByte(it.toByte()) }
-
-        // Pre-populated 4KB source for pure xorMaskCopy benchmark (no writeString cost)
-        xorMaskCopySrc = PlatformBuffer.allocate(MEDIUM_SIZE, AllocationZone.Direct) as ReadWriteBuffer
-        xorMaskCopySrc.writeString(mediumText, Charset.UTF8)
-        xorMaskCopySrc.resetForRead()
 
         // Pre-compress payloads for decompression benchmarks
         smallCompressed = compressForDecompBench(smallText)
         mediumCompressed = compressForDecompBench(mediumText)
         largeCompressed = compressForDecompBench(largeText)
 
-        // Same but with marker appended (for inline marker benchmark — avoids copy in hot loop)
+        // Same but with marker appended (for inline marker benchmark)
         smallCompressedWithMarker = appendMarker(smallCompressed)
         mediumCompressedWithMarker = appendMarker(mediumCompressed)
         largeCompressedWithMarker = appendMarker(largeCompressed)
@@ -135,8 +103,6 @@ class CompressedMessageBenchmark {
         smallCompressedWithMarker.freeIfNeeded()
         mediumCompressedWithMarker.freeIfNeeded()
         largeCompressedWithMarker.freeIfNeeded()
-        xorMaskBuf.freeIfNeeded()
-        xorMaskCopySrc.freeIfNeeded()
         compressor.close()
         decompressor.close()
         pool.clear()
@@ -178,7 +144,7 @@ class CompressedMessageBenchmark {
 
     @Benchmark
     fun decompressToStringSyncSmall(bh: Blackhole) {
-        smallCompressed.position(0) // rewind, not flip (buffer already in read mode)
+        smallCompressed.position(0)
         val str = decompressToString(smallCompressed, decompressor)
         bh.consume(str)
         decompressor.reset()
@@ -232,131 +198,7 @@ class CompressedMessageBenchmark {
         frame.freeIfNeeded()
     }
 
-    // --- Isolated writeString benchmarks (no frame overhead) ---
-
-    @Benchmark
-    fun writeStringSmall(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(smallText, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeString256B(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(text256, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeString1KB(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(text1k, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeStringMedium(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(mediumText, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeString16KB(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(text16k, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeStringLarge(bh: Blackhole) {
-        val buf = pool.acquire()
-        buf.writeString(largeText, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeString1MB(bh: Blackhole) {
-        val buf = pool.acquire(1024 * 1024)
-        buf.writeString(text1m, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    @Benchmark
-    fun writeString16MB(bh: Blackhole) {
-        val buf = pool.acquire(16 * 1024 * 1024)
-        buf.writeString(text16m, Charset.UTF8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
-    // --- FrameWriter component isolation benchmarks (4KB) ---
-
-    @Benchmark
-    fun utf8ByteSizeMedium(bh: Blackhole) {
-        bh.consume(utf8ByteSize(mediumText))
-    }
-
-    @Benchmark
-    fun randomNextInt(bh: Blackhole) {
-        bh.consume(kotlin.random.Random.nextInt())
-    }
-
-    @Benchmark
-    fun xorMaskMedium(bh: Blackhole) {
-        // Mask in-place and unmask to restore for next iteration
-        xorMaskBuf.position(0)
-        xorMaskBuf.setLimit(MEDIUM_SIZE)
-        xorMaskBuf.xorMask(0x12345678)
-        bh.consume(xorMaskBuf)
-        xorMaskBuf.position(0)
-        xorMaskBuf.setLimit(MEDIUM_SIZE)
-        xorMaskBuf.xorMask(0x12345678)
-    }
-
-    @Benchmark
-    fun xorMaskCopyMedium(bh: Blackhole) {
-        // Includes writeString + pool + xorMaskCopy (matches full writeTextFrame pipeline)
-        val src = pool.acquire(MEDIUM_SIZE)
-        src.writeString(mediumText, Charset.UTF8)
-        src.resetForRead()
-        // Dest has 8-byte header offset (2 header + 2 ext len + 4 mask) to match real frames
-        val dst = pool.acquire(MEDIUM_SIZE + 8)
-        dst.position(8)
-        dst.xorMaskCopy(src, 0x12345678)
-        bh.consume(dst)
-        pool.release(src)
-        pool.release(dst)
-    }
-
-    @Benchmark
-    fun xorMaskCopyPureMedium(bh: Blackhole) {
-        // Pure copy+mask only — pre-populated source, no writeString cost
-        xorMaskCopySrc.position(0)
-        val dst = pool.acquire(MEDIUM_SIZE + 8)
-        dst.position(8)
-        dst.xorMaskCopy(xorMaskCopySrc, 0x12345678)
-        bh.consume(dst)
-        pool.release(dst)
-    }
-
-    @Benchmark
-    fun poolAcquireReleaseMedium(bh: Blackhole) {
-        val buf = pool.acquire(MEDIUM_SIZE + 8)
-        bh.consume(buf)
-        pool.release(buf)
-    }
-
     // --- Decompress with inline marker (single zlib call) ---
-    // Instead of a separate decompress(markerBuffer), marker is pre-appended to input
 
     @Benchmark
     fun decompressInlineMarkerSmall(bh: Blackhole) {
@@ -405,7 +247,6 @@ class CompressedMessageBenchmark {
     @Benchmark
     fun fullRoundTripSmall(bh: Blackhole) {
         val frame = compressedWriter.writeTextFrame(smallText)
-        // Extract compressed payload from frame (skip header + mask)
         val compressed = extractCompressedPayload(frame)
         if (compressed != null) {
             val str = decompressToString(compressed, decompressor)
@@ -431,10 +272,6 @@ class CompressedMessageBenchmark {
 
     // --- Helper functions ---
 
-    /**
-     * Reproduces the websocket compress pipeline using public StreamingCompressor API:
-     * compress → flush → strip sync flush marker (0x00 0x00 0xFF 0xFF)
-     */
     private fun compressAndStripMarker(
         buffer: ReadBuffer,
         comp: StreamingCompressor,
@@ -445,7 +282,6 @@ class CompressedMessageBenchmark {
 
         if (chunks.isEmpty()) return emptyList()
 
-        // Strip sync flush marker from end (same logic as compressSync)
         val lastChunk = chunks.last()
         if (lastChunk.remaining() >= 4) {
             val pos = lastChunk.position()
@@ -465,10 +301,6 @@ class CompressedMessageBenchmark {
         return chunks
     }
 
-    /**
-     * Reproduces the websocket decompress-to-string pipeline using public StreamingDecompressor API
-     * with StreamingStringDecoder for platform-optimized UTF-8 decoding.
-     */
     private fun decompressToString(
         buffer: ReadBuffer,
         decomp: StreamingDecompressor,
@@ -481,7 +313,6 @@ class CompressedMessageBenchmark {
             chunk.freeIfNeeded()
         }
 
-        // Append sync marker and decompress (flushes pending output)
         val marker = PlatformBuffer.allocate(4, AllocationZone.Direct)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
@@ -503,10 +334,6 @@ class CompressedMessageBenchmark {
         return sb.toString()
     }
 
-    /**
-     * Extracts the unmasked compressed payload from a WebSocket frame.
-     * Frame format: [header 2B] [ext len 0/2/8B] [mask 4B] [masked payload]
-     */
     private fun extractCompressedPayload(frame: ReadBuffer): ReadBuffer? {
         if (frame.remaining() < 2) return null
         frame.position(0)
@@ -514,7 +341,7 @@ class CompressedMessageBenchmark {
         val byte1 = frame.readByte().toInt() and 0xFF
         val byte2 = frame.readByte().toInt() and 0xFF
         val rsv1 = (byte1 and 0x40) != 0
-        if (!rsv1) return null // Not compressed
+        if (!rsv1) return null
 
         val masked = (byte2 and 0x80) != 0
         val len7 = byte2 and 0x7F
@@ -528,7 +355,6 @@ class CompressedMessageBenchmark {
 
         val maskKey = if (masked) frame.readInt() else 0
 
-        // Read payload and unmask
         val payload = PlatformBuffer.allocate(payloadLen, AllocationZone.Direct)
         for (i in 0 until payloadLen) {
             payload.writeByte(frame.readByte())
@@ -543,16 +369,11 @@ class CompressedMessageBenchmark {
         return payload
     }
 
-    /**
-     * Decompresses using a single decompress() call — the marker is already in the buffer.
-     * Eliminates the second decompress(markerBuffer) call.
-     */
     private fun decompressSingleCall(
         bufferWithMarker: ReadBuffer,
         decomp: StreamingDecompressor,
     ): String {
         val sb = StringBuilder()
-        // Single decompress call — marker is part of the input
         decomp.decompress(bufferWithMarker) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
@@ -569,10 +390,6 @@ class CompressedMessageBenchmark {
         return sb.toString()
     }
 
-    /**
-     * Decompresses and decodes each chunk directly to StringBuilder using StreamingStringDecoder.
-     * Same as decompressToString but uses the two-call decompress pattern with explicit marker.
-     */
     private fun decompressToStringStreaming(
         buffer: ReadBuffer,
         decomp: StreamingDecompressor,
@@ -606,13 +423,12 @@ class CompressedMessageBenchmark {
         return sb.toString()
     }
 
-    /** Creates a new buffer with the compressed payload + 4-byte SYNC_FLUSH marker appended. */
     private fun appendMarker(compressed: ReadBuffer): ReadBuffer {
         val size = compressed.remaining()
         val withMarker = PlatformBuffer.allocate(size + 4, AllocationZone.Direct)
         compressed.position(0)
         withMarker.write(compressed)
-        compressed.position(0) // restore
+        compressed.position(0)
         withMarker.writeInt(SYNC_FLUSH_MARKER)
         withMarker.resetForRead()
         return withMarker
@@ -626,17 +442,12 @@ class CompressedMessageBenchmark {
         return buf
     }
 
-    /**
-     * Creates a pre-compressed buffer for decompression benchmarks.
-     * Compresses with sync flush and strips the marker (websocket format).
-     */
     private fun compressForDecompBench(text: String): ReadBuffer {
         val input = textToBuffer(text)
         val chunks = compressAndStripMarker(input, compressor)
         input.freeIfNeeded()
         compressor.reset()
 
-        // Combine into single buffer for consistent benchmark input
         var totalSize = 0
         for (chunk in chunks) totalSize += chunk.remaining()
         val combined = PlatformBuffer.allocate(totalSize, AllocationZone.Direct)
@@ -656,22 +467,5 @@ class CompressedMessageBenchmark {
             sb.append(chars[i % chars.length])
         }
         return sb.toString()
-    }
-
-    /** Same logic as internal Utf8.byteSize — measures character iteration cost */
-    private fun utf8ByteSize(text: String): Int {
-        var size = 0
-        var i = 0
-        val len = text.length
-        while (i < len) {
-            val c = text[i].code
-            when {
-                c <= 0x7F -> { size += 1; i++ }
-                c <= 0x7FF -> { size += 2; i++ }
-                c in 0xD800..0xDBFF && i + 1 < len && text[i + 1].code in 0xDC00..0xDFFF -> { size += 4; i += 2 }
-                else -> { size += 3; i++ }
-            }
-        }
-        return size
     }
 }
