@@ -73,7 +73,6 @@ class DefaultWebSocketClient(
         CoroutineScope(
             (parentScope?.coroutineContext ?: Dispatchers.Default) +
                 clientJob +
-                Dispatchers.Default +
                 CoroutineName(
                     "ModularWebSocket: ${connectionOptions.name}:${connectionOptions.port}",
                 ),
