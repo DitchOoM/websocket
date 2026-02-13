@@ -6,6 +6,7 @@ import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.freeIfNeeded
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
@@ -15,8 +16,6 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
-
-private val testImplementation = WebSocketImplementation.MODULAR
 
 /**
  * Await connection, failing fast if the connection is refused or the server is down.
@@ -47,7 +46,6 @@ internal suspend fun CoroutineScope.prepareConnection(
             connectionOptions,
             AllocationZone.Direct,
             this + CoroutineName(case.toString()),
-            testImplementation,
         )
     websocket.connect()
     websocket.awaitConnected()
@@ -91,7 +89,6 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             connectionOptions,
             zone,
             this,
-            testImplementation,
         )
     ws.connect()
     ws.awaitConnected()
@@ -134,7 +131,6 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             connectionOptions,
             zone,
             this + CoroutineName(case.toString()),
-            testImplementation,
         )
     ws.connect()
     ws.awaitConnected()
@@ -142,7 +138,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         ws.incomingMessages.filter { it is WebSocketMessage.Binary }.take(count).collect {
             val m = it as WebSocketMessage.Binary
             ws.write(m.value)
-            m.value.closeIfNeeded() // Free NativeBuffer after echo
+            m.value.freeIfNeeded() // Free NativeBuffer after echo
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
@@ -176,7 +172,6 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
             connectionOptions,
             AllocationZone.Direct,
             this + CoroutineName(case.toString()),
-            testImplementation,
         )
     ws.connect()
     ws.awaitConnected()

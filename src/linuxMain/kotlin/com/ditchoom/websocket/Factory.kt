@@ -12,9 +12,4 @@ actual fun WebSocketClient.Companion.allocate(
     pool: BufferPool,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
-    implementation: WebSocketImplementation,
-): WebSocketClient =
-    when (implementation) {
-        WebSocketImplementation.DEFAULT -> DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
-        WebSocketImplementation.MODULAR -> ModularWebSocketClient(connectionOptions, pool, parentScope, allocationZone)
-    }
+): WebSocketClient = DefaultWebSocketClient(connectionOptions, pool, parentScope, allocationZone)

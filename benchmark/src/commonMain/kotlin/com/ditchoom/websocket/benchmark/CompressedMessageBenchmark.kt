@@ -43,7 +43,7 @@ class CompressedMessageBenchmark {
     private lateinit var decompressor: StreamingDecompressor
     private lateinit var decoder: StreamingStringDecoder
 
-    // Buffer pool matching production ModularWebSocketClient pattern
+    // Buffer pool matching production DefaultWebSocketClient pattern
     private lateinit var pool: BufferPool
 
     // FrameWriter with compression enabled

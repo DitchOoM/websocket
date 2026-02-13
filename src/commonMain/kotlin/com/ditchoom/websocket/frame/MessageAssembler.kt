@@ -360,14 +360,8 @@ value class CloseCode(
         /** 1000 - Normal closure */
         val NORMAL = CloseCode(1000u)
 
-        /** 1001 - Endpoint going away */
-        val GOING_AWAY = CloseCode(1001u)
-
         /** 1002 - Protocol error */
         val PROTOCOL_ERROR = CloseCode(1002u)
-
-        /** 1003 - Unsupported data type */
-        val UNSUPPORTED_DATA = CloseCode(1003u)
 
         /**
          * 1005 - No status received. Per RFC 6455, this status code is used internally
@@ -377,17 +371,5 @@ value class CloseCode(
 
         /** 1007 - Invalid payload data (e.g., non-UTF-8 in text message) */
         val INVALID_PAYLOAD = CloseCode(1007u)
-
-        /** 1008 - Policy violation */
-        val POLICY_VIOLATION = CloseCode(1008u)
-
-        /** 1009 - Message too big */
-        val MESSAGE_TOO_BIG = CloseCode(1009u)
-
-        /** 1010 - Missing expected extension (also known as MANDATORY_EXTENSION) */
-        val MISSING_EXTENSION = CloseCode(1010u)
-
-        /** 1011 - Internal server error */
-        val INTERNAL_ERROR = CloseCode(1011u)
     }
 }

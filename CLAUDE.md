@@ -6,7 +6,7 @@ This is a Kotlin Multiplatform WebSocket library providing RFC 6455 compliant We
 
 ## Core Components
 
-### ModularWebSocketClient (Recommended)
+### DefaultWebSocketClient
 The primary WebSocket client implementation using composable components:
 - `FrameReader` - Zero-copy frame parsing using StreamProcessor
 - `FrameWriter` - Frame serialization with SIMD-optimized masking
@@ -26,6 +26,7 @@ The primary WebSocket client implementation using composable components:
 
 ### Compression (`Compression.kt`)
 - permessage-deflate extension support (RFC 7692)
+- Sync-only compression/decompression (no suspend overhead)
 - Streaming decompression for memory efficiency
 - UTF-8 boundary handling for chunked string decoding
 

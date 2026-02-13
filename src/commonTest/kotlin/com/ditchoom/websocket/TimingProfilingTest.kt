@@ -243,7 +243,7 @@ class TimingProfilingTest {
                 val directMark = TimeSource.Monotonic.markNow()
                 repeat(iterations) {
                     val buf = PlatformBuffer.allocate(size, AllocationZone.Direct)
-                    buf.closeIfNeeded()
+                    buf.freeIfNeeded()
                 }
                 val directTime = directMark.elapsedNow()
 
@@ -251,7 +251,7 @@ class TimingProfilingTest {
                 val heapMark = TimeSource.Monotonic.markNow()
                 repeat(iterations) {
                     val buf = PlatformBuffer.allocate(size, AllocationZone.Heap)
-                    buf.closeIfNeeded()
+                    buf.freeIfNeeded()
                 }
                 val heapTime = heapMark.elapsedNow()
 

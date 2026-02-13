@@ -27,14 +27,6 @@ enum class Opcode(
 
     fun isControlFrame(): Boolean = this == Close || this == Ping || this == Pong
 
-    fun isValid(): Boolean =
-        this == Close ||
-            this == Ping ||
-            this == Pong ||
-            this == Binary ||
-            this == Text ||
-            this == Continuation
-
     companion object {
         private val VALUES = entries.toTypedArray()
 

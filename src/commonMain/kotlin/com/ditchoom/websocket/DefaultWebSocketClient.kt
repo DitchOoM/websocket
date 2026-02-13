@@ -2,83 +2,107 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
-import com.ditchoom.buffer.compression.SuspendingStreamingCompressor
-import com.ditchoom.buffer.compression.SuspendingStreamingDecompressor
+import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
-import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.buffer.stream.builder
-import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.allocate
+import com.ditchoom.websocket.frame.AssembledMessage
+import com.ditchoom.websocket.frame.AssemblyResult
+import com.ditchoom.websocket.frame.CloseCode
+import com.ditchoom.websocket.frame.FrameReader
+import com.ditchoom.websocket.frame.FrameWriter
+import com.ditchoom.websocket.frame.MessageAssembler
+import com.ditchoom.websocket.frame.ParsedFrame
+import com.ditchoom.websocket.handshake.HandshakeException
+import com.ditchoom.websocket.handshake.HandshakeRequest
+import com.ditchoom.websocket.handshake.HandshakeResponseParser
+import com.ditchoom.websocket.handshake.HandshakeValidator
+import com.ditchoom.websocket.handshake.ValidationResult
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
-import kotlin.time.Duration
 
 /**
- * Original WebSocket client implementation.
+ * Modular WebSocket client implementation using composable components.
  *
- * @deprecated Use [ModularWebSocketClient] instead for better performance and RFC compliance.
- * This class will be removed in a future release.
+ * This implementation uses:
+ * - [FrameReader] for zero-copy frame parsing
+ * - [FrameWriter] for frame serialization with SIMD masking
+ * - [MessageAssembler] for fragmented message reassembly
+ * - [HandshakeRequest]/[HandshakeResponseParser]/[HandshakeValidator] for connection setup
+ *
+ * Designed for high performance and testability with RFC 6455 compliance.
  */
-@Deprecated(
-    "Use ModularWebSocketClient for better performance",
-    ReplaceWith("ModularWebSocketClient(connectionOptions, pool, parentScope, allocationZone)"),
-)
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     private val pool: BufferPool,
     parentScope: CoroutineScope?,
-    allocationZone: AllocationZone = AllocationZone.Direct,
+    private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
 ) : WebSocketClient {
-    override val scope =
-        if (parentScope == null) {
-            CoroutineScope(
+    // Create a dedicated Job for this client - NOT a child of parent scope.
+    // This ensures the websocket can be cancelled without blocking parent scope completion.
+    // The websocket runs independently; callers must explicitly call close().
+    private val clientJob = kotlinx.coroutines.Job()
+
+    override val scope: CoroutineScope =
+        CoroutineScope(
+            (parentScope?.coroutineContext ?: Dispatchers.Default) +
+                clientJob +
                 Dispatchers.Default +
-                    CoroutineName(
-                        "Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                            ": ${connectionOptions.name}:${connectionOptions.port}",
-                    ),
-            )
-        } else {
-            parentScope + Dispatchers.Default +
                 CoroutineName(
-                    "Websocket Connection #${getCountForConnection(connectionOptions)}" +
-                        ": ${connectionOptions.name}:${connectionOptions.port}",
-                )
-        }
+                    "ModularWebSocket: ${connectionOptions.name}:${connectionOptions.port}",
+                ),
+        )
+
     private val socket = ClientSocket.allocate(allocationZone)
-    private var hasServerInitiatedClose = false
-    internal val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
+    private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
+
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
     override val incomingMessages = incomingMessageChannel.receiveAsFlow()
-    val outgoingMessages = Channel<WebSocketMessage>()
-    internal var enableCompression = false
-    private var outgoingCompressor: SuspendingStreamingCompressor? = null
-    private var incomingDecompressor: SuspendingStreamingDecompressor? = null
+
+    // Components initialized during connect()
+    // Note: These are set once during connect() and cleared during close().
+    // The nullable checks (e.g., frameWriter ?: return) provide defensive access.
+    private var frameWriter: FrameWriter? = null
+    private var outgoingCompressor: StreamingCompressor? = null
+    private var incomingDecompressor: StreamingDecompressor? = null
+    private var compressionEnabled = false
+    private var outgoingCompressionEnabled = false
+    private var serverNoContextTakeover = false
+    private var clientNoContextTakeover = false
+
+    // Reusable decoder for streaming UTF-8 decoding of decompressed text messages
     private val stringDecoder = StreamingStringDecoder()
+
+    // Use StateFlow for thread-safe access between read loop and close()
+    private val serverInitiatedClose = MutableStateFlow(false)
+    private var clientKey: String = ""
 
     fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
 
@@ -93,809 +117,541 @@ class DefaultWebSocketClient(
             return this
         }
         connectionStateFlow.value = ConnectionState.Connecting
-        try {
-            val protocolString =
-                if (connectionOptions.protocols.isNotEmpty()) {
-                    val sb = StringBuilder()
-                    connectionOptions.protocols.forEach {
-                        sb.append("Sec-WebSocket-Protocol: $it\r\n")
-                    }
-                    sb
-                } else {
-                    ""
-                }
-            val hostline =
-                if ((connectionOptions.tls && connectionOptions.port == 443) ||
-                    (!connectionOptions.tls && connectionOptions.port == 80)
-                ) {
-                    connectionOptions.name
-                } else {
-                    "${connectionOptions.name}:${connectionOptions.port}"
-                }
-            val deflateHeader =
-                if (connectionOptions.requestCompression) {
-                    HTTP_COMPRESSION_HEADER
-                } else {
-                    ""
-                }
-            val request =
-                "GET ${connectionOptions.websocketEndpoint} HTTP/1.1\r\n" +
-                    "Host: $hostline\r\n" +
-                    "Connection: Upgrade\r\n" +
-                    "Pragma: no-cache\r\n" +
-                    "Cache-Control: no-cache\r\n" +
-                    "User-Agent: Ditchoom/websockets\r\n" +
-                    "Upgrade: websocket\r\n" +
-                    protocolString +
-                    deflateHeader +
-                    "Sec-WebSocket-Version: 13\r\n" +
-                    "Sec-WebSocket-Key: ${generateWebSocketKey()}\r\n" +
-                    "\r\n"
 
+        try {
+            // Build handshake request using modular component
+            val handshakeRequest =
+                HandshakeRequest
+                    .builder(
+                        host = connectionOptions.name,
+                        port = connectionOptions.port,
+                        path = connectionOptions.websocketEndpoint,
+                    ).apply {
+                        useTls(connectionOptions.tls)
+                        if (connectionOptions.protocols.isNotEmpty()) {
+                            protocols(*connectionOptions.protocols.toTypedArray())
+                        }
+                        if (connectionOptions.requestCompression) {
+                            val opts = connectionOptions.compressionOptions
+                            // On platforms without context takeover support (JS Node.js),
+                            // always include no_context_takeover in the offer so the server
+                            // doesn't use back-references to prior messages.
+                            val forceNoCtx = !supportsDeflateContextTakeover
+                            requestCompression(
+                                clientNoContextTakeover = opts.clientNoContextTakeover || forceNoCtx,
+                                serverNoContextTakeover = opts.serverNoContextTakeover || forceNoCtx,
+                                serverMaxWindowBits = opts.serverMaxWindowBits,
+                                clientMaxWindowBits = opts.clientMaxWindowBits,
+                            )
+                        }
+                    }.build()
+
+            clientKey = handshakeRequest.key
+
+            // Open socket connection
             val socketOptions =
                 if (connectionOptions.tls) SocketOptions.tlsDefault() else SocketOptions.LOW_LATENCY
             withTimeout(connectionOptions.connectionTimeout) {
                 socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name, socketOptions)
             }
-            socket.writeString(request, Charset.UTF8, connectionOptions.writeTimeout)
 
-            // Read HTTP upgrade response using stream processor
+            // Send handshake request
+            val requestBuffer = handshakeRequest.toBuffer()
+            socket.write(requestBuffer, connectionOptions.writeTimeout)
+
+            // Read and parse handshake response
             val streamProcessor = StreamProcessor.builder(pool).buildSuspending()
-            val endOfHeaders = "\r\n\r\n".toReadBuffer(Charset.UTF8)
+            val response = readHandshakeResponse(streamProcessor)
 
-            // Read until we find the end of HTTP headers
-            var foundHeaders = false
-            while (!foundHeaders) {
-                readIntoProcessor(streamProcessor)
-                if (streamProcessor.available() >= endOfHeaders.remaining()) {
-                    foundHeaders = streamProcessor.peekMatches(endOfHeaders) ||
-                        findPattern(streamProcessor, endOfHeaders)
+            // Validate response
+            val offeredExtensions =
+                if (connectionOptions.requestCompression) {
+                    listOf("permessage-deflate")
+                } else {
+                    emptyList()
                 }
-            }
-
-            // Read all available data as the HTTP response
-            val responseSize = findPatternIndex(streamProcessor, endOfHeaders) + endOfHeaders.remaining()
-            val responseBuffer = streamProcessor.readBuffer(responseSize)
-            val response = responseBuffer.readString(responseBuffer.remaining())
-
-            if (!(
-                    response.contains("101 Switching Protocols", ignoreCase = true) &&
-                        response.contains("Upgrade: websocket", ignoreCase = true) &&
-                        response.contains("Connection: Upgrade", ignoreCase = true) &&
-                        response.contains("Sec-WebSocket-Accept", ignoreCase = true)
+            val validationResult =
+                HandshakeValidator.validate(
+                    response = response,
+                    expectedAcceptKey = handshakeRequest.expectedAcceptKey,
+                    offeredProtocols = connectionOptions.protocols,
+                    offeredExtensions = offeredExtensions,
                 )
-            ) {
-                streamProcessor.release()
-                throw IllegalStateException(
-                    "Invalid response from server when reading the result from " +
-                        "websockets. Response:\r\n$response",
-                )
-            }
-            if (connectionOptions.requestCompression &&
-                response.contains("Sec-WebSocket-Extensions:", ignoreCase = true) &&
-                response.contains("permessage-deflate", ignoreCase = true)
-            ) {
-                enableCompression = true
-                outgoingCompressor =
-                    SuspendingStreamingCompressor.create(
-                        CompressionAlgorithm.Raw,
-                        CompressionLevel.Default,
-                        BufferAllocator.Heap,
-                    )
-                incomingDecompressor =
-                    SuspendingStreamingDecompressor.create(
-                        CompressionAlgorithm.Raw,
-                        BufferAllocator.Direct,
-                    )
-            }
-            connectionStateFlow.value = ConnectionState.Connected
-            processIncomingMessages(streamProcessor)
-            scope.launch {
-                outgoingMessages.consumeAsFlow().collect {
-                    when (it) {
-                        is WebSocketMessage.Binary -> writeWebsocketFrame(Opcode.Binary, it.value)
-                        is WebSocketMessage.Close -> sendCloseFrame(it.code, it.reason)
-                        is WebSocketMessage.Ping -> writeWebsocketFrame(Opcode.Ping, it.value)
-                        is WebSocketMessage.Pong -> writeWebsocketFrame(Opcode.Pong, it.value)
-                        is WebSocketMessage.Text ->
-                            writeWebsocketFrame(
-                                Opcode.Text,
-                                it.value.toReadBuffer(Charset.UTF8),
-                            )
+
+            when (validationResult) {
+                is ValidationResult.Success -> {
+                    // Setup compression if negotiated
+                    if (response.compressionEnabled) {
+                        val negotiatedClientWindowBits =
+                            response.compressionParams?.clientMaxWindowBits ?: 0
+                        setupCompression(negotiatedClientWindowBits)
+                        response.compressionParams?.let {
+                            serverNoContextTakeover = it.serverNoContextTakeover
+                        }
+                        // client_no_context_takeover is a unilateral client promise
+                        // (RFC 7692 Section 7.1.1.2): the client must honor it regardless
+                        // of whether the server echoes it. Also honor if the server requires it.
+                        clientNoContextTakeover =
+                            connectionOptions.compressionOptions.clientNoContextTakeover ||
+                            (response.compressionParams?.clientNoContextTakeover ?: false)
                     }
+
+                    // Initialize frame writer
+                    frameWriter =
+                        FrameWriter(
+                            compressor = outgoingCompressor,
+                            compressionEnabled = outgoingCompressionEnabled,
+                            clientMode = true,
+                            allocationZone = allocationZone,
+                            pool = pool,
+                            resetCompressorPerMessage = clientNoContextTakeover,
+                        )
+
+                    connectionStateFlow.value = ConnectionState.Connected
+
+                    // Start read loop
+                    startReadLoop(streamProcessor)
+                }
+                is ValidationResult.Failure -> {
+                    streamProcessor.release()
+                    throw HandshakeException(validationResult.message)
                 }
             }
         } catch (e: Exception) {
             connectionStateFlow.value = ConnectionState.Disconnected(e)
         }
+
         return this
     }
 
-    private suspend fun findPattern(
-        processor: SuspendingStreamProcessor,
-        pattern: ReadBuffer,
-    ): Boolean {
-        val available = processor.available()
-        val patternSize = pattern.remaining()
-        if (available < patternSize) return false
-
-        for (i in 0..(available - patternSize)) {
-            var matches = true
-            for (j in 0 until patternSize) {
-                if (processor.peekByte(i + j) != pattern[pattern.position() + j]) {
-                    matches = false
-                    break
-                }
-            }
-            if (matches) return true
-        }
-        return false
-    }
-
-    private suspend fun findPatternIndex(
-        processor: SuspendingStreamProcessor,
-        pattern: ReadBuffer,
-    ): Int {
-        val available = processor.available()
-        val patternSize = pattern.remaining()
-        if (available < patternSize) return -1
-
-        for (i in 0..(available - patternSize)) {
-            var matches = true
-            for (j in 0 until patternSize) {
-                if (processor.peekByte(i + j) != pattern[pattern.position() + j]) {
-                    matches = false
-                    break
-                }
-            }
-            if (matches) return i
-        }
-        return -1
-    }
-
-    override suspend fun write(string: String) {
-        writeWebsocketFrame(Opcode.Text, string.toReadBuffer(Charset.UTF8), connectionOptions.writeTimeout)
-    }
-
-    override suspend fun write(buffer: ReadBuffer) {
-        writeWebsocketFrame(Opcode.Binary, buffer, connectionOptions.writeTimeout)
-    }
-
-    suspend fun write(
-        buffer: ReadBuffer,
-        timeout: Duration,
-    ): Int = writeWebsocketFrame(Opcode.Binary, buffer, timeout)
-
-    override suspend fun ping(payloadData: ReadBuffer) {
-        writeWebsocketFrame(Opcode.Ping, payloadData, connectionOptions.writeTimeout)
-    }
-
-    private suspend fun writeWebsocketFrame(
-        opcode: Opcode,
-        payloadData: ReadBuffer = EMPTY_BUFFER,
-        timeout: Duration = connectionOptions.writeTimeout,
-    ): Int =
-        try {
-            val frame = Frame(true, opcode, MaskingKey.FourByteMaskingKey(), payloadData)
-            val frameBuffer =
-                frame.toBuffer(
-                    attemptDeflate = enableCompression,
-                    compressor = outgoingCompressor,
+    private fun setupCompression(clientWindowBits: Int = 0) {
+        val allocator = BufferAllocator.FromPool(pool)
+        compressionEnabled = true
+        // Disable outgoing compression when the server negotiated client_max_window_bits < 15
+        // and the platform can't honor it (JVM Deflater only supports window=15).
+        // Incoming decompression still works (Inflater handles any window size).
+        val needsCustomWindowBits = clientWindowBits in 8..14
+        outgoingCompressionEnabled = !needsCustomWindowBits || supportsCustomDeflateWindowBits
+        if (outgoingCompressionEnabled) {
+            outgoingCompressor =
+                StreamingCompressor.create(
+                    algorithm = CompressionAlgorithm.Raw,
+                    level = CompressionLevel.Default,
+                    allocator = allocator,
+                    windowBits = if (clientWindowBits in 8..15) -clientWindowBits else 0,
                 )
-            frameBuffer.resetForRead()
-            val remainingBytes = frameBuffer.remaining()
-            while (frameBuffer.hasRemaining()) {
-                socket.write(frameBuffer, timeout)
-            }
-            remainingBytes
-        } catch (e: Exception) {
-            connectionStateFlow.value = ConnectionState.Disconnected(e)
-            -1
         }
+        incomingDecompressor =
+            StreamingDecompressor.create(
+                CompressionAlgorithm.Raw,
+                allocator,
+            )
+    }
 
-    private suspend fun readIntoProcessor(processor: SuspendingStreamProcessor) {
-        val readBuffer = socket.read(connectionOptions.readTimeout)
-        readBuffer.resetForRead()
-        if (readBuffer.hasRemaining()) {
-            processor.append(readBuffer)
+    private suspend fun readHandshakeResponse(
+        processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor,
+    ): com.ditchoom.websocket.handshake.HandshakeResponse {
+        // Read until we have complete HTTP headers
+        while (true) {
+            readIntoProcessor(processor)
+
+            // Try to parse - returns null if incomplete
+            val available = processor.available()
+            if (available < 12) continue // Minimum: "HTTP/1.1 101"
+
+            // Read available data for parsing
+            val buffer = pool.acquire(available)
+            for (i in 0 until available) {
+                buffer.writeByte(processor.peekByte(i))
+            }
+            buffer.resetForRead()
+
+            // Find where headers end (position after \r\n\r\n)
+            val headerEnd = HandshakeResponseParser.findHeaderEnd(buffer)
+            if (headerEnd < 0) {
+                continue // Need more data - headers not complete
+            }
+
+            val response =
+                try {
+                    HandshakeResponseParser.parse(buffer)
+                } catch (e: HandshakeException) {
+                    if (e.message?.contains("Incomplete") == true) {
+                        continue // Need more data
+                    }
+                    throw e
+                }
+
+            // Successfully parsed - consume ONLY the HTTP headers, not any trailing frame data
+            processor.skip(headerEnd)
+            return response
         }
     }
 
-    internal fun processIncomingMessages(streamProcessor: SuspendingStreamProcessor) =
+    /**
+     * Reads data from socket into the processor.
+     * Uses zero-copy path when available: socket writes directly into our buffer.
+     * Socket cancellation is handled via suspendCancellableCoroutine + invokeOnCancellation
+     * in the underlying socket implementation.
+     */
+    private suspend fun readIntoProcessor(processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
+        // Allocate buffer that we own (not from socket's internal pool).
+        // This buffer will be owned by the processor after append.
+        val buffer = pool.acquire(readBufferSize)
+
+        try {
+            // Zero-copy: socket writes directly into our buffer
+            val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
+
+            if (bytesRead > 0) {
+                // Buffer was written at position 0..bytesRead, position is now at bytesRead
+                // Set limit to bytesRead and position to 0 for reading
+                buffer.setLimit(buffer.position())
+                buffer.position(0)
+                processor.append(buffer)
+            } else {
+                // EOF or no data - free the unused buffer (Linux NativeBuffer leak fix)
+                buffer.freeIfNeeded()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Do NOT free the buffer on cancellation. The kernel io_uring recv operation
+            // may still be writing to this buffer — freeing it causes use-after-free heap
+            // corruption. The buffer (64KB) is intentionally leaked on cancellation.
+            // socket.close() will close the fd, causing the kernel to cancel the recv,
+            // but we cannot safely free the buffer until that completes.
+            throw e
+        } catch (e: Exception) {
+            // Socket error - free the unused buffer (Linux NativeBuffer leak fix)
+            buffer.freeIfNeeded()
+            throw e
+        }
+    }
+
+    companion object {
+        /** Default read buffer size (64KB) - matches typical socket receive buffer */
+        const val DEFAULT_READ_BUFFER_SIZE = 65536
+    }
+
+    private fun startReadLoop(streamProcessor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
         scope.launch {
+            val frameReader = FrameReader(streamProcessor)
+            val messageAssembler = MessageAssembler(compressionEnabled)
+
             try {
-                readLoop@ while (isOpen()) {
-                    // Ensure we have data available, reading from socket if needed
-                    while (streamProcessor.available() < 2) {
+                readLoop@ while (isOpen() && isActive) {
+                    // Ensure minimum data for frame header
+                    while (streamProcessor.available() < 2 && isActive) {
                         readIntoProcessor(streamProcessor)
                     }
 
-                    lateinit var firstFrame: Frame
-                    val payloadBuffers = mutableListOf<ReadBuffer>()
-                    var totalPayloadSize = 0
+                    if (!isActive) break@readLoop
 
-                    process@ do {
-                        val frame = readAndProcessWebSocketFrame(streamProcessor) ?: return@launch
-                        if (frame.opcode.isControlFrame()) {
-                            if (!handleControlPacketFrameShouldContinue(frame)) {
-                                return@launch
-                            }
-                        } else {
-                            if (payloadBuffers.isEmpty()) {
-                                firstFrame = frame
-                            }
-                            // Buffer is already in read mode from processor.readBuffer()
-                            payloadBuffers += frame.payloadData
-                            totalPayloadSize += frame.payloadData.remaining()
-                        }
-                    } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
+                    // Try to read a frame
+                    val frame = frameReader.readFrame()
 
-                    // Combine payloads into a single buffer
-                    val payload =
-                        if (payloadBuffers.size == 1) {
-                            payloadBuffers[0]
-                        } else if (totalPayloadSize == 0) {
-                            EMPTY_BUFFER
-                        } else {
-                            val combined = PlatformBuffer.allocate(totalPayloadSize)
-                            for (buf in payloadBuffers) {
-                                combined.write(buf)
-                            }
-                            // Clear references to allow GC to reclaim fragment buffers
-                            payloadBuffers.clear()
-                            combined.resetForRead()
-                            combined
-                        }
-                    // Buffer is already in read mode, no resetForRead() needed
-                    when (firstFrame.opcode) {
-                        Opcode.Text -> {
-                            try {
-                                val utf8StringRead =
-                                    if (firstFrame.rsv1 && enableCompression) {
-                                        if (incomingDecompressor != null) {
-                                            // Stream decompress directly to string - reduces peak memory
-                                            val result = decompressToString(payload, incomingDecompressor!!, stringDecoder)
-                                            incomingDecompressor!!.reset()
-                                            result
-                                        } else {
-                                            val decompressed = payload.decompressWebsocketBuffer()
-                                            decompressed.readString(decompressed.remaining())
-                                        }
-                                    } else {
-                                        payload.readString(payload.remaining())
-                                    }
-                                incomingMessageChannel.trySend(WebSocketMessage.Text(utf8StringRead))
-                            } catch (e: Throwable) {
-                                sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
+                    if (frame == null) {
+                        // Need more data
+                        readIntoProcessor(streamProcessor)
+                        continue@readLoop
+                    }
+
+                    // Process frame through assembler
+                    when (val result = messageAssembler.addFrame(frame)) {
+                        is AssemblyResult.ControlFrame -> {
+                            handleControlFrame(result.frame)
+                            if (result.frame.opcode == Opcode.Close) {
                                 return@launch
                             }
                         }
-                        Opcode.Binary -> {
-                            val binaryPayload =
-                                if (firstFrame.rsv1 && enableCompression) {
-                                    if (incomingDecompressor != null) {
-                                        // Stream decompress to single buffer - reduces peak memory
-                                        val result = decompressToBuffer(payload, incomingDecompressor!!)
-                                        incomingDecompressor!!.reset()
-                                        result
-                                    } else {
-                                        payload.decompressWebsocketBuffer()
-                                    }
-                                } else {
-                                    payload
-                                }
-                            incomingMessageChannel.trySend(WebSocketMessage.Binary(binaryPayload))
+                        is AssemblyResult.CompleteMessage -> {
+                            emitMessage(result.message)
+                            // Free fragment NativeBuffers after processing (Linux native heap).
+                            // For multi-fragment messages, combineBuffers() copied data to a new
+                            // buffer, so originals can be freed. Empty for single-frame messages.
+                            result.fragmentsToClose.freeAll()
                         }
-                        else -> {
-                            sendCloseFrame(1002u, "Invalid opcode for frame")
+                        is AssemblyResult.NeedMoreFrames -> {
+                            // Continue reading
+                        }
+                        is AssemblyResult.Error -> {
+                            sendCloseFrame(result.code.code, result.reason)
+                            // Update state to prevent close() from sending another close frame
+                            connectionStateFlow.value =
+                                ConnectionState.Disconnected(
+                                    code = result.code.code,
+                                    reason = result.reason,
+                                )
                             return@launch
                         }
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Clean cancellation - update state atomically
+                connectionStateFlow.update { current ->
+                    if (current !is ConnectionState.Disconnected) {
+                        ConnectionState.Disconnected()
+                    } else {
+                        current
+                    }
+                }
             } catch (e: SocketClosedException) {
-                // SocketClosedException is expected when the connection is closed
-                // Don't treat as error if we're already closing or server initiated close
-                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                    connectionStateFlow.value = ConnectionState.Disconnected(e)
-                } else {
-                    connectionStateFlow.value = ConnectionState.Disconnected(null)
+                // Expected on close - update state atomically
+                connectionStateFlow.update { current ->
+                    when {
+                        current is ConnectionState.Disconnected -> current
+                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
+                            ConnectionState.Disconnected(e)
+                        else -> ConnectionState.Disconnected()
+                    }
                 }
             } catch (e: SocketException) {
-                // SocketException (connection reset, etc.) is expected when the connection is closed
-                if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                    connectionStateFlow.value = ConnectionState.Disconnected(e)
-                } else {
-                    connectionStateFlow.value = ConnectionState.Disconnected(null)
+                // Socket error - update state atomically
+                connectionStateFlow.update { current ->
+                    when {
+                        current is ConnectionState.Disconnected -> current
+                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
+                            ConnectionState.Disconnected(e)
+                        else -> ConnectionState.Disconnected()
+                    }
                 }
             } finally {
                 streamProcessor.release()
             }
         }
-
-    // Legacy method for tests - creates a stream processor internally
-    internal fun processIncomingMessages(
-        isOpen: (() -> Boolean),
-        readByte: (suspend () -> Byte),
-        readBuffer: (suspend (Int?) -> ReadBuffer),
-    ) = scope.launch {
-        val testProcessor = StreamProcessor.builder(pool).buildSuspending()
-
-        try {
-            readLoop@ while (isOpen()) {
-                lateinit var firstFrame: Frame
-                val payloadBuffers = mutableListOf<ReadBuffer>()
-                var totalPayloadSize = 0
-
-                process@ do {
-                    // Ensure we have enough data for frame header (2 bytes minimum)
-                    while (testProcessor.available() < 2) {
-                        val byte = readByte()
-                        val singleByte = pool.acquire(1)
-                        singleByte.writeByte(byte)
-                        singleByte.resetForRead()
-                        testProcessor.append(singleByte)
-                    }
-
-                    val frame = readAndProcessWebSocketFrameLegacy(testProcessor, readByte, readBuffer) ?: return@launch
-                    if (frame.opcode.isControlFrame()) {
-                        if (!handleControlPacketFrameShouldContinue(frame)) {
-                            return@launch
-                        }
-                    } else {
-                        if (payloadBuffers.isEmpty()) {
-                            firstFrame = frame
-                        }
-                        // Buffer is already in read mode from legacy processor
-                        payloadBuffers += frame.payloadData
-                        totalPayloadSize += frame.payloadData.remaining()
-                    }
-                } while (!frame.fin || (frame.opcode.isControlFrame() && frame.opcode != Opcode.Close))
-
-                // Combine payloads into a single buffer
-                val payload =
-                    if (payloadBuffers.size == 1) {
-                        payloadBuffers[0]
-                    } else if (totalPayloadSize == 0) {
-                        EMPTY_BUFFER
-                    } else {
-                        val combined = PlatformBuffer.allocate(totalPayloadSize)
-                        for (buf in payloadBuffers) {
-                            combined.write(buf)
-                        }
-                        // Clear references to allow GC to reclaim fragment buffers
-                        payloadBuffers.clear()
-                        combined.resetForRead()
-                        combined
-                    }
-                // Buffer is already in read mode, no resetForRead() needed
-                when (firstFrame.opcode) {
-                    Opcode.Text -> {
-                        try {
-                            val utf8StringRead =
-                                if (firstFrame.rsv1 && enableCompression) {
-                                    if (incomingDecompressor != null) {
-                                        // Stream decompress directly to string - reduces peak memory
-                                        val result = decompressToString(payload, incomingDecompressor!!, stringDecoder)
-                                        incomingDecompressor!!.reset()
-                                        result
-                                    } else {
-                                        val decompressed = payload.decompressWebsocketBuffer()
-                                        decompressed.readString(decompressed.remaining())
-                                    }
-                                } else {
-                                    payload.readString(payload.remaining())
-                                }
-                            incomingMessageChannel.trySend(WebSocketMessage.Text(utf8StringRead))
-                        } catch (e: Throwable) {
-                            sendCloseFrame(1007u, "Invalid UTF-8 Message. ${e.message}")
-                            return@launch
-                        }
-                    }
-                    Opcode.Binary -> {
-                        val binaryPayload =
-                            if (firstFrame.rsv1 && enableCompression) {
-                                if (incomingDecompressor != null) {
-                                    // Stream decompress to single buffer - reduces peak memory
-                                    val result = decompressToBuffer(payload, incomingDecompressor!!)
-                                    incomingDecompressor!!.reset()
-                                    result
-                                } else {
-                                    payload.decompressWebsocketBuffer()
-                                }
-                            } else {
-                                payload
-                            }
-                        incomingMessageChannel.trySend(WebSocketMessage.Binary(binaryPayload))
-                    }
-                    else -> {
-                        sendCloseFrame(1002u, "Invalid opcode for frame")
-                        return@launch
-                    }
-                }
-            }
-        } catch (e: SocketClosedException) {
-            // SocketClosedException is expected when the connection is closed
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
-            }
-        } catch (e: SocketException) {
-            // SocketException (connection reset, etc.) is expected when the connection is closed
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
-            }
-        } finally {
-            testProcessor.release()
-        }
     }
 
-    private suspend fun handleControlPacketFrameShouldContinue(frame: Frame): Boolean {
+    private suspend fun handleControlFrame(frame: ParsedFrame) {
+        // Note: FrameReader guarantees payload.position() == 0
         when (frame.opcode) {
             Opcode.Ping -> {
-                // Buffer is already in read mode from processor.readBuffer()
-                incomingMessageChannel.trySend(WebSocketMessage.Ping(frame.payloadData))
+                // Auto-respond with pong
+                val pongData =
+                    if (frame.payloadLength > 0) {
+                        frame.payload
+                    } else {
+                        EMPTY_BUFFER
+                    }
+                writePongFrame(pongData)
+                // Reset position after pong write so consumers can read the payload
+                if (frame.payloadLength > 0) {
+                    frame.payload.position(0)
+                }
+                incomingMessageChannel.trySend(WebSocketMessage.Ping(frame.payload))
             }
             Opcode.Pong -> {
-                // Buffer is already in read mode from processor.readBuffer()
-                incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payloadData))
+                incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payload))
             }
             Opcode.Close -> {
-                if (frame.payloadData.hasRemaining()) {
-                    // Buffer is already in read mode from processor.readBuffer()
-                    val code =
-                        if (frame.payloadLength == 1) {
-                            1002u
+                serverInitiatedClose.value = true
+                // Use pre-parsed close code and reason from FrameReader
+                val closeFrame = frame as ParsedFrame.ControlFrame.Close
+                val code = closeFrame.closeCode.code
+                val reason = closeFrame.closeReason
+
+                // Send close response if we haven't already
+                if (connectionState.value is ConnectionState.Connected) {
+                    // If our parser detected a protocol error (e.g., 1-byte close payload),
+                    // respond with the error code. Otherwise, respond with 1000 Normal Closure.
+                    val responseCode =
+                        if (closeFrame.closeCode == CloseCode.PROTOCOL_ERROR) {
+                            CloseCode.PROTOCOL_ERROR.code
                         } else {
-                            frame.payloadData.readUnsignedShort()
+                            CloseCode.NORMAL.code
                         }
-                    val reason =
-                        if (frame.payloadData.hasRemaining()) {
-                            try {
-                                frame.payloadData.readString(frame.payloadData.remaining())
-                            } catch (e: Throwable) {
-                                // Invalid UTF-8 in close reason - use empty string
-                                ""
-                            }
-                        } else {
-                            ""
-                        }
-                    incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
-                } else {
-                    incomingMessageChannel.trySend(WebSocketMessage.Close(0u, "No Close Message"))
+                    sendCloseFrame(responseCode, reason)
                 }
-                return false
-            }
-            else -> {} // Do nothing
-        }
-        return true
-    }
 
-    private suspend fun readAndProcessWebSocketFrame(processor: SuspendingStreamProcessor): Frame? {
-        try {
-            // Ensure we have at least 2 bytes for the header
-            while (processor.available() < 2) {
-                readIntoProcessor(processor)
+                incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
+                connectionStateFlow.value = ConnectionState.Disconnected(code = code, reason = reason)
             }
-
-            // Read first two bytes as a short for efficiency
-            val headerShort = processor.readShort()
-            val byte1Int = (headerShort.toInt() ushr 8) and 0xFF
-            val byte2Int = headerShort.toInt() and 0xFF
-
-            val fin = byte1Int and 0x80 != 0
-            val rsv1 = byte1Int and 0x40 != 0
-            val isRsv1Valid = !rsv1 || (rsv1 && enableCompression)
-            val rsv2 = byte1Int and 0x20 != 0
-            val rsv3 = byte1Int and 0x10 != 0
-            check(isRsv1Valid && !rsv2 && !rsv3) {
-                sendCloseFrame(1002u, "Invalid RSV")
-                "Invalid incoming RSV bits 0x${byte1Int.toString(16)}"
+            else -> {
+                // Unexpected control opcode
             }
-            val opcode = Opcode.fromInt(byte1Int)
-            if (!opcode.isValid()) {
-                sendCloseFrame(1002u, "Invalid OpCode $opcode")
-                return null
-            } else if (!fin && (opcode == Opcode.Ping || opcode == Opcode.Pong)) {
-                sendCloseFrame(1002u, "$opcode does not support fragmentation")
-                return null
-            }
-            val mask = byte2Int and 0x80 != 0
-            check(!mask) // websocket spec requires this to be a 0 or false
-            val payloadLength = byte2Int and 0x7F
-
-            val actualPayloadLength: ULong
-            if (payloadLength <= 125) {
-                actualPayloadLength = payloadLength.toULong()
-            } else if (payloadLength == 126) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(
-                        1002u,
-                        "Control frames are only allowed to have payload up to and including 125 octets",
-                    )
-                    return null
-                }
-                // Ensure we have 2 more bytes for extended length
-                while (processor.available() < 2) {
-                    readIntoProcessor(processor)
-                }
-                actualPayloadLength = processor.readShort().toUShort().toULong()
-            } else if (payloadLength == 127) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(
-                        1002u,
-                        "Control frames are only allowed to have payload up to and including 125 octets",
-                    )
-                    return null
-                }
-                // Ensure we have 8 more bytes for extended length
-                while (processor.available() < 8) {
-                    readIntoProcessor(processor)
-                }
-                actualPayloadLength = processor.readLong().toULong()
-            } else {
-                throw IllegalStateException("Invalid payload length $payloadLength")
-            }
-
-            val payload: ReadBuffer
-            if (actualPayloadLength == 0uL) {
-                payload = EMPTY_BUFFER
-            } else {
-                check(actualPayloadLength < Int.MAX_VALUE.toULong()) {
-                    "Payloads larger than ${Int.MAX_VALUE} bytes is currently unsupported"
-                }
-                val payloadSize = actualPayloadLength.toInt()
-                // Ensure we have enough data for the payload
-                while (processor.available() < payloadSize) {
-                    readIntoProcessor(processor)
-                }
-                payload = processor.readBuffer(payloadSize)
-            }
-
-            val frame = Frame(fin, rsv1, rsv2, rsv3, opcode, MaskingKey.NoMaskingKey, payload)
-            if (frame.opcode == Opcode.Ping) {
-                writeWebsocketFrame(Opcode.Pong, frame.payloadData, connectionOptions.writeTimeout)
-            } else if (frame.opcode == Opcode.Close) {
-                hasServerInitiatedClose = true
-                // Buffer is already in read mode
-                if (payloadLength == 1) {
-                    sendCloseFrame(1002u, "Invalid close payload length (1)")
-                } else if (payload.hasRemaining()) {
-                    var code = payload.readUnsignedShort()
-                    if (payloadLength >= 126) {
-                        sendCloseFrame(1002u, "Invalid close payload length")
-                    } else if (!isValidServerCloseCode(code)) {
-                        sendCloseFrame(1002u, "Invalid Server close code $code")
-                    } else if (payload.hasRemaining()) {
-                        val decoded =
-                            try {
-                                payload.readString(payload.remaining())
-                            } catch (t: Throwable) {
-                                code = 1002u
-                                "Invalid UTF-8 Message in payload"
-                            }
-                        sendCloseFrame(code, decoded)
-                    } else {
-                        sendCloseFrame(code)
-                    }
-                } else {
-                    sendCloseFrame()
-                }
-                close()
-            }
-            return frame
-        } catch (e: SocketClosedException) {
-            // SocketClosedException is expected when the server closes the connection
-            // after the close handshake or when we're already closing
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                // Clean close - don't treat as error
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
-            }
-            return null
-        } catch (e: SocketException) {
-            // SocketException (connection reset, etc.) is expected when the server closes
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
-            }
-            return null
-        } catch (e: Exception) {
-            connectionStateFlow.value = ConnectionState.Disconnected(e)
-            return null
         }
     }
 
-    // Legacy frame reading for tests that provide byte-by-byte callbacks
-    private suspend fun readAndProcessWebSocketFrameLegacy(
-        processor: SuspendingStreamProcessor,
-        readByte: suspend () -> Byte,
-        readBuffer: suspend (Int?) -> ReadBuffer,
-    ): Frame? {
-        try {
-            // Read header bytes via callback and feed to processor
-            while (processor.available() < 2) {
-                val byte = readByte()
-                val singleByte = pool.acquire(1)
-                singleByte.writeByte(byte)
-                singleByte.resetForRead()
-                processor.append(singleByte)
-            }
-
-            val headerShort = processor.readShort()
-            val byte1Int = (headerShort.toInt() ushr 8) and 0xFF
-            val byte2Int = headerShort.toInt() and 0xFF
-
-            val fin = byte1Int and 0x80 != 0
-            val rsv1 = byte1Int and 0x40 != 0
-            val isRsv1Valid = !rsv1 || (rsv1 && enableCompression)
-            val rsv2 = byte1Int and 0x20 != 0
-            val rsv3 = byte1Int and 0x10 != 0
-            check(isRsv1Valid && !rsv2 && !rsv3) {
-                sendCloseFrame(1002u, "Invalid RSV")
-                "Invalid incoming RSV bits 0x${byte1Int.toString(16)}"
-            }
-            val opcode = Opcode.fromInt(byte1Int)
-            if (!opcode.isValid()) {
-                sendCloseFrame(1002u, "Invalid OpCode $opcode")
-                return null
-            } else if (!fin && (opcode == Opcode.Ping || opcode == Opcode.Pong)) {
-                sendCloseFrame(1002u, "$opcode does not support fragmentation")
-                return null
-            }
-            val mask = byte2Int and 0x80 != 0
-            check(!mask) // websocket spec requires this to be 0 for server-to-client
-            val payloadLength = byte2Int and 0x7F
-
-            val actualPayloadLength: ULong
-            if (payloadLength <= 125) {
-                actualPayloadLength = payloadLength.toULong()
-            } else if (payloadLength == 126) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(1002u, "Control frames are only allowed to have payload up to and including 125 octets")
-                    return null
-                }
-                val extLenBuffer = readBuffer(UShort.SIZE_BYTES)
-                actualPayloadLength = extLenBuffer.readUnsignedShort().toULong()
-            } else if (payloadLength == 127) {
-                if (opcode == Opcode.Ping) {
-                    sendCloseFrame(1002u, "Control frames are only allowed to have payload up to and including 125 octets")
-                    return null
-                }
-                val extLenBuffer = readBuffer(ULong.SIZE_BYTES)
-                actualPayloadLength = extLenBuffer.readUnsignedLong()
-            } else {
-                throw IllegalStateException("Invalid payload length $payloadLength")
-            }
-
-            val payload: ReadBuffer
-            if (actualPayloadLength == 0uL) {
-                payload = EMPTY_BUFFER
-            } else {
-                check(actualPayloadLength < Int.MAX_VALUE.toULong()) {
-                    "Payloads larger than ${Int.MAX_VALUE} bytes is currently unsupported"
-                }
-                // readBuffer returns a buffer ready to read (pos=0, lim=size)
-                payload = readBuffer(actualPayloadLength.toInt())
-            }
-
-            val frame = Frame(fin, rsv1, rsv2, rsv3, opcode, MaskingKey.NoMaskingKey, payload)
-            if (frame.opcode == Opcode.Ping) {
-                writeWebsocketFrame(Opcode.Pong, frame.payloadData, connectionOptions.writeTimeout)
-            } else if (frame.opcode == Opcode.Close) {
-                hasServerInitiatedClose = true
-                // Buffer is already in read mode
-                if (payloadLength == 1) {
-                    sendCloseFrame(1002u, "Invalid close payload length (1)")
-                } else if (payload.hasRemaining()) {
-                    var code = payload.readUnsignedShort()
-                    if (payloadLength >= 126) {
-                        sendCloseFrame(1002u, "Invalid close payload length")
-                    } else if (!isValidServerCloseCode(code)) {
-                        sendCloseFrame(1002u, "Invalid Server close code $code")
-                    } else if (payload.hasRemaining()) {
-                        val decoded =
-                            try {
-                                payload.readString(payload.remaining())
-                            } catch (t: Throwable) {
-                                code = 1002u
-                                "Invalid UTF-8 Message in payload"
-                            }
-                        sendCloseFrame(code, decoded)
-                    } else {
-                        sendCloseFrame(code)
+    private suspend fun emitMessage(message: AssembledMessage) {
+        when (message.opcode) {
+            Opcode.Text -> {
+                val text =
+                    try {
+                        if (message.compressed && compressionEnabled) {
+                            decompressPayloadToString(message.payload)
+                        } else {
+                            message.payload.readString(message.payload.remaining(), Charset.UTF8)
+                        }
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught") e: Throwable,
+                    ) {
+                        // Use Throwable to catch JS TypeError from TextDecoder on invalid UTF-8
+                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
+                        message.payload.freeIfNeeded()
+                        return
                     }
-                } else {
-                    sendCloseFrame()
-                }
-                close()
+                // Free the compressed/raw payload after extracting text
+                message.payload.freeIfNeeded()
+                incomingMessageChannel.trySend(WebSocketMessage.Text(text))
             }
-            return frame
-        } catch (e: SocketClosedException) {
-            // SocketClosedException is expected when the server closes the connection
-            // after the close handshake or when we're already closing
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                // Clean close - don't treat as error
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
+            Opcode.Binary -> {
+                val payload =
+                    if (message.compressed && compressionEnabled) {
+                        val decompressed = decompressPayload(message.payload)
+                        // Free compressed payload after decompression (decompressed is a new buffer)
+                        if (decompressed !== message.payload) {
+                            message.payload.freeIfNeeded()
+                        }
+                        decompressed
+                    } else {
+                        message.payload
+                    }
+                incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
             }
-            return null
-        } catch (e: SocketException) {
-            // SocketException (connection reset, etc.) is expected when the server closes
-            if (!hasServerInitiatedClose && connectionState.value is ConnectionState.Connected) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
-            } else {
-                connectionStateFlow.value = ConnectionState.Disconnected(null)
+            else -> {
+                // Unexpected opcode for assembled message
             }
-            return null
-        } catch (e: Exception) {
-            connectionStateFlow.value = ConnectionState.Disconnected(e)
-            return null
         }
+    }
+
+    private fun decompressPayload(payload: ReadBuffer): ReadBuffer {
+        val decompressor = incomingDecompressor ?: return payload
+
+        return try {
+            // Stream decompress to single buffer - reduces peak memory
+            // Use Direct zone so output buffer has NativeMemoryAccess for re-compression
+            decompressToBufferSync(payload, decompressor, allocationZone)
+        } catch (e: Exception) {
+            payload // Fallback to original on error
+        } finally {
+            // Reset decompressor state for next message when server_no_context_takeover
+            // was negotiated. Without it, the server maintains its LZ77 sliding window
+            // across messages and the client must do the same for decompression.
+            if (serverNoContextTakeover) {
+                try {
+                    decompressor.reset()
+                } catch (_: Exception) {
+                    // Ignore reset failures
+                }
+            }
+        }
+    }
+
+    /**
+     * Decompresses payload directly to string with streaming UTF-8 handling.
+     * Reduces peak memory by not holding all decompressed chunks at once.
+     */
+    private fun decompressPayloadToString(payload: ReadBuffer): String {
+        val decompressor =
+            incomingDecompressor
+                ?: return payload.readString(payload.remaining(), Charset.UTF8)
+
+        return try {
+            // Stream decompress directly to string - reduces peak memory
+            decompressToStringSync(payload, decompressor, stringDecoder)
+        } catch (e: Throwable) {
+            throw e
+        } finally {
+            if (serverNoContextTakeover) {
+                try {
+                    decompressor.reset()
+                } catch (_: Exception) {
+                    // Ignore reset failures
+                }
+            }
+        }
+    }
+
+    override suspend fun write(string: String) {
+        val writer = frameWriter ?: return
+        val frameBuffer = writer.writeTextFrame(string)
+        writeToSocket(frameBuffer)
+        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
+    }
+
+    override suspend fun write(buffer: ReadBuffer) {
+        val writer = frameWriter ?: return
+        val frameBuffer = writer.writeBinaryFrame(buffer)
+        writeToSocket(frameBuffer)
+        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
+    }
+
+    override suspend fun ping(payloadData: ReadBuffer) {
+        val writer = frameWriter ?: return
+        val frameBuffer = writer.writePingFrame(payloadData)
+        writeToSocket(frameBuffer)
+        frameBuffer.freeIfNeeded()
+    }
+
+    private suspend fun writePongFrame(payloadData: ReadBuffer) {
+        val writer = frameWriter ?: return
+        val frameBuffer = writer.writePongFrame(payloadData)
+        writeToSocket(frameBuffer)
+        frameBuffer.freeIfNeeded()
     }
 
     private suspend fun sendCloseFrame(
-        statusCode: UShort = 1000u,
-        message: String? = null,
+        code: UShort,
+        reason: String = "",
     ) {
+        val writer = frameWriter ?: return
         try {
-            val utf8MessageBuffer = message?.toReadBuffer(Charset.UTF8) ?: EMPTY_BUFFER
-            val closeBuffer = pool.acquire(UShort.SIZE_BYTES + utf8MessageBuffer.limit())
-            try {
-                closeBuffer.writeUShort(statusCode)
-                closeBuffer.write(utf8MessageBuffer)
-                closeBuffer.resetForRead()
-                writeWebsocketFrame(Opcode.Close, closeBuffer, connectionOptions.writeTimeout)
-            } finally {
-                pool.release(closeBuffer)
+            val frameBuffer = writer.writeCloseFrame(code, reason)
+            writeToSocket(frameBuffer)
+            frameBuffer.freeIfNeeded()
+        } catch (e: Exception) {
+            // Ignore errors when sending close
+        }
+    }
+
+    private suspend fun writeToSocket(buffer: ReadBuffer) {
+        try {
+            // Note: buffer is already in read mode from FrameWriter, don't call resetForRead()
+            while (buffer.hasRemaining()) {
+                socket.write(buffer, connectionOptions.writeTimeout)
             }
-        } finally {
-            cleanupResources()
+        } catch (e: Exception) {
+            connectionStateFlow.value = ConnectionState.Disconnected(e)
         }
     }
 
     override suspend fun close() {
-        if (!hasServerInitiatedClose) {
-            sendCloseFrame()
+        if (connectionState.value is ConnectionState.Connected && !serverInitiatedClose.value) {
+            sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
         }
-    }
-
-    suspend fun cleanupResources() {
-        outgoingMessages.close()
-        socket.close()
+        // Clear frameWriter to prevent writes after close (avoids infinite loop
+        // when socket.write returns -1 on a closed socket)
+        frameWriter = null
+        // Close the incoming message channel so collectors complete
+        incomingMessageChannel.close()
+        // Clean up compression resources
         outgoingCompressor?.close()
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-    }
-
-    private fun isValidServerCloseCode(code: UShort): Boolean =
-        code in 1000u..1003u ||
-            code in 1007u..1015u ||
-            code in 3000u..3999u ||
-            code in 4000u..4999u
-
-    companion object {
-        private const val HTTP_COMPRESSION_HEADER =
-            "Sec-WebSocket-Extensions: permessage-deflate" +
-                "; client_no_context_takeover; server_no_context_takeover\r\n"
-        private val countMap = mutableMapOf<String, Int>()
-
-        private fun getCountForConnection(connectionOptions: WebSocketConnectionOptions): Int {
-            val key = "${connectionOptions.name}:${connectionOptions.port}"
-            val value = countMap[key]
-            return if (value == null) {
-                countMap[key] = 1
-                1
+        // Cancel job FIRST - this triggers CancellationException in read loop
+        // which is properly handled via suspendCancellableCoroutine + invokeOnCancellation
+        clientJob.cancel()
+        // Then close socket (causes SocketClosedException if read is still in progress)
+        try {
+            socket.close()
+        } catch (_: Exception) {
+            // Ignore close errors
+        }
+        // Wait for cleanup with increased timeout for reliable close handshake
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(1000) {
+                clientJob.join()
+            }
+        } catch (_: Exception) {
+            // Ignore join errors
+        }
+        // Free all pooled NativeBuffers (no-op on JVM/JS)
+        pool.clear()
+        // Atomic state update to avoid race with read loop
+        connectionStateFlow.update { current ->
+            if (current !is ConnectionState.Disconnected) {
+                ConnectionState.Disconnected()
             } else {
-                val newCount = value + 1
-                countMap[key] = newCount
-                newCount
+                current
             }
         }
     }

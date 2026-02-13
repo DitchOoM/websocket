@@ -4,6 +4,8 @@ import agentName
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
@@ -162,21 +164,21 @@ class ProfilingTest {
         size: Int,
         iterations: Int,
     ) {
+        val pool = BufferPool(allocationZone = AllocationZone.Heap)
+        val writer = FrameWriter(clientMode = true, pool = pool)
         val payload = PlatformBuffer.allocate(size)
         repeat(size) { payload.writeByte(0x42) }
         payload.position(0)
 
         // Warmup
         repeat(10) {
-            val frame = Frame(true, Opcode.Binary, MaskingKey.FourByteMaskingKey(), payload)
-            frame.toBuffer()
+            writer.writeBinaryFrame(payload)
             payload.position(0)
         }
 
         val mark = TimeSource.Monotonic.markNow()
         repeat(iterations) {
-            val frame = Frame(true, Opcode.Binary, MaskingKey.FourByteMaskingKey(), payload)
-            frame.toBuffer()
+            writer.writeBinaryFrame(payload)
             payload.position(0)
         }
         val elapsed = mark.elapsedNow()
