@@ -17,6 +17,7 @@ import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.socket.ClientSocket
+import com.ditchoom.socket.ClientToServerSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import com.ditchoom.socket.SocketOptions
@@ -63,6 +64,7 @@ class DefaultWebSocketClient(
     parentScope: CoroutineScope?,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
+    internal val socketOverride: ClientToServerSocket? = null,
 ) : WebSocketClient {
     // Create a dedicated Job for this client - NOT a child of parent scope.
     // This ensures the websocket can be cancelled without blocking parent scope completion.
@@ -78,7 +80,7 @@ class DefaultWebSocketClient(
                 ),
         )
 
-    private val socket = ClientSocket.allocate(allocationZone)
+    private val socket = socketOverride ?: ClientSocket.allocate(allocationZone)
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
