@@ -176,10 +176,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
         this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
     }
-    // Exclude handshake tests from browser - they use Node.js crypto module
-    // Browser WebSocket handles handshake internally via native API
+    // Exclude tests from browser that require Node.js APIs or raw socket access
+    // Browser WebSocket handles handshake/compression internally via native API
     if (name.contains("Browser", ignoreCase = true)) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
     }
 }
 
