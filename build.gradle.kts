@@ -26,7 +26,6 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 println("Version: ${project.version}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub")
 
 repositories {
-    mavenLocal() // For local buffer library testing
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -72,8 +71,7 @@ kotlin {
     // Linux targets (only on Linux host)
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
-        // TODO: re-enable when socket library publishes linuxArm64 to mavenLocal
-        // linuxArm64()
+        linuxArm64()
     }
 
     applyDefaultHierarchyTemplate()
@@ -141,6 +139,9 @@ val runIntegrationTests = project.hasProperty("integrationTests")
 // Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
     failFast = true
+    testLogging {
+        showStandardStreams = true
+    }
     // Always exclude profiling tests from CI - run manually when needed
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }

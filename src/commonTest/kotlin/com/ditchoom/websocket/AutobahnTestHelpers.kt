@@ -16,6 +16,7 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * Await connection, failing fast if the connection is refused or the server is down.
@@ -84,6 +85,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             compressionOptions = compressionOptions,
         )
     val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
+    val mark = TimeSource.Monotonic.markNow()
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
@@ -92,6 +94,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
         )
     ws.connect()
     ws.awaitConnected()
+    val connectTime = mark.elapsedNow()
     try {
         ws.incomingMessages.filter { it is WebSocketMessage.Text }.take(count).collect {
             val m = it as WebSocketMessage.Text
@@ -101,6 +104,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
+    val echoTime = mark.elapsedNow() - connectTime
     // Give the read loop a chance to detect any remaining protocol errors
     // before explicitly closing. This allows proper close codes to be sent.
     kotlinx.coroutines.delay(100)
@@ -109,6 +113,10 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     } catch (_: Exception) {
         // Already closed
     }
+    val totalTime = mark.elapsedNow()
+    val closeTime = totalTime - connectTime - echoTime
+    val avgMsg = if (count > 0) echoTime / count else echoTime
+    println("AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us")
 }
 
 internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
@@ -126,6 +134,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             compressionOptions = compressionOptions,
         )
     val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
+    val mark = TimeSource.Monotonic.markNow()
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
@@ -134,6 +143,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         )
     ws.connect()
     ws.awaitConnected()
+    val connectTime = mark.elapsedNow()
     try {
         ws.incomingMessages.filter { it is WebSocketMessage.Binary }.take(count).collect {
             val m = it as WebSocketMessage.Binary
@@ -144,6 +154,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
+    val echoTime = mark.elapsedNow() - connectTime
     // Give the read loop a chance to process the server's close frame naturally.
     // Without this delay, ws.close() cancels the read loop while an io_uring recv
     // may still be in-flight, causing the buffer to be freed while the kernel is
@@ -154,6 +165,10 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     } catch (_: Exception) {
         // Already closed
     }
+    val totalTime = mark.elapsedNow()
+    val closeTime = totalTime - connectTime - echoTime
+    val avgMsg = if (count > 0) echoTime / count else echoTime
+    println("AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us")
 }
 
 internal suspend fun CoroutineScope.echoMessageWhenFoundText(

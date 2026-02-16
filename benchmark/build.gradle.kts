@@ -7,7 +7,6 @@ plugins {
 }
 
 repositories {
-    mavenLocal() // For local buffer library testing
     mavenCentral()
     google()
 }
@@ -36,6 +35,7 @@ kotlin {
 
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
+        linuxArm64()
     }
 
     sourceSets {
@@ -60,6 +60,7 @@ benchmark {
         }
         if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
             register("linuxX64")
+            register("linuxArm64")
         }
     }
     configurations {
