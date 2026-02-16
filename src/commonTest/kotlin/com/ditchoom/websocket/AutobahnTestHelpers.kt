@@ -116,7 +116,9 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     val totalTime = mark.elapsedNow()
     val closeTime = totalTime - connectTime - echoTime
     val avgMsg = if (count > 0) echoTime / count else echoTime
-    println("AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us")
+    println(
+        "AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
+    )
 }
 
 internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
@@ -168,7 +170,9 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     val totalTime = mark.elapsedNow()
     val closeTime = totalTime - connectTime - echoTime
     val avgMsg = if (count > 0) echoTime / count else echoTime
-    println("AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us")
+    println(
+        "AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
+    )
 }
 
 internal suspend fun CoroutineScope.echoMessageWhenFoundText(

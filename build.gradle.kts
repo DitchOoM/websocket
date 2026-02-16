@@ -7,6 +7,7 @@ import java.util.Base64
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.dokka)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
     signing
@@ -283,6 +284,49 @@ ktlint {
     }
 }
 
+dokka {
+    dokkaSourceSets.configureEach {
+        externalDocumentationLinks.register("kotlin-stdlib") {
+            url("https://kotlinlang.org/api/latest/jvm/stdlib/")
+        }
+        externalDocumentationLinks.register("kotlinx-coroutines") {
+            url("https://kotlinlang.org/api/kotlinx.coroutines/")
+        }
+        reportUndocumented.set(false)
+    }
+}
+
+tasks.register<Copy>("copyDokkaToDocusaurus") {
+    dependsOn("dokkaGenerateHtml")
+    from(layout.buildDirectory.dir("dokka/html")) { into("websocket") }
+    into(layout.projectDirectory.dir("docs/static/api"))
+}
+
+afterEvaluate {
+    // Split publishing metadata fix: When publishing from split CI jobs (Linux + Apple),
+    // each host only registers its own targets. The root module metadata (.module file)
+    // generated on Linux would be missing Apple variants, breaking KMP resolution for
+    // Apple consumers. Fix: on Linux, inject Apple variant references into the generated
+    // .module file. On Apple, skip the root metadata publication (Linux publishes it).
+    if (isRunningOnGithub) {
+        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsLinux) {
+            tasks.named("generateMetadataFileForKotlinMultiplatformPublication") {
+                doLast {
+                    val moduleFile = outputs.files.singleFile
+                    injectAppleVariantsIntoModuleMetadata(moduleFile, project.version.toString(), "websocket")
+                }
+            }
+        }
+        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
+            // Skip root metadata publication — published from Linux with all variant references
+            tasks
+                .matching {
+                    it.name.startsWith("publishKotlinMultiplatformPublication")
+                }.configureEach { enabled = false }
+        }
+    }
+}
+
 tasks.register("nextVersion") {
     println(getNextVersion(false))
 }
@@ -451,4 +495,78 @@ tasks.register("integrationTest") {
     dependsOn(echoWebsocket)
     dependsOn(autobahnContainer)
     finalizedBy(validateAutobahnResults)
+}
+
+/**
+ * Split publishing metadata fix: inject Apple variant references into the Gradle Module Metadata
+ * (.module) file. When publishing from split CI jobs, the Linux host generates the root metadata
+ * but only has Linux/JVM/JS/Android targets registered. Apple variants must be injected so
+ * that KMP consumers on Apple platforms can resolve the dependency.
+ */
+@Suppress("UNCHECKED_CAST")
+fun injectAppleVariantsIntoModuleMetadata(
+    moduleFile: File,
+    version: String,
+    artifactId: String,
+) {
+    val appleTargets =
+        listOf(
+            "iosArm64" to "ios_arm64",
+            "iosSimulatorArm64" to "ios_simulator_arm64",
+            "iosX64" to "ios_x64",
+            "macosArm64" to "macos_arm64",
+            "macosX64" to "macos_x64",
+            "tvosArm64" to "tvos_arm64",
+            "tvosSimulatorArm64" to "tvos_simulator_arm64",
+            "tvosX64" to "tvos_x64",
+            "watchosArm64" to "watchos_arm64",
+            "watchosSimulatorArm64" to "watchos_simulator_arm64",
+            "watchosX64" to "watchos_x64",
+        )
+
+    val json = groovy.json.JsonSlurper().parseText(moduleFile.readText()) as MutableMap<String, Any>
+    val variants = json["variants"] as MutableList<Any>
+
+    appleTargets.forEach { (gradleName, konanName) ->
+        val moduleName = "$artifactId-${gradleName.lowercase()}"
+        val availableAt =
+            mapOf(
+                "url" to "../../$moduleName/$version/$moduleName-$version.module",
+                "group" to "com.ditchoom",
+                "module" to moduleName,
+                "version" to version,
+            )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}ApiElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "library",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-api",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}SourcesElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "documentation",
+                        "org.gradle.dependency.bundling" to "external",
+                        "org.gradle.docstype" to "sources",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-runtime",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+    }
+
+    moduleFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)))
 }
