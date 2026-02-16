@@ -7,6 +7,7 @@ plugins {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     google()
 }
@@ -24,9 +25,6 @@ kotlin {
     jvm {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
-    js {
-        nodejs()
-    }
 
     if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
         macosArm64()
@@ -42,6 +40,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(libs.kotlinx.benchmark.runtime)
+                implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.buffer)
                 implementation(libs.buffer.compression)
                 implementation(project(":"))
@@ -53,7 +52,6 @@ kotlin {
 benchmark {
     targets {
         register("jvm")
-        register("js")
         if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
             register("macosArm64")
             register("macosX64")

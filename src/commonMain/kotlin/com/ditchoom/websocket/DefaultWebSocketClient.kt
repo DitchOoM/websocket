@@ -16,11 +16,12 @@ import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.pool.DEFAULT_NETWORK_BUFFER_SIZE
 import com.ditchoom.buffer.pool.ThreadingMode
+import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
+import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.ClientToServerSocket
-import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.allocate
@@ -39,16 +40,17 @@ import com.ditchoom.websocket.handshake.ValidationResult
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 
 /**
  * Modular WebSocket client implementation using composable components.
@@ -77,6 +79,7 @@ class DefaultWebSocketClient(
             defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
             allocationZone = allocationZone,
         )
+
     // Create a dedicated Job for this client - NOT a child of parent scope.
     // This ensures the websocket can be cancelled without blocking parent scope completion.
     // The websocket runs independently; callers must explicitly call close().
@@ -95,8 +98,16 @@ class DefaultWebSocketClient(
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
+    // Main message channel (all types)
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
     override val incomingMessages = incomingMessageChannel.receiveAsFlow()
+
+    // Typed message channels — avoid filterIsInstance overhead for typed consumers
+    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
+    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
+
+    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
+    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
 
     // Components initialized during connect()
     // Note: These are set once during connect() and cleared during close().
@@ -171,9 +182,33 @@ class DefaultWebSocketClient(
             val requestBuffer = handshakeRequest.toBuffer()
             socket.write(requestBuffer, connectionOptions.writeTimeout)
 
+            // Build auto-filling stream processor.
+            // This replaces the manual readIntoProcessor + ensureAvailable pattern.
+            // Peek/read operations automatically read from the socket when more data is needed.
+            val autoFillingStream =
+                StreamProcessor
+                    .builder(pool)
+                    .buildSuspendingWithAutoFill { stream ->
+                        val buffer = pool.acquire(readBufferSize)
+                        try {
+                            val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
+                            if (bytesRead <= 0) {
+                                buffer.freeIfNeeded()
+                                throw EndOfStreamException()
+                            }
+                            buffer.setLimit(buffer.position())
+                            buffer.position(0)
+                            stream.append(buffer)
+                        } catch (e: EndOfStreamException) {
+                            throw e
+                        } catch (e: Exception) {
+                            buffer.freeIfNeeded()
+                            throw e
+                        }
+                    }
+
             // Read and parse handshake response
-            val streamProcessor = StreamProcessor.builder(pool).buildSuspending()
-            val response = readHandshakeResponse(streamProcessor)
+            val response = readHandshakeResponse(autoFillingStream)
 
             // Validate response
             val offeredExtensions =
@@ -221,11 +256,11 @@ class DefaultWebSocketClient(
 
                     connectionStateFlow.value = ConnectionState.Connected
 
-                    // Start read loop
-                    startReadLoop(streamProcessor)
+                    // Start read loop with auto-filling processor
+                    startReadLoop(autoFillingStream)
                 }
                 is ValidationResult.Failure -> {
-                    streamProcessor.release()
+                    autoFillingStream.release()
                     throw HandshakeException(validationResult.message)
                 }
             }
@@ -261,15 +296,17 @@ class DefaultWebSocketClient(
     }
 
     private suspend fun readHandshakeResponse(
-        processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor,
+        processor: AutoFillingSuspendingStreamProcessor,
     ): com.ditchoom.websocket.handshake.HandshakeResponse {
-        // Read until we have complete HTTP headers
+        // Read until we have complete HTTP headers.
+        // The auto-filling processor reads from the socket as needed.
         while (true) {
-            readIntoProcessor(processor)
-
-            // Try to parse - returns null if incomplete
             val available = processor.available()
-            if (available < 12) continue // Minimum: "HTTP/1.1 101"
+            if (available < 12) {
+                // Auto-fill to get at least 12 bytes (minimum "HTTP/1.1 101")
+                processor.peekByte(11)
+                continue
+            }
 
             // Read available data for parsing
             val buffer = pool.acquire(available)
@@ -281,7 +318,9 @@ class DefaultWebSocketClient(
             // Find where headers end (position after \r\n\r\n)
             val headerEnd = HandshakeResponseParser.findHeaderEnd(buffer)
             if (headerEnd < 0) {
-                continue // Need more data - headers not complete
+                // Need more data — auto-fill at least 1 more byte
+                processor.peekByte(available)
+                continue
             }
 
             val response =
@@ -289,7 +328,8 @@ class DefaultWebSocketClient(
                     HandshakeResponseParser.parse(buffer)
                 } catch (e: HandshakeException) {
                     if (e.message?.contains("Incomplete") == true) {
-                        continue // Need more data
+                        processor.peekByte(available)
+                        continue
                     }
                     throw e
                 }
@@ -300,72 +340,42 @@ class DefaultWebSocketClient(
         }
     }
 
-    /**
-     * Reads data from socket into the processor.
-     * Uses zero-copy path when available: socket writes directly into our buffer.
-     * Socket cancellation is handled via suspendCancellableCoroutine + invokeOnCancellation
-     * in the underlying socket implementation.
-     */
-    private suspend fun readIntoProcessor(processor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
-        // Allocate buffer that we own (not from socket's internal pool).
-        // This buffer will be owned by the processor after append.
-        val buffer = pool.acquire(readBufferSize)
-
-        try {
-            // Zero-copy: socket writes directly into our buffer
-            val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
-
-            if (bytesRead > 0) {
-                // Buffer was written at position 0..bytesRead, position is now at bytesRead
-                // Set limit to bytesRead and position to 0 for reading
-                buffer.setLimit(buffer.position())
-                buffer.position(0)
-                processor.append(buffer)
-            } else {
-                // EOF or no data - free the unused buffer (Linux NativeBuffer leak fix)
-                buffer.freeIfNeeded()
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            // Do NOT free the buffer on cancellation. The kernel io_uring recv operation
-            // may still be writing to this buffer — freeing it causes use-after-free heap
-            // corruption. The buffer (64KB) is intentionally leaked on cancellation.
-            // socket.close() will close the fd, causing the kernel to cancel the recv,
-            // but we cannot safely free the buffer until that completes.
-            throw e
-        } catch (e: Exception) {
-            // Socket error - free the unused buffer (Linux NativeBuffer leak fix)
-            buffer.freeIfNeeded()
-            throw e
-        }
-    }
-
     companion object {
         /** Default read buffer size (64KB) - matches typical socket receive buffer */
         const val DEFAULT_READ_BUFFER_SIZE = 65536
     }
 
-    private fun startReadLoop(streamProcessor: com.ditchoom.buffer.stream.SuspendingStreamProcessor) {
+    /**
+     * Reads the next complete frame, using auto-fill to ensure data availability.
+     *
+     * FrameReader.readFrame() checks `available()` (synchronous, no auto-fill) before
+     * parsing. If the full frame isn't available yet, it returns null. We handle this
+     * by auto-filling one more chunk and retrying until a complete frame is read.
+     */
+    private suspend fun readNextFrame(
+        frameReader: FrameReader,
+        stream: AutoFillingSuspendingStreamProcessor,
+    ): ParsedFrame? {
+        while (coroutineContext.isActive) {
+            if (stream.available() < 2) {
+                stream.peekByte(0) // auto-fill at least 1 byte
+            }
+            val frame = frameReader.readFrame()
+            if (frame != null) return frame
+            // Not enough data for complete frame — auto-fill one more chunk
+            stream.peekByte(stream.available())
+        }
+        return null
+    }
+
+    private fun startReadLoop(autoFillingStream: AutoFillingSuspendingStreamProcessor) {
         scope.launch {
-            val frameReader = FrameReader(streamProcessor)
+            val frameReader = FrameReader(autoFillingStream)
             val messageAssembler = MessageAssembler(compressionEnabled)
 
             try {
                 readLoop@ while (isOpen() && isActive) {
-                    // Ensure minimum data for frame header
-                    while (streamProcessor.available() < 2 && isActive) {
-                        readIntoProcessor(streamProcessor)
-                    }
-
-                    if (!isActive) break@readLoop
-
-                    // Try to read a frame
-                    val frame = frameReader.readFrame()
-
-                    if (frame == null) {
-                        // Need more data
-                        readIntoProcessor(streamProcessor)
-                        continue@readLoop
-                    }
+                    val frame = readNextFrame(frameReader, autoFillingStream) ?: break@readLoop
 
                     // Process frame through assembler
                     when (val result = messageAssembler.addFrame(frame)) {
@@ -406,8 +416,8 @@ class DefaultWebSocketClient(
                         current
                     }
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // Clean cancellation - update state atomically
+            } catch (e: EndOfStreamException) {
+                // Clean disconnection — socket closed or read returned 0 bytes
                 connectionStateFlow.update { current ->
                     if (current !is ConnectionState.Disconnected) {
                         ConnectionState.Disconnected()
@@ -415,39 +425,25 @@ class DefaultWebSocketClient(
                         current
                     }
                 }
-            } catch (e: SocketClosedException) {
-                // Expected on close - update state atomically
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
                 connectionStateFlow.update { current ->
                     when {
                         current is ConnectionState.Disconnected -> current
-                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
+                        // Cancellation is a clean shutdown, not an error
+                        e is kotlinx.coroutines.CancellationException -> ConnectionState.Disconnected()
+                        // Socket errors: only report as error for unexpected disconnects
+                        e is SocketException && (!serverInitiatedClose.value && current is ConnectionState.Connected) ->
                             ConnectionState.Disconnected(e)
-                        else -> ConnectionState.Disconnected()
-                    }
-                }
-            } catch (e: SocketException) {
-                // Socket error - update state atomically
-                connectionStateFlow.update { current ->
-                    when {
-                        current is ConnectionState.Disconnected -> current
-                        !serverInitiatedClose.value && current is ConnectionState.Connected ->
-                            ConnectionState.Disconnected(e)
-                        else -> ConnectionState.Disconnected()
-                    }
-                }
-            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                // Catch-all for unexpected exceptions (e.g., ClosedReceiveChannelException
-                // when socket channel closes during read). Prevents uncaught exceptions from
-                // terminating the K/N process.
-                connectionStateFlow.update { current ->
-                    if (current !is ConnectionState.Disconnected) {
-                        ConnectionState.Disconnected(e)
-                    } else {
-                        current
+                        e is SocketException -> ConnectionState.Disconnected()
+                        // Catch-all for unexpected exceptions (e.g., ClosedReceiveChannelException
+                        // when socket channel closes during read)
+                        else -> ConnectionState.Disconnected(e)
                     }
                 }
             } finally {
-                streamProcessor.release()
+                autoFillingStream.release()
             }
         }
     }
@@ -523,6 +519,7 @@ class DefaultWebSocketClient(
                 // Free the compressed/raw payload after extracting text
                 message.payload.freeIfNeeded()
                 incomingMessageChannel.trySend(WebSocketMessage.Text(text))
+                incomingTextChannel.trySend(text)
             }
             Opcode.Binary -> {
                 val payload =
@@ -537,6 +534,7 @@ class DefaultWebSocketClient(
                         message.payload
                     }
                 incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
+                incomingBinaryChannel.trySend(payload)
             }
             else -> {
                 // Unexpected opcode for assembled message
@@ -652,8 +650,10 @@ class DefaultWebSocketClient(
         // Clear frameWriter to prevent writes after close (avoids infinite loop
         // when socket.write returns -1 on a closed socket)
         frameWriter = null
-        // Close the incoming message channel so collectors complete
+        // Close the incoming message channels so collectors complete
         incomingMessageChannel.close()
+        incomingTextChannel.close()
+        incomingBinaryChannel.close()
         // Clean up compression resources
         outgoingCompressor?.close()
         outgoingCompressor = null

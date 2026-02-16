@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -59,6 +60,12 @@ class BrowserWebSocketController(
     override val connectionState = connectionStateFlow.asStateFlow()
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
     override val incomingMessages = incomingMessageChannel.receiveAsFlow()
+
+    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
+    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
+
+    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
+    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
     private val useSharedMemory = allocationZone == AllocationZone.SharedMemory
@@ -115,11 +122,13 @@ class BrowserWebSocketController(
                         }
                     scope.launch {
                         incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
+                        incomingBinaryChannel.trySend(buffer)
                     }
                 }
                 is String ->
                     scope.launch {
                         incomingMessageChannel.trySend(WebSocketMessage.Text(data))
+                        incomingTextChannel.trySend(data)
                     }
                 else -> throw IllegalArgumentException("Received invalid message type!")
             }
@@ -174,6 +183,9 @@ class BrowserWebSocketController(
     }
 
     private fun closeInternal() {
+        incomingMessageChannel.close()
+        incomingTextChannel.close()
+        incomingBinaryChannel.close()
         webSocket.close()
     }
 

@@ -28,4 +28,10 @@ interface WebSocketClient : SuspendCloseable {
 
     val connectionState: StateFlow<ConnectionState>
     val incomingMessages: Flow<WebSocketMessage>
+
+    /** Text messages only — avoids filterIsInstance overhead for typed consumers. */
+    val incomingTextMessages: Flow<String>
+
+    /** Binary messages only — avoids filterIsInstance overhead for typed consumers. */
+    val incomingBinaryMessages: Flow<ReadBuffer>
 }
