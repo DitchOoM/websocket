@@ -41,7 +41,7 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, AllocationZone.Heap)
+            val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Heap)
             ws.connect()
             ws.awaitConnected()
 
@@ -92,7 +92,7 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = WebSocketClient.allocate(connectionOptions, AllocationZone.Direct)
+                val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Direct)
                 ws.connect()
                 ws.awaitConnected()
                 times.add(mark.elapsedNow().inWholeMilliseconds)
@@ -210,7 +210,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = WebSocketClient.allocate(connectionOptions, zone)
+        val ws = WebSocketClient.allocate(connectionOptions, allocationZone = zone)
         ws.connect()
         ws.awaitConnected()
         val connectTime = connectMark.elapsedNow()

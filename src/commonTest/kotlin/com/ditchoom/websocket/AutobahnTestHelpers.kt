@@ -45,8 +45,8 @@ internal suspend fun CoroutineScope.prepareConnection(
     val websocket =
         WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.Direct,
-            this + CoroutineName(case.toString()),
+            parentScope = this + CoroutineName(case.toString()),
+            allocationZone = AllocationZone.Direct,
         )
     websocket.connect()
     websocket.awaitConnected()
@@ -89,8 +89,8 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
-            zone,
-            this,
+            parentScope = this,
+            allocationZone = zone,
         )
     ws.connect()
     ws.awaitConnected()
@@ -140,8 +140,8 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
-            zone,
-            this + CoroutineName(case.toString()),
+            parentScope = this + CoroutineName(case.toString()),
+            allocationZone = zone,
         )
     ws.connect()
     ws.awaitConnected()
@@ -189,8 +189,8 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
-            AllocationZone.Direct,
-            this + CoroutineName(case.toString()),
+            parentScope = this + CoroutineName(case.toString()),
+            allocationZone = AllocationZone.Direct,
         )
     ws.connect()
     ws.awaitConnected()

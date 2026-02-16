@@ -8,6 +8,7 @@ import com.ditchoom.socket.ClientToServerSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketOptions
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration
 
@@ -58,8 +59,12 @@ class MockClientToServerSocket : ClientToServerSocket {
     override suspend fun read(timeout: Duration): ReadBuffer {
         if (!open) throw SocketClosedException("Mock socket is closed")
         val result =
-            withTimeout(timeout) {
-                readQueue.receive()
+            try {
+                withTimeout(timeout) {
+                    readQueue.receive()
+                }
+            } catch (e: ClosedReceiveChannelException) {
+                throw SocketClosedException("Mock socket channel closed")
             }
         return result.getOrThrow()
     }

@@ -1,7 +1,6 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import kotlinx.coroutines.async
@@ -22,8 +21,6 @@ import kotlin.time.Duration.Companion.seconds
  * without any network I/O by injecting a [MockClientToServerSocket].
  */
 class DefaultWebSocketClientMockTest {
-    private val pool = BufferPool(allocationZone = AllocationZone.Heap)
-
     private val defaultOptions =
         WebSocketConnectionOptions(
             name = "localhost",
@@ -38,7 +35,6 @@ class DefaultWebSocketClientMockTest {
     ): DefaultWebSocketClient =
         DefaultWebSocketClient(
             connectionOptions = options,
-            pool = pool,
             parentScope = null,
             allocationZone = AllocationZone.Heap,
             socketOverride = mockSocket,
@@ -153,6 +149,7 @@ class DefaultWebSocketClientMockTest {
 
             val state = client.connectionState.value
             assertIs<ConnectionState.Disconnected>(state)
+            client.close()
         }
 
     @Test
@@ -178,6 +175,7 @@ class DefaultWebSocketClientMockTest {
             assertIs<ConnectionState.Disconnected>(state)
             assertNotNull(state.t)
             assertIs<SocketException>(state.t)
+            client.close()
         }
 
     @Test
@@ -202,6 +200,7 @@ class DefaultWebSocketClientMockTest {
             }
 
             assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            client.close()
         }
 
     @Test
@@ -231,6 +230,7 @@ class DefaultWebSocketClientMockTest {
 
             assertEquals(ConnectionState.Connected, client.connectionState.value)
             assertTrue(mockSocket.openCalled)
+            client.close()
         }
 
     @Test
@@ -250,6 +250,7 @@ class DefaultWebSocketClientMockTest {
 
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello, WebSocket!", msg.value)
+            client.close()
         }
 
     @Test
@@ -273,6 +274,7 @@ class DefaultWebSocketClientMockTest {
                 received[i] = msg.value.readByte()
             }
             assertTrue(testData.contentEquals(received))
+            client.close()
         }
 
     @Test
@@ -311,6 +313,7 @@ class DefaultWebSocketClientMockTest {
                 val unmasked = (maskedByte.toInt() xor maskKey[i % 4].toInt()).toByte()
                 assertEquals(expectedPayload[i], unmasked)
             }
+            client.close()
         }
 
     @Test
@@ -341,6 +344,7 @@ class DefaultWebSocketClientMockTest {
                 }
             }
             assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            client.close()
         }
 
     @Test
@@ -409,6 +413,7 @@ class DefaultWebSocketClientMockTest {
                 val unmasked = (maskedByte.toInt() xor maskKey[i % 4].toInt()).toByte()
                 assertEquals(pingPayload[i], unmasked, "Pong payload byte $i mismatch")
             }
+            client.close()
         }
 
     @Test
@@ -425,6 +430,7 @@ class DefaultWebSocketClientMockTest {
                     client.incomingMessages.first()
                 }
             assertIs<WebSocketMessage.Pong>(msg)
+            client.close()
         }
 
     // ========================================================================

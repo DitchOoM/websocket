@@ -14,6 +14,8 @@ import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.DEFAULT_NETWORK_BUFFER_SIZE
+import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.socket.ClientSocket
@@ -42,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
@@ -60,12 +63,20 @@ import kotlinx.coroutines.withTimeout
  */
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val pool: BufferPool,
     parentScope: CoroutineScope?,
     private val allocationZone: AllocationZone = AllocationZone.Direct,
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
     internal val socketOverride: ClientToServerSocket? = null,
 ) : WebSocketClient {
+    // Lock-free pool for thread-safe buffer reuse across read loop and caller coroutines.
+    // Must be multi-threaded: the read loop runs on Dispatchers.Default while
+    // write()/close() are called from the caller's coroutine context.
+    private val pool =
+        BufferPool(
+            threadingMode = ThreadingMode.MultiThreaded,
+            defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
+            allocationZone = allocationZone,
+        )
     // Create a dedicated Job for this client - NOT a child of parent scope.
     // This ensures the websocket can be cancelled without blocking parent scope completion.
     // The websocket runs independently; callers must explicitly call close().
@@ -386,6 +397,15 @@ class DefaultWebSocketClient(
                         }
                     }
                 }
+                // Read loop exited normally (isOpen() returned false or !isActive).
+                // Ensure state transitions to Disconnected so waiters don't hang.
+                connectionStateFlow.update { current ->
+                    if (current !is ConnectionState.Disconnected) {
+                        ConnectionState.Disconnected()
+                    } else {
+                        current
+                    }
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Clean cancellation - update state atomically
                 connectionStateFlow.update { current ->
@@ -413,6 +433,17 @@ class DefaultWebSocketClient(
                         !serverInitiatedClose.value && current is ConnectionState.Connected ->
                             ConnectionState.Disconnected(e)
                         else -> ConnectionState.Disconnected()
+                    }
+                }
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                // Catch-all for unexpected exceptions (e.g., ClosedReceiveChannelException
+                // when socket channel closes during read). Prevents uncaught exceptions from
+                // terminating the K/N process.
+                connectionStateFlow.update { current ->
+                    if (current !is ConnectionState.Disconnected) {
+                        ConnectionState.Disconnected(e)
+                    } else {
+                        current
                     }
                 }
             } finally {
@@ -628,22 +659,20 @@ class DefaultWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Cancel job FIRST - this triggers CancellationException in read loop
-        // which is properly handled via suspendCancellableCoroutine + invokeOnCancellation
-        clientJob.cancel()
-        // Then close socket (causes SocketClosedException if read is still in progress)
+        // Cancel and join the read loop coroutine. This ensures the read loop's
+        // finally block (which releases the stream processor) completes before we
+        // close the socket or clear the pool. Without joining, pool.clear() could
+        // free buffers the stream processor still references (use-after-free on K/N).
+        try {
+            clientJob.cancelAndJoin()
+        } catch (_: Exception) {
+            // Ignore cancel/join errors
+        }
+        // Close socket after read loop is done
         try {
             socket.close()
         } catch (_: Exception) {
             // Ignore close errors
-        }
-        // Wait for cleanup with increased timeout for reliable close handshake
-        try {
-            kotlinx.coroutines.withTimeoutOrNull(1000) {
-                clientJob.join()
-            }
-        } catch (_: Exception) {
-            // Ignore join errors
         }
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()
