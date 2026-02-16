@@ -80,6 +80,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          to: '/autobahn-report',
+          label: 'Compliance',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/DitchOoM/websocket',
           label: 'GitHub',
           position: 'right',

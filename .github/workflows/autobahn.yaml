@@ -1,0 +1,468 @@
+name: "Autobahn Compliance Tests"
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Report version label (defaults to dev-YYYY-MM-DD)'
+        required: false
+  pull_request:
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+
+# Reusable PyPy2 install script. autobahntestsuite is Python 2 only,
+# so we use prebuilt PyPy2 binaries instead of Docker.
+env:
+  PYPY2_VERSION: "7.3.17"
+
+jobs:
+  autobahn-linux:
+    name: "Autobahn (JVM, LinuxX64, NodeJS, BrowserJS)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install PyPy2 and autobahntestsuite
+        run: |
+          curl -L -o pypy2.tar.bz2 \
+            "https://downloads.python.org/pypy/pypy2.7-v${PYPY2_VERSION}-linux64.tar.bz2"
+          tar xjf pypy2.tar.bz2
+          export PATH="$(pwd)/pypy2.7-v${PYPY2_VERSION}-linux64/bin:$PATH"
+
+          pypy -m ensurepip
+          pypy -m pip install virtualenv
+          pypy -m virtualenv wstest-venv
+          source wstest-venv/bin/activate
+
+          pip install 'pip==20.3.4' 'setuptools==44.0.0' 'wheel==0.36.2'
+
+          # cryptography 3.3.2 (last Python 2 version) requires OpenSSL 1.1.
+          # Install from Ubuntu 20.04 (Focal) packages.
+          echo "deb http://security.ubuntu.com/ubuntu focal-security main" | \
+            sudo tee /etc/apt/sources.list.d/focal-security.list
+          sudo apt-get update
+          sudo apt-get install -y --allow-downgrades \
+            libssl1.1 libssl-dev=1.1.1*
+
+          pip install 'cryptography==3.3.2'
+          pip install 'pyOpenSSL==19.1.0'
+          pip install typing 'incremental==21.3.0'
+          pip install --no-build-isolation 'Twisted==19.10.0'
+          pip install --no-build-isolation autobahntestsuite
+
+          echo "WSTEST_VENV=$(pwd)/wstest-venv" >> $GITHUB_ENV
+
+      - name: Start Autobahn fuzzing server
+        run: |
+          source $WSTEST_VENV/bin/activate
+          cd .docker
+          wstest -m fuzzingserver -s config/fuzzingserver.json &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9001 > /dev/null 2>&1; then
+              echo "Autobahn server ready after ${i}s"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Autobahn server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run integration tests
+        env:
+          AUTOBAHN_HOST: 127.0.0.1
+        run: |
+          ./gradlew :jvmTest :linuxX64Test :jsNodeTest :jsBrowserTest \
+            -PintegrationTests --no-build-cache
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-report
+          path: .docker/reports/clients/
+          retention-days: 90
+
+  autobahn-linux-arm64:
+    name: "Autobahn (LinuxArm64)"
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Install PyPy2 and autobahntestsuite
+        run: |
+          curl -L -o pypy2.tar.bz2 \
+            "https://downloads.python.org/pypy/pypy2.7-v${PYPY2_VERSION}-aarch64.tar.bz2"
+          tar xjf pypy2.tar.bz2
+          export PATH="$(pwd)/pypy2.7-v${PYPY2_VERSION}-aarch64/bin:$PATH"
+
+          pypy -m ensurepip
+          pypy -m pip install virtualenv
+          pypy -m virtualenv wstest-venv
+          source wstest-venv/bin/activate
+
+          pip install 'pip==20.3.4' 'setuptools==44.0.0' 'wheel==0.36.2'
+
+          # cryptography 3.3.2 requires OpenSSL 1.1 (from Ubuntu Focal arm64)
+          echo "deb http://ports.ubuntu.com/ubuntu-ports focal-security main" | \
+            sudo tee /etc/apt/sources.list.d/focal-security.list
+          sudo apt-get update
+          sudo apt-get install -y --allow-downgrades \
+            libssl1.1 libssl-dev=1.1.1*
+
+          pip install 'cryptography==3.3.2'
+          pip install 'pyOpenSSL==19.1.0'
+          pip install typing 'incremental==21.3.0'
+          pip install --no-build-isolation 'Twisted==19.10.0'
+          pip install --no-build-isolation autobahntestsuite
+
+          echo "WSTEST_VENV=$(pwd)/wstest-venv" >> $GITHUB_ENV
+
+      - name: Start Autobahn fuzzing server
+        run: |
+          source $WSTEST_VENV/bin/activate
+          cd .docker
+          wstest -m fuzzingserver -s config/fuzzingserver.json &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9001 > /dev/null 2>&1; then
+              echo "Autobahn server ready after ${i}s"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Autobahn server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run integration tests
+        env:
+          AUTOBAHN_HOST: 127.0.0.1
+        run: ./gradlew :linuxArm64Test -PintegrationTests --no-build-cache
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-report
+          path: .docker/reports/clients/
+          retention-days: 90
+
+  autobahn-apple:
+    name: "Autobahn (macOS, iOS Simulator)"
+    runs-on: macos-latest
+    timeout-minutes: 25
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Install PyPy2 and autobahntestsuite
+        run: |
+          curl -L -o pypy2.tar.bz2 \
+            "https://downloads.python.org/pypy/pypy2.7-v${PYPY2_VERSION}-macos_arm64.tar.bz2"
+          tar xjf pypy2.tar.bz2
+          export PATH="$(pwd)/pypy2.7-v${PYPY2_VERSION}-macos_arm64/bin:$PATH"
+
+          pypy -m ensurepip
+          pypy -m pip install virtualenv
+          pypy -m virtualenv wstest-venv
+          source wstest-venv/bin/activate
+
+          pip install 'pip==20.3.4' 'setuptools==44.0.0' 'wheel==0.36.2'
+
+          # cryptography needs OpenSSL 1.1 headers on macOS
+          brew install openssl@1.1
+          export CFLAGS="-I$(brew --prefix openssl@1.1)/include"
+          export LDFLAGS="-L$(brew --prefix openssl@1.1)/lib"
+
+          pip install 'cryptography==3.3.2'
+          pip install 'pyOpenSSL==19.1.0'
+          pip install typing 'incremental==21.3.0'
+          pip install --no-build-isolation 'Twisted==19.10.0'
+          pip install --no-build-isolation autobahntestsuite
+
+          echo "WSTEST_VENV=$(pwd)/wstest-venv" >> $GITHUB_ENV
+
+      - name: Start Autobahn fuzzing server
+        run: |
+          source $WSTEST_VENV/bin/activate
+          cd .docker
+          wstest -m fuzzingserver -s config/fuzzingserver.json &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9001 > /dev/null 2>&1; then
+              echo "Autobahn server ready after ${i}s"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Autobahn server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run integration tests
+        env:
+          AUTOBAHN_HOST: 127.0.0.1
+        run: |
+          ./gradlew macosArm64Test iosSimulatorArm64Test \
+            -PintegrationTests --no-build-cache
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-report
+          path: .docker/reports/clients/
+          retention-days: 90
+
+  autobahn-android:
+    name: "Autobahn (Android)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Install PyPy2 and autobahntestsuite
+        run: |
+          curl -L -o pypy2.tar.bz2 \
+            "https://downloads.python.org/pypy/pypy2.7-v${PYPY2_VERSION}-linux64.tar.bz2"
+          tar xjf pypy2.tar.bz2
+          export PATH="$(pwd)/pypy2.7-v${PYPY2_VERSION}-linux64/bin:$PATH"
+
+          pypy -m ensurepip
+          pypy -m pip install virtualenv
+          pypy -m virtualenv wstest-venv
+          source wstest-venv/bin/activate
+
+          pip install 'pip==20.3.4' 'setuptools==44.0.0' 'wheel==0.36.2'
+
+          # cryptography 3.3.2 requires OpenSSL 1.1 (from Ubuntu Focal)
+          echo "deb http://security.ubuntu.com/ubuntu focal-security main" | \
+            sudo tee /etc/apt/sources.list.d/focal-security.list
+          sudo apt-get update
+          sudo apt-get install -y --allow-downgrades \
+            libssl1.1 libssl-dev=1.1.1*
+
+          pip install 'cryptography==3.3.2'
+          pip install 'pyOpenSSL==19.1.0'
+          pip install typing 'incremental==21.3.0'
+          pip install --no-build-isolation 'Twisted==19.10.0'
+          pip install --no-build-isolation autobahntestsuite
+
+          echo "WSTEST_VENV=$(pwd)/wstest-venv" >> $GITHUB_ENV
+
+      - name: Start Autobahn fuzzing server
+        run: |
+          source $WSTEST_VENV/bin/activate
+          cd .docker
+          wstest -m fuzzingserver -s config/fuzzingserver.json &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9001 > /dev/null 2>&1; then
+              echo "Autobahn server ready after ${i}s"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Autobahn server failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-26-autobahn
+
+      - name: Create AVD and generate snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      - name: Run Android integration tests
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          AUTOBAHN_HOST: 10.0.2.2
+        with:
+          api-level: 26
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: ./gradlew connectedCheck -PintegrationTests
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-report
+          path: .docker/reports/clients/
+          retention-days: 90
+
+  merge-report:
+    name: "Merge and Generate Report"
+    needs: [autobahn-linux, autobahn-linux-arm64, autobahn-apple, autobahn-android]
+    if: >-
+      always() && (
+        needs.autobahn-linux.result == 'success' ||
+        needs.autobahn-linux-arm64.result == 'success' ||
+        needs.autobahn-apple.result == 'success' ||
+        needs.autobahn-android.result == 'success'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Download Linux report
+        if: needs.autobahn-linux.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-report
+          path: linux-report
+
+      - name: Download Linux ARM64 report
+        if: needs.autobahn-linux-arm64.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-report
+          path: linux-arm64-report
+
+      - name: Download Apple report
+        if: needs.autobahn-apple.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: apple-report
+          path: apple-report
+
+      - name: Download Android report
+        if: needs.autobahn-android.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-report
+          path: android-report
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            version="${{ github.event.release.tag_name }}"
+            version="${version#v}"  # Strip leading 'v'
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ github.event.inputs.version }}"
+            if [ -z "$version" ]; then
+              version="dev-$(date +%Y-%m-%d)"
+            fi
+          else
+            version="pr-${{ github.event.pull_request.number }}"
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Collect available report directories
+        id: dirs
+        run: |
+          dirs=""
+          for d in linux-report linux-arm64-report apple-report android-report; do
+            if [ -d "$d" ] && [ -f "$d/index.json" ]; then
+              if [ -n "$dirs" ]; then dirs="$dirs,"; fi
+              dirs="$dirs$d"
+            fi
+          done
+          echo "report-dirs=$dirs" >> $GITHUB_OUTPUT
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Merge reports and generate HTML
+        run: |
+          ./gradlew mergeAutobahnReports \
+            -PreportDirs=${{ steps.dirs.outputs.report-dirs }} \
+            -PreportVersion=${{ steps.version.outputs.version }}
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-${{ steps.version.outputs.version }}
+          path: docs/static/autobahn/${{ steps.version.outputs.version }}/
+          retention-days: 90
+
+      - name: Comment on PR with report link
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const version = '${{ steps.version.outputs.version }}';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Autobahn Compliance Report\n\nReport for \`${version}\` is available as a [workflow artifact](${runUrl}).\n\nDownload the \`autobahn-report-${version}\` artifact to view \`report.html\`.`
+            });

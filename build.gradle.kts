@@ -2,6 +2,7 @@ import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.Socket
 import java.security.SecureRandom
+import java.time.LocalDate
 import java.util.Base64
 
 plugins {
@@ -27,6 +28,7 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
+    mavenLocal()
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -72,6 +74,9 @@ kotlin {
     // Linux targets (only on Linux host)
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
+        linuxArm64()
+    }
+    if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64) {
         linuxArm64()
     }
 
@@ -345,7 +350,7 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "macOS", "LinuxX64")
+        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "iOS", "LinuxX64", "LinuxArm64", "Android")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
@@ -461,6 +466,26 @@ val validateAutobahnResultsJs =
     tasks.register("validateAutobahnResultsJs") {
         doLast(createAutobahnValidationAction(setOf("NodeJS")))
     }
+val validateAutobahnResultsBrowserJs =
+    tasks.register("validateAutobahnResultsBrowserJs") {
+        doLast(createAutobahnValidationAction(setOf("BrowserJS")))
+    }
+val validateAutobahnResultsMacOs =
+    tasks.register("validateAutobahnResultsMacOs") {
+        doLast(createAutobahnValidationAction(setOf("macOS")))
+    }
+val validateAutobahnResultsIos =
+    tasks.register("validateAutobahnResultsIos") {
+        doLast(createAutobahnValidationAction(setOf("iOS")))
+    }
+val validateAutobahnResultsLinuxArm64 =
+    tasks.register("validateAutobahnResultsLinuxArm64") {
+        doLast(createAutobahnValidationAction(setOf("LinuxArm64")))
+    }
+val validateAutobahnResultsAndroid =
+    tasks.register("validateAutobahnResultsAndroid") {
+        doLast(createAutobahnValidationAction(setOf("Android")))
+    }
 // Validates all agents (used by the convenience integrationTest task)
 val validateAutobahnResults =
     tasks.register("validateAutobahnResults") {
@@ -499,6 +524,74 @@ tasks.register("integrationTest") {
     dependsOn(echoWebsocket)
     dependsOn(autobahnContainer)
     finalizedBy(validateAutobahnResults)
+}
+
+// Merge Autobahn reports from multiple CI jobs and generate a unified HTML report.
+// Usage: ./gradlew mergeAutobahnReports -PreportDirs=linux-report,apple-report,... -PreportVersion=...
+tasks.register<MergeAutobahnReports>("mergeAutobahnReports") {
+    group = "verification"
+    description = "Merge Autobahn reports from multiple platforms and generate HTML"
+    val version = project.findProperty("reportVersion")?.toString() ?: "dev"
+    reportVersion.set(version)
+
+    val outDir = layout.projectDirectory.dir("docs/static/autobahn/$version")
+    outputDir.set(outDir)
+
+    val dirs =
+        project
+            .findProperty("reportDirs")
+            ?.toString()
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
+    reportDirs.set(dirs)
+
+    // Chain HTML generation after merge
+    doLast {
+        val genTask = project.tasks.create("generateAutobahnReportInternal", GenerateAutobahnReport::class.java)
+        genTask.inputDir.set(outDir)
+        genTask.reportVersion.set(version)
+        genTask.outputFile.set(File(outDir.asFile, "report.html"))
+        genTask.generate()
+
+        // Update manifest
+        val autobahnDir = File(project.projectDir, "docs/static/autobahn")
+        updateManifest(autobahnDir, version)
+    }
+}
+
+fun updateManifest(
+    autobahnDir: File,
+    version: String,
+) {
+    val manifestFile = File(autobahnDir, "manifest.json")
+
+    @Suppress("UNCHECKED_CAST")
+    val manifest: MutableMap<String, Any> =
+        if (manifestFile.exists()) {
+            groovy.json.JsonSlurper().parseText(manifestFile.readText()) as MutableMap<String, Any>
+        } else {
+            mutableMapOf("versions" to mutableListOf<Any>())
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    val versions = manifest["versions"] as MutableList<Any>
+    // Remove existing entry for this version
+    versions.removeAll { entry ->
+        @Suppress("UNCHECKED_CAST")
+        (entry as? Map<String, Any>)?.get("version") == version
+    }
+    versions.add(
+        0,
+        mapOf(
+            "version" to version,
+            "date" to LocalDate.now().toString(),
+            "reportPath" to "$version/report.html",
+        ),
+    )
+    manifest["versions"] = versions
+    manifestFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest)))
 }
 
 /**
