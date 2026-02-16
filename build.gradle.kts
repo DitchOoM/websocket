@@ -24,7 +24,7 @@ val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
 project.version = getNextVersion(!isRunningOnGithub).toString()
 
-println("Version: ${project.version}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub")
+logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
     mavenCentral()
@@ -328,7 +328,9 @@ afterEvaluate {
 }
 
 tasks.register("nextVersion") {
-    println(getNextVersion(false))
+    doLast {
+        println(getNextVersion(false))
+    }
 }
 
 val echoWebsocket =
