@@ -5,6 +5,7 @@ package com.ditchoom.websocket.handshake
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.usePinned
 import platform.CoreCrypto.CC_SHA1
 import platform.CoreCrypto.CC_SHA1_DIGEST_LENGTH
@@ -29,7 +30,7 @@ actual fun computeAcceptKey(clientKey: String): String {
             CC_SHA1(
                 inputPinned.addressOf(0),
                 inputBytes.size.convert(),
-                hashPinned.addressOf(0),
+                hashPinned.addressOf(0).reinterpret(),
             )
         }
     }
