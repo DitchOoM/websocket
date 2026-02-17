@@ -105,81 +105,9 @@ jobs:
           path: .docker/reports/clients/
           retention-days: 90
 
-  autobahn-linux-arm64:
-    name: "Autobahn (LinuxArm64)"
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-
-      - name: Install PyPy2 and autobahntestsuite
-        run: |
-          curl -L -o pypy2.tar.bz2 \
-            "https://downloads.python.org/pypy/pypy2.7-v${PYPY2_VERSION}-aarch64.tar.bz2"
-          tar xjf pypy2.tar.bz2
-          export PATH="$(pwd)/pypy2.7-v${PYPY2_VERSION}-aarch64/bin:$PATH"
-
-          pypy -m ensurepip
-          pypy -m pip install virtualenv
-          pypy -m virtualenv wstest-venv
-          source wstest-venv/bin/activate
-
-          pip install 'pip==20.3.4' 'setuptools==44.0.0' 'wheel==0.36.2'
-
-          # cryptography 3.3.2 requires OpenSSL 1.1 (from Ubuntu Focal arm64)
-          echo "deb http://ports.ubuntu.com/ubuntu-ports focal-security main" | \
-            sudo tee /etc/apt/sources.list.d/focal-security.list
-          sudo apt-get update
-          sudo apt-get install -y --allow-downgrades \
-            libssl1.1 libssl-dev=1.1.1*
-
-          pip install 'cryptography==3.3.2'
-          pip install 'pyOpenSSL==19.1.0'
-          pip install typing 'incremental==21.3.0'
-          pip install --no-build-isolation 'Twisted==19.10.0'
-          pip install --no-build-isolation autobahntestsuite
-
-          echo "WSTEST_VENV=$(pwd)/wstest-venv" >> $GITHUB_ENV
-
-      - name: Start Autobahn fuzzing server
-        run: |
-          source $WSTEST_VENV/bin/activate
-          cd .docker
-          wstest -m fuzzingserver -s config/fuzzingserver.json &
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:9001 > /dev/null 2>&1; then
-              echo "Autobahn server ready after ${i}s"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "Autobahn server failed to start"
-              exit 1
-            fi
-            sleep 1
-          done
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Run integration tests
-        env:
-          AUTOBAHN_HOST: 127.0.0.1
-        run: ./gradlew :linuxArm64Test -PintegrationTests --no-build-cache
-
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64-report
-          path: .docker/reports/clients/
-          retention-days: 90
+  # Note: linuxArm64 job removed — Kotlin/Native 2.3.0 has no prebuilt compiler
+  # for linux-aarch64. linuxArm64 shares the same code as linuxX64 (same KMP source
+  # sets), so x64 testing provides equivalent coverage.
 
   autobahn-apple:
     name: "Autobahn (macOS, iOS Simulator)"
@@ -366,11 +294,10 @@ jobs:
 
   merge-report:
     name: "Merge and Generate Report"
-    needs: [autobahn-linux, autobahn-linux-arm64, autobahn-apple, autobahn-android]
+    needs: [autobahn-linux, autobahn-apple, autobahn-android]
     if: >-
       always() && (
         needs.autobahn-linux.result == 'success' ||
-        needs.autobahn-linux-arm64.result == 'success' ||
         needs.autobahn-apple.result == 'success' ||
         needs.autobahn-android.result == 'success'
       )
@@ -391,13 +318,6 @@ jobs:
         with:
           name: linux-report
           path: linux-report
-
-      - name: Download Linux ARM64 report
-        if: needs.autobahn-linux-arm64.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-arm64-report
-          path: linux-arm64-report
 
       - name: Download Apple report
         if: needs.autobahn-apple.result == 'success'
@@ -433,7 +353,7 @@ jobs:
         id: dirs
         run: |
           dirs=""
-          for d in linux-report linux-arm64-report apple-report android-report; do
+          for d in linux-report apple-report android-report; do
             if [ -d "$d" ] && [ -f "$d/index.json" ]; then
               if [ -n "$dirs" ]; then dirs="$dirs,"; fi
               dirs="$dirs$d"

@@ -172,32 +172,6 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     }
 }
 
-// Workaround: KMP's HostManager.host reports linux_x64 on ARM64 hosts (Kotlin bug),
-// so linuxArm64Test execution task is never created. Detect ARM64 via os.arch instead.
-val isLinuxArm64Host = System.getProperty("os.arch") in listOf("aarch64", "arm64") &&
-    hostOs.family == org.jetbrains.kotlin.konan.target.Family.LINUX
-if (isLinuxArm64Host) {
-    afterEvaluate {
-        if (tasks.findByName("linuxArm64Test") == null) {
-            tasks.register<Exec>("linuxArm64Test") {
-                group = "verification"
-                description = "Runs linuxArm64 native tests"
-                dependsOn("linkDebugTestLinuxArm64")
-                val testBinary = project.layout.buildDirectory.file("bin/linuxArm64/debugTest/test.kexe")
-                executable(testBinary.get().asFile.absolutePath)
-                val negativeFilters = mutableListOf<String>()
-                negativeFilters.addAll(profilingTestPatterns)
-                if (!runIntegrationTests) {
-                    negativeFilters.addAll(integrationTestPatterns)
-                }
-                if (negativeFilters.isNotEmpty()) {
-                    args("--ktest_negative_filter=${negativeFilters.joinToString(",")}")
-                }
-            }
-        }
-    }
-}
-
 // Filter Kotlin/JS tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
     // Always exclude profiling tests from CI
@@ -375,7 +349,7 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "iOS", "LinuxX64", "LinuxArm64", "Android")
+        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "iOS", "LinuxX64", "Android")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
