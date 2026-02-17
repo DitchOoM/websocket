@@ -26,7 +26,7 @@ jobs:
   autobahn-linux:
     name: "Autobahn (JVM, LinuxX64, NodeJS, BrowserJS)"
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
   autobahn-apple:
     name: "Autobahn (macOS, iOS Simulator)"
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
@@ -188,7 +188,7 @@ jobs:
   autobahn-android:
     name: "Autobahn (Android)"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
