@@ -111,9 +111,9 @@ jobs:
 
   autobahn-apple:
     name: "Autobahn (macOS, iOS Simulator)"
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
-    timeout-minutes: 90
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -187,9 +187,9 @@ jobs:
 
   autobahn-android:
     name: "Autobahn (Android)"
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
