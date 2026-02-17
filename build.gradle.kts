@@ -25,7 +25,7 @@ val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
 project.version = getNextVersion(!isRunningOnGithub).toString()
 
-logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
+logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub, hostOs: $hostOs, arch: ${System.getProperty("os.arch")}")
 
 repositories {
     mavenLocal()
@@ -175,9 +175,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
 
 // Workaround: KMP doesn't create linuxArm64Test execution task on ARM64 hosts.
 // Register an Exec-based task that links the test binary and runs it directly.
+logger.lifecycle("ARM64 check: hostOs=$hostOs, LINUX_ARM64=${org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64}, match=${hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64}")
 if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64) {
+    logger.lifecycle("Registering linuxArm64Test workaround task")
     afterEvaluate {
-        if (tasks.findByName("linuxArm64Test") == null) {
+        val existingTask = tasks.findByName("linuxArm64Test")
+        logger.lifecycle("afterEvaluate: existing linuxArm64Test = $existingTask")
+        if (existingTask == null) {
             tasks.register<Exec>("linuxArm64Test") {
                 group = "verification"
                 description = "Runs linuxArm64 native tests"
