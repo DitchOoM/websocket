@@ -25,7 +25,7 @@ val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
 val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
 project.version = getNextVersion(!isRunningOnGithub).toString()
 
-logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub, hostOs: $hostOs, arch: ${System.getProperty("os.arch")}")
+logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
     mavenLocal()
@@ -72,11 +72,10 @@ kotlin {
     }
 
     // Linux targets (only on Linux host)
+    // Note: HostManager.host reports LINUX_X64 even on ARM64 hosts (Kotlin bug),
+    // so this block handles both x64 and ARM64 Linux hosts.
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
-        linuxArm64()
-    }
-    if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64) {
         linuxArm64()
     }
 
@@ -173,15 +172,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     }
 }
 
-// Workaround: KMP doesn't create linuxArm64Test execution task on ARM64 hosts.
-// Register an Exec-based task that links the test binary and runs it directly.
-logger.lifecycle("ARM64 check: hostOs=$hostOs, LINUX_ARM64=${org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64}, match=${hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64}")
-if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64) {
-    logger.lifecycle("Registering linuxArm64Test workaround task")
+// Workaround: KMP's HostManager.host reports linux_x64 on ARM64 hosts (Kotlin bug),
+// so linuxArm64Test execution task is never created. Detect ARM64 via os.arch instead.
+val isLinuxArm64Host = System.getProperty("os.arch") in listOf("aarch64", "arm64") &&
+    hostOs.family == org.jetbrains.kotlin.konan.target.Family.LINUX
+if (isLinuxArm64Host) {
     afterEvaluate {
-        val existingTask = tasks.findByName("linuxArm64Test")
-        logger.lifecycle("afterEvaluate: existing linuxArm64Test = $existingTask")
-        if (existingTask == null) {
+        if (tasks.findByName("linuxArm64Test") == null) {
             tasks.register<Exec>("linuxArm64Test") {
                 group = "verification"
                 description = "Runs linuxArm64 native tests"
