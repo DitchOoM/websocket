@@ -19,10 +19,15 @@ class WebSocketTests {
     @Test
     fun clientEchoString() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
+            val websocket =
+                WebSocketClient.Companion.allocate(
+                    connectionOptions,
+                    parentScope = this,
+                    allocationZone = AllocationZone.SharedMemory,
+                )
             websocket.connect()
-            websocket.connectionState.first { it is ConnectionState.Connected }
+            websocket.awaitConnected()
             val string1 = "test"
             launch(Dispatchers.Default) { websocket.write(string1) }
             val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
@@ -38,7 +43,12 @@ class WebSocketTests {
     fun clientEchoReadBuffer() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket =
+                WebSocketClient.Companion.allocate(
+                    connectionOptions,
+                    parentScope = this,
+                    allocationZone = AllocationZone.SharedMemory,
+                )
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
             val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
@@ -53,7 +63,12 @@ class WebSocketTests {
     fun pingPongWorks() =
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val websocket =
+                WebSocketClient.Companion.allocate(
+                    connectionOptions,
+                    parentScope = this,
+                    allocationZone = AllocationZone.SharedMemory,
+                )
             websocket.connect()
             if (websocket.isPingSupported()) {
                 val payload = createPayload()
@@ -71,8 +86,13 @@ class WebSocketTests {
     @Test
     fun allTypesWork() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(name = "localhost", port = 8081, websocketEndpoint = "/echo")
-            val websocket = WebSocketClient.Companion.allocate(connectionOptions, AllocationZone.SharedMemory)
+            val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
+            val websocket =
+                WebSocketClient.Companion.allocate(
+                    connectionOptions,
+                    parentScope = this,
+                    allocationZone = AllocationZone.SharedMemory,
+                )
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
             val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
@@ -107,16 +127,14 @@ class WebSocketTests {
 
     private fun createPayload(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
-        val readBuffer = PlatformBuffer.wrap(bytes)
-        readBuffer.position(readBuffer.limit())
-        return readBuffer
+        // wrap() returns buffer with position=0, limit=length, ready to read
+        return PlatformBuffer.wrap(bytes)
     }
 
     private fun createPayloadReverse(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8).reversedArray()
-        val readBuffer = PlatformBuffer.wrap(bytes)
-        readBuffer.position(readBuffer.limit())
-        return readBuffer
+        // wrap() returns buffer with position=0, limit=length, ready to read
+        return PlatformBuffer.wrap(bytes)
     }
 
     private fun validatePayload(buffer: ReadBuffer) {

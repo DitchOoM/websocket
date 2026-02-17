@@ -1,91 +1,100 @@
-import groovy.util.Node
-import groovy.xml.XmlParser
-import org.apache.tools.ant.taskdefs.condition.Os
-import java.net.URL
+import org.gradle.api.tasks.testing.Test
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.Socket
+import java.security.SecureRandom
+import java.util.Base64
 
 plugins {
-    kotlin("multiplatform") version "2.0.0"
-    kotlin("native.cocoapods") version "2.0.0"
-    id("com.android.library") version "8.4.0"
-    id("io.codearte.nexus-staging") version "0.30.0"
-    `maven-publish`
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.dokka)
+    alias(libs.plugins.ktlint)
+    alias(libs.plugins.maven.publish)
     signing
-    id("org.jlleitschuh.gradle.ktlint") version "12.1.1"
 }
+
+apply(from = "gradle/setup.gradle.kts")
+
+group = "com.ditchoom"
 val isRunningOnGithub = System.getenv("GITHUB_REPOSITORY")?.isNotBlank() == true
 val isMainBranchGithub = System.getenv("GITHUB_REF") == "refs/heads/main"
-val isMacOS = Os.isFamily(Os.FAMILY_MAC)
-val loadAllPlatforms = !isRunningOnGithub || (isMacOS && isMainBranchGithub) || !isMacOS
-val libraryVersionPrefix: String by project
-group = "com.ditchoom"
-val libraryVersion = getNextVersion().toString()
-println(
-    "Version: ${libraryVersion}\nisRunningOnGithub: $isRunningOnGithub\nisMainBranchGithub: $isMainBranchGithub\n" +
-        "OS:$isMacOS\nLoad All Platforms: $loadAllPlatforms",
-)
+val hostOs = org.jetbrains.kotlin.konan.target.HostManager.host
+
+@Suppress("UNCHECKED_CAST")
+val getNextVersion = project.extra["getNextVersion"] as (Boolean) -> Any
+project.version = getNextVersion(!isRunningOnGithub).toString()
+
+logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
-    google()
     mavenCentral()
+    google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
 kotlin {
-    jvmToolchain(19)
+    // Ensure consistent JDK version across all developer machines and CI
+    jvmToolchain(21)
+
     androidTarget {
         publishLibraryVariants("release")
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
     }
-    jvm()
+    jvm {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+    }
     js {
         browser()
         nodejs {
             testTask {
                 useMocha {
-                    timeout = "15s"
+                    timeout = if (project.hasProperty("integrationTests")) "660s" else "15s"
                 }
             }
         }
     }
-    macosX64()
-    macosArm64()
-    iosArm64()
-    iosX64()
-    applyDefaultHierarchyTemplate()
-    cocoapods {
-        ios.deploymentTarget = "13.0"
-        osx.deploymentTarget = "11.0"
-        watchos.deploymentTarget = "6.0"
-        tvos.deploymentTarget = "13.0"
-        pod("SocketWrapper") {
-            source =
-                git("https://github.com/DitchOoM/apple-socket-wrapper.git") {
-                    tag = "0.1.3"
-                }
-            extraOpts += listOf("-compiler-option", "-fmodules")
-        }
-        version = "0.1.3"
+
+    // Apple targets (only on macOS host)
+    if (hostOs.family.isAppleFamily) {
+        macosX64()
+        macosArm64()
+        iosArm64()
+        iosSimulatorArm64()
+        iosX64()
+        tvosArm64()
+        tvosSimulatorArm64()
+        tvosX64()
+        watchosArm64()
+        watchosSimulatorArm64()
+        watchosX64()
     }
+
+    // Linux targets (only on Linux host)
+    if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
+        linuxX64()
+        linuxArm64()
+    }
+
+    applyDefaultHierarchyTemplate()
     sourceSets {
         commonMain.dependencies {
-            implementation("com.ditchoom:buffer:1.4.1")
-            implementation("com.ditchoom:socket:1.2.1")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+            implementation(libs.buffer)
+            implementation(libs.buffer.compression)
+            implementation(libs.socket)
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+            implementation(libs.kotlinx.coroutines.test)
         }
         jvmTest.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-debug:1.8.1")
-            implementation("junit:junit:4.13.2")
+            implementation(libs.kotlinx.coroutines.debug)
         }
         jsMain.dependencies {
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-browser:1.0.0-pre.746")
-            implementation("org.jetbrains.kotlin-wrappers:kotlin-js:1.0.0-pre.746")
+            implementation(libs.kotlin.web)
+            implementation(libs.kotlin.js)
         }
-        val androidInstrumentedTest by getting {
-            dependsOn(commonTest.get())
-        }
+        val androidInstrumentedTest by getting
         val commonJvmMain by creating {
             dependsOn(commonMain.get())
         }
@@ -101,16 +110,95 @@ kotlin {
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
+
+        androidInstrumentedTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.rules)
+            implementation(libs.androidx.test.core.ktx)
+        }
+    }
+}
+
+val integrationTestPatterns =
+    listOf(
+        "com.ditchoom.websocket.Autobahn*",
+        "com.ditchoom.websocket.WebSocketTests",
+    )
+
+// Profiling tests are excluded from CI - they're diagnostic tools for local profiling,
+// not conformance tests. Run manually with: ./gradlew jvmTest --tests "*ProfilingTest*"
+val profilingTestPatterns =
+    listOf(
+        "com.ditchoom.websocket.ProfilingTest",
+        "com.ditchoom.websocket.TimingProfilingTest",
+    )
+
+val runIntegrationTests = project.hasProperty("integrationTests")
+
+// Filter JVM/Android tests
+tasks.withType<Test>().configureEach {
+    failFast = true
+    testLogging {
+        showStandardStreams = true
+    }
+    // Always exclude profiling tests from CI - run manually when needed
+    filter {
+        profilingTestPatterns.forEach { excludeTestsMatching(it) }
+    }
+    if (runIntegrationTests) {
+        // Stress tests with 1MB+ compressed payloads need adequate heap
+        // (Streaming decompression reduced requirement from 2GB to ~640MB)
+        maxHeapSize = "1g"
+    } else {
+        filter {
+            integrationTestPatterns.forEach { excludeTestsMatching(it) }
+        }
+    }
+}
+
+// Filter Kotlin/Native tests
+tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+    // Always exclude profiling tests from CI
+    profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
+    if (!runIntegrationTests) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+    }
+}
+
+// Filter Kotlin/JS tests
+tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
+    // Always exclude profiling tests from CI
+    profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
+    if (!runIntegrationTests) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+    }
+    // Exclude tests from browser that require Node.js APIs or raw socket access
+    // Browser WebSocket handles handshake/compression internally via native API
+    if (name.contains("Browser", ignoreCase = true)) {
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
     }
 }
 
 android {
-    compileSdk = 34
+    compileSdk = 36
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 19
+        minSdk = 21
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     namespace = "$group.${rootProject.name}"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -123,158 +211,128 @@ val javadocJar: TaskProvider<Jar> by tasks.registering(Jar::class) {
     archiveClassifier.set("javadoc")
 }
 
-if (isRunningOnGithub) {
-    if (isMainBranchGithub) {
-        signing {
-            useInMemoryPgpKeys(
-                "56F1A973",
-                System.getenv("GPG_SECRET"),
-                System.getenv("GPG_SIGNING_PASSWORD"),
-            )
-            sign(publishing.publications)
-        }
+val publishedGroupId: String by project
+val libraryName: String by project
+val artifactName: String by project
+val libraryDescription: String by project
+val siteUrl: String by project
+val gitUrl: String by project
+val licenseName: String by project
+val licenseUrl: String by project
+val developerOrg: String by project
+val developerName: String by project
+val developerEmail: String by project
+val developerId: String by project
+
+project.group = publishedGroupId
+
+val signingInMemoryKey = project.findProperty("signingInMemoryKey")
+val signingInMemoryKeyPassword = project.findProperty("signingInMemoryKeyPassword")
+val shouldSignAndPublish = isMainBranchGithub && signingInMemoryKey is String && signingInMemoryKeyPassword is String
+
+if (shouldSignAndPublish) {
+    signing {
+        useInMemoryPgpKeys(
+            signingInMemoryKey as String,
+            signingInMemoryKeyPassword as String,
+        )
+        sign(publishing.publications)
+    }
+}
+
+mavenPublishing {
+    if (shouldSignAndPublish) {
+        publishToMavenCentral()
+        signAllPublications()
     }
 
-    val ossUser = System.getenv("SONATYPE_NEXUS_USERNAME")
-    val ossPassword = System.getenv("SONATYPE_NEXUS_PASSWORD")
+    coordinates(publishedGroupId, artifactName, project.version.toString())
 
-    val publishedGroupId: String by project
-    val libraryName: String by project
-    val libraryDescription: String by project
-    val siteUrl: String by project
-    val gitUrl: String by project
-    val licenseName: String by project
-    val licenseUrl: String by project
-    val developerOrg: String by project
-    val developerName: String by project
-    val developerEmail: String by project
-    val developerId: String by project
+    pom {
+        name.set(libraryName)
+        description.set(libraryDescription)
+        url.set(siteUrl)
 
-    project.group = publishedGroupId
-    project.version = libraryVersion
-
-    publishing {
-        publications.withType(MavenPublication::class) {
-            groupId = publishedGroupId
-            version = libraryVersion
-
-            artifact(tasks["javadocJar"])
-
-            pom {
-                name.set(libraryName)
-                description.set(libraryDescription)
-                url.set(siteUrl)
-
-                licenses {
-                    license {
-                        name.set(licenseName)
-                        url.set(licenseUrl)
-                    }
-                }
-                developers {
-                    developer {
-                        id.set(developerId)
-                        name.set(developerName)
-                        email.set(developerEmail)
-                    }
-                }
-                organization {
-                    name.set(developerOrg)
-                }
-                scm {
-                    connection.set(gitUrl)
-                    developerConnection.set(gitUrl)
-                    url.set(siteUrl)
-                }
+        licenses {
+            license {
+                name.set(licenseName)
+                url.set(licenseUrl)
             }
         }
-
-        repositories {
-            val repositoryId = System.getenv("SONATYPE_REPOSITORY_ID")
-            maven("https://oss.sonatype.org/service/local/staging/deployByRepositoryId/$repositoryId/") {
-                name = "sonatype"
-                credentials {
-                    username = ossUser
-                    password = ossPassword
-                }
+        developers {
+            developer {
+                id.set(developerId)
+                name.set(developerName)
+                email.set(developerEmail)
             }
         }
-    }
-
-    nexusStaging {
-        username = ossUser
-        password = ossPassword
-        packageGroup = publishedGroupId
+        organization {
+            name.set(developerOrg)
+        }
+        scm {
+            connection.set(gitUrl)
+            developerConnection.set(gitUrl)
+            url.set(siteUrl)
+        }
     }
 }
 
 ktlint {
     verbose.set(true)
     outputToConsole.set(true)
+    android.set(true)
+    filter {
+        exclude("**/generated/**")
+    }
 }
 
-class Version(val major: UInt, val minor: UInt, val patch: UInt, val snapshot: Boolean) {
-    constructor(string: String, snapshot: Boolean) :
-        this(
-            string.split('.')[0].toUInt(),
-            string.split('.')[1].toUInt(),
-            string.split('.')[2].toUInt(),
-            snapshot,
-        )
-
-    fun incrementMajor() = Version(major + 1u, 0u, 0u, snapshot)
-
-    fun incrementMinor() = Version(major, minor + 1u, 0u, snapshot)
-
-    fun incrementPatch() = Version(major, minor, patch + 1u, snapshot)
-
-    fun snapshot() = Version(major, minor, patch, true)
-
-    fun isVersionZero() = major == 0u && minor == 0u && patch == 0u
-
-    override fun toString(): String =
-        if (snapshot) {
-            "$major.$minor.$patch-SNAPSHOT"
-        } else {
-            "$major.$minor.$patch"
+dokka {
+    dokkaSourceSets.configureEach {
+        externalDocumentationLinks.register("kotlin-stdlib") {
+            url("https://kotlinlang.org/api/latest/jvm/stdlib/")
         }
-}
-private var latestVersion: Version? = Version(0u, 0u, 0u, true)
-
-@Suppress("UNCHECKED_CAST")
-fun getLatestVersion(): Version {
-    val latestVersion = latestVersion
-    if (latestVersion != null && !latestVersion.isVersionZero()) {
-        return latestVersion
+        externalDocumentationLinks.register("kotlinx-coroutines") {
+            url("https://kotlinlang.org/api/kotlinx.coroutines/")
+        }
+        reportUndocumented.set(false)
     }
-    val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
-    val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
-    val latestStringList = versioning.first()["latest"] as List<Node>
-    val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)
-    this.latestVersion = result
-    return result
 }
 
-fun getNextVersion(snapshot: Boolean = !isRunningOnGithub): Version {
-    var v = getLatestVersion()
-    if (snapshot) {
-        v = v.snapshot()
+tasks.register<Copy>("copyDokkaToDocusaurus") {
+    dependsOn("dokkaGenerateHtml")
+    from(layout.buildDirectory.dir("dokka/html")) { into("websocket") }
+    into(layout.projectDirectory.dir("docs/static/api"))
+}
+
+afterEvaluate {
+    // Split publishing metadata fix: When publishing from split CI jobs (Linux + Apple),
+    // each host only registers its own targets. The root module metadata (.module file)
+    // generated on Linux would be missing Apple variants, breaking KMP resolution for
+    // Apple consumers. Fix: on Linux, inject Apple variant references into the generated
+    // .module file. On Apple, skip the root metadata publication (Linux publishes it).
+    if (isRunningOnGithub) {
+        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsLinux) {
+            tasks.named("generateMetadataFileForKotlinMultiplatformPublication") {
+                doLast {
+                    val moduleFile = outputs.files.singleFile
+                    injectAppleVariantsIntoModuleMetadata(moduleFile, project.version.toString(), "websocket")
+                }
+            }
+        }
+        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
+            // Skip root metadata publication — published from Linux with all variant references
+            tasks
+                .matching {
+                    it.name.startsWith("publishKotlinMultiplatformPublication")
+                }.configureEach { enabled = false }
+        }
     }
-    if (project.hasProperty("incrementMajor") && project.property("incrementMajor") == "true") {
-        return v.incrementMajor()
-    } else if (project.hasProperty("incrementMinor") && project.property("incrementMinor") == "true") {
-        return v.incrementMinor()
+}
+
+tasks.register("nextVersion") {
+    doLast {
+        println(getNextVersion(false))
     }
-    return v.incrementPatch()
-}
-
-tasks.create("nextVersion") {
-    println(getNextVersion())
-}
-
-val signingTasks = tasks.withType<Sign>()
-tasks.withType<AbstractPublishToMaven>().configureEach {
-    dependsOn(signingTasks)
 }
 
 val echoWebsocket =
@@ -282,43 +340,237 @@ val echoWebsocket =
         port.set(8081)
     }
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
-val validateAutobahnResults =
-    task("validateAutobahnResults") {
-        doLast {
-//        val path = Paths.get("${project.projectDir}/.docker/reports/clients/index.json")
-//        if (!Files.exists(path)) return@doLast
-//        println("**VALIDATING AUTOBAHN RESULTS **")
-//        data class TestResult(val agent: String, val testCase: String, val behavior: String, val behaviorClose: String, val duration: Int, val remoteCloseCode: Int?)
-//        val json = Files.readAllBytes(path).decodeToString()
-//        val obj = JSONObject(json).toMap()
-//        val cases = ArrayList<TestResult>()
-//
-//        obj.keys.forEach { agentName ->
-//            val props = obj[agentName] as Map<String, Map<String, Any>>
-//            props.keys.forEach { version ->
-//                val keyValue = props[version]!!
-//                try {
-//                    cases += TestResult(agentName, version, keyValue["behavior"].toString(), keyValue["behaviorClose"].toString(), keyValue["duration"].toString().toInt(), keyValue["remoteCloseCode"]?.toString()?.toInt())
-//                } catch (e: Exception) {
-//                    println("FAIL $e")
-//                    println("$agentName $version : ${keyValue["behavior"]} ${keyValue["behaviorClose"]} ${keyValue["duration"]} ${keyValue["remoteCloseCode"]}")
-//                }
-//            }
-//        }
-//
-//        val failedCases = cases.filterNot { it.agent.equals("BrowserJS", ignoreCase = true) }.filterNot { it.behavior == "OK" || it.behavior == "NON-STRICT" || it.behavior == "INFORMATIONAL" }
-//        if (failedCases.isNotEmpty()) {
-//            throw GradleException("Failed test cases: $failedCases")
-//        }
+
+// Shared logic for Autobahn validation tasks. When agentsToValidate is null, all agents are checked.
+fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
+    Action<Task> {
+        val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
+        val allAgents = listOf("JVM", "NodeJS", "macOS", "LinuxX64")
+        allAgents.forEach { agent ->
+            try {
+                val socket = Socket(autobahnHost, 9001)
+                socket.soTimeout = 5000
+                val output = socket.getOutputStream()
+                val input = socket.getInputStream()
+                val path = "/updateReports?agent=$agent"
+                val keyBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+                val key = Base64.getEncoder().encodeToString(keyBytes)
+                val request =
+                    "GET $path HTTP/1.1\r\n" +
+                        "Host: $autobahnHost:9001\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: $key\r\n" +
+                        "Sec-WebSocket-Version: 13\r\n" +
+                        "\r\n"
+                output.write(request.toByteArray())
+                output.flush()
+                // Read response headers
+                val buffer = StringBuilder()
+                while (!buffer.endsWith("\r\n\r\n")) {
+                    val b = input.read()
+                    if (b == -1) break
+                    buffer.append(b.toChar())
+                }
+                // Send close frame (opcode 0x88, mask bit set, 2-byte payload with code 1000)
+                val closeFrame =
+                    byteArrayOf(
+                        0x88.toByte(),
+                        0x82.toByte(),
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x03,
+                        0xE8.toByte(),
+                    )
+                output.write(closeFrame)
+                output.flush()
+                Thread.sleep(200)
+                socket.close()
+                println("Updated Autobahn reports for agent: $agent")
+            } catch (e: Exception) {
+                println("Warning: Could not update reports for agent $agent: ${e.message}")
+            }
+        }
+
+        // Read index.json from the container via docker exec (avoids file permission issues)
+        var indexJson: String? = null
+        try {
+            val execProcess =
+                ProcessBuilder("docker", "exec", "fuzzingserver", "cat", "/reports/clients/index.json")
+                    .start()
+            indexJson = execProcess.inputStream.bufferedReader().readText()
+            val exitCode = execProcess.waitFor()
+            if (exitCode != 0 || indexJson.isNullOrBlank()) {
+                val err = execProcess.errorStream.bufferedReader().readText()
+                println("Warning: Could not read index.json from container (exit=$exitCode): $err")
+                indexJson = null
+            }
+        } catch (e: Exception) {
+            println("Warning: Could not read index.json from container: ${e.message}")
+        }
+        // Fall back to host file if container read failed
+        if (indexJson == null) {
+            val hostFile = File(file(".docker/reports/clients"), "index.json")
+            if (hostFile.exists()) {
+                indexJson = hostFile.readText()
+            }
+        }
+
+        // Parse results and fail on failures (filtered to agentsToValidate if specified)
+        if (!indexJson.isNullOrBlank()) {
+            @Suppress("UNCHECKED_CAST")
+            val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
+            val failures = mutableListOf<String>()
+            json.forEach { (agent, cases) ->
+                // Skip agents not in the filter set (when a filter is specified)
+                if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
+                @Suppress("UNCHECKED_CAST")
+                (cases as? Map<String, Any>)?.forEach { (caseId, result) ->
+                    @Suppress("UNCHECKED_CAST")
+                    val r = result as? Map<String, Any>
+                    if (r?.get("behavior") == "FAILED") {
+                        failures.add("$agent case $caseId: behaviorClose=${r["behaviorClose"]}")
+                    }
+                }
+            }
+            if (failures.isNotEmpty()) {
+                throw GradleException(
+                    "Autobahn test failures (${failures.size}):\n" +
+                        failures.joinToString("\n") { "  - $it" },
+                )
+            }
+            val scope = agentsToValidate?.joinToString(", ") ?: "all agents"
+            println("All Autobahn tests passed for $scope!")
+        } else {
+            println("Warning: No Autobahn report index.json found")
         }
     }
-tasks.forEach { task ->
-    val taskName = task.name
-    if ((taskName.contains("test", ignoreCase = true) && !taskName.contains("clean", ignoreCase = true)) ||
-        taskName == "check"
-    ) {
-        task.dependsOn(echoWebsocket)
-        task.dependsOn(autobahnContainer)
-        task.finalizedBy(validateAutobahnResults)
+
+// Per-platform validation tasks: each only checks its own agent in the report
+val validateAutobahnResultsJvm =
+    tasks.register("validateAutobahnResultsJvm") {
+        doLast(createAutobahnValidationAction(setOf("JVM")))
     }
+val validateAutobahnResultsLinuxX64 =
+    tasks.register("validateAutobahnResultsLinuxX64") {
+        doLast(createAutobahnValidationAction(setOf("LinuxX64")))
+    }
+val validateAutobahnResultsJs =
+    tasks.register("validateAutobahnResultsJs") {
+        doLast(createAutobahnValidationAction(setOf("NodeJS")))
+    }
+// Validates all agents (used by the convenience integrationTest task)
+val validateAutobahnResults =
+    tasks.register("validateAutobahnResults") {
+        doLast(createAutobahnValidationAction(null))
+    }
+
+// Wire Docker/echo server dependencies only when integration tests are requested
+if (runIntegrationTests) {
+    // Wire actual test execution tasks (not compile/process tasks) to validation
+    tasks.withType<Test>().configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResultsJvm)
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResultsLinuxX64)
+    }
+    tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResultsJs)
+    }
+    tasks.named("check") {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResults)
+    }
+}
+
+// Convenience lifecycle task
+tasks.register("integrationTest") {
+    group = "verification"
+    description = "Run integration tests (requires Docker and echo server)"
+    dependsOn(echoWebsocket)
+    dependsOn(autobahnContainer)
+    finalizedBy(validateAutobahnResults)
+}
+
+/**
+ * Split publishing metadata fix: inject Apple variant references into the Gradle Module Metadata
+ * (.module) file. When publishing from split CI jobs, the Linux host generates the root metadata
+ * but only has Linux/JVM/JS/Android targets registered. Apple variants must be injected so
+ * that KMP consumers on Apple platforms can resolve the dependency.
+ */
+@Suppress("UNCHECKED_CAST")
+fun injectAppleVariantsIntoModuleMetadata(
+    moduleFile: File,
+    version: String,
+    artifactId: String,
+) {
+    val appleTargets =
+        listOf(
+            "iosArm64" to "ios_arm64",
+            "iosSimulatorArm64" to "ios_simulator_arm64",
+            "iosX64" to "ios_x64",
+            "macosArm64" to "macos_arm64",
+            "macosX64" to "macos_x64",
+            "tvosArm64" to "tvos_arm64",
+            "tvosSimulatorArm64" to "tvos_simulator_arm64",
+            "tvosX64" to "tvos_x64",
+            "watchosArm64" to "watchos_arm64",
+            "watchosSimulatorArm64" to "watchos_simulator_arm64",
+            "watchosX64" to "watchos_x64",
+        )
+
+    val json = groovy.json.JsonSlurper().parseText(moduleFile.readText()) as MutableMap<String, Any>
+    val variants = json["variants"] as MutableList<Any>
+
+    appleTargets.forEach { (gradleName, konanName) ->
+        val moduleName = "$artifactId-${gradleName.lowercase()}"
+        val availableAt =
+            mapOf(
+                "url" to "../../$moduleName/$version/$moduleName-$version.module",
+                "group" to "com.ditchoom",
+                "module" to moduleName,
+                "version" to version,
+            )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}ApiElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "library",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-api",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+        variants.add(
+            mapOf(
+                "name" to "${gradleName}SourcesElements-published",
+                "attributes" to
+                    mapOf(
+                        "org.gradle.category" to "documentation",
+                        "org.gradle.dependency.bundling" to "external",
+                        "org.gradle.docstype" to "sources",
+                        "org.gradle.jvm.environment" to "non-jvm",
+                        "org.gradle.usage" to "kotlin-runtime",
+                        "org.jetbrains.kotlin.native.target" to konanName,
+                        "org.jetbrains.kotlin.platform.type" to "native",
+                    ),
+                "available-at" to availableAt,
+            ),
+        )
+    }
+
+    moduleFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)))
 }

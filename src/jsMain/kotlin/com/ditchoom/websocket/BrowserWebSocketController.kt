@@ -3,16 +3,18 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.AllocationZone
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.socket.SocketClosedException
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeout
@@ -25,8 +27,9 @@ import org.w3c.dom.WebSocket
 
 class BrowserWebSocketController(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val zone: AllocationZone,
+    private val pool: BufferPool,
     parentScope: CoroutineScope?,
+    private val allocationZone: AllocationZone = AllocationZone.Direct,
 ) : WebSocketClient {
     override val scope =
         if (parentScope == null) {
@@ -55,10 +58,17 @@ class BrowserWebSocketController(
 
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
-    private val incomingMessageSharedFlow = MutableSharedFlow<WebSocketMessage>()
-    override val incomingMessages = incomingMessageSharedFlow.asSharedFlow()
+    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    override val incomingMessages = incomingMessageChannel.receiveAsFlow()
+
+    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
+    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
+
+    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
+    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
+    private val useSharedMemory = allocationZone == AllocationZone.SharedMemory
 
     init {
         webSocket.binaryType = BinaryType.ARRAYBUFFER
@@ -86,13 +96,13 @@ class BrowserWebSocketController(
             when (val data = it.data) {
                 is ArrayBuffer -> {
                     val buffer =
-                        if (zone == AllocationZone.SharedMemory && crossOriginIsolated) {
+                        if (useSharedMemory && crossOriginIsolated) {
                             val sharedArrayBuffer = SharedArrayBuffer(data.byteLength)
                             val array = Int8Array(sharedArrayBuffer.unsafeCast<ArrayBuffer>())
                             array.set(Int8Array(it.data as ArrayBuffer), 0)
-                            JsBuffer(Int8Array(data), false, data.byteLength, data.byteLength, data.byteLength, sharedArrayBuffer)
+                            JsBuffer(array, sharedArrayBuffer = sharedArrayBuffer)
                         } else {
-                            if (zone == AllocationZone.SharedMemory && !crossOriginIsolated) {
+                            if (useSharedMemory && !crossOriginIsolated) {
                                 console.warn(
                                     "Failed to allocate shared buffer in " +
                                         "BrowserWebSocketController.kt. " +
@@ -105,18 +115,20 @@ class BrowserWebSocketController(
                                 )
                             }
                             val array = Int8Array(data)
-                            val buffer = JsBuffer(array)
-                            buffer.setLimit(array.length)
-                            buffer.setPosition(0)
-                            buffer.slice()
+                            val jsBuffer = JsBuffer(array)
+                            jsBuffer.setLimit(array.length)
+                            jsBuffer.position(0)
+                            jsBuffer.slice()
                         }
                     scope.launch {
-                        incomingMessageSharedFlow.emit(WebSocketMessage.Binary(buffer))
+                        incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
+                        incomingBinaryChannel.trySend(buffer)
                     }
                 }
                 is String ->
                     scope.launch {
-                        incomingMessageSharedFlow.emit(WebSocketMessage.Text(data))
+                        incomingMessageChannel.trySend(WebSocketMessage.Text(data))
+                        incomingTextChannel.trySend(data)
                     }
                 else -> throw IllegalArgumentException("Received invalid message type!")
             }
@@ -171,6 +183,9 @@ class BrowserWebSocketController(
     }
 
     private fun closeInternal() {
+        incomingMessageChannel.close()
+        incomingTextChannel.close()
+        incomingBinaryChannel.close()
         webSocket.close()
     }
 

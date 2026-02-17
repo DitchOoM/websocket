@@ -4,9 +4,8 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.SuspendCloseable
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 
 interface WebSocketClient : SuspendCloseable {
     val scope: CoroutineScope
@@ -25,18 +24,14 @@ interface WebSocketClient : SuspendCloseable {
 
     suspend fun isPingSupported(): Boolean = true
 
-    fun onIncomingWebsocketMessage(cb: (WebSocketMessage) -> Unit) =
-        scope.launch {
-            incomingMessages.collect { cb(it) }
-        }
-
-    fun onConnectionStateChange(cb: (ConnectionState) -> Unit) =
-        scope.launch {
-            connectionState.collect { cb(it) }
-        }
-
     companion object
 
     val connectionState: StateFlow<ConnectionState>
-    val incomingMessages: SharedFlow<WebSocketMessage>
+    val incomingMessages: Flow<WebSocketMessage>
+
+    /** Text messages only — avoids filterIsInstance overhead for typed consumers. */
+    val incomingTextMessages: Flow<String>
+
+    /** Binary messages only — avoids filterIsInstance overhead for typed consumers. */
+    val incomingBinaryMessages: Flow<ReadBuffer>
 }

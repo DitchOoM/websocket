@@ -1,6 +1,8 @@
 package com.ditchoom.websocket
 
-enum class Opcode(val value: Byte) {
+enum class Opcode(
+    val value: Byte,
+) {
     Continuation(0x0),
     Text(0x1),
     Binary(0x2),
@@ -25,34 +27,11 @@ enum class Opcode(val value: Byte) {
 
     fun isControlFrame(): Boolean = this == Close || this == Ping || this == Pong
 
-    fun isValid(): Boolean =
-        this == Close ||
-            this == Ping ||
-            this == Pong ||
-            this == Binary ||
-            this == Text ||
-            this == Continuation
-
     companion object {
-        fun from(byte: Byte) =
-            when (val actualValue = (byte.toUByte() and 15u).toByte()) {
-                Continuation.value -> Continuation
-                Text.value -> Text
-                Binary.value -> Binary
-                ReservedBit3.value -> ReservedBit3
-                ReservedBit4.value -> ReservedBit4
-                ReservedBit5.value -> ReservedBit5
-                ReservedBit6.value -> ReservedBit6
-                ReservedBit7.value -> ReservedBit7
-                Close.value -> Close
-                Ping.value -> Ping
-                Pong.value -> Pong
-                ReservedBitB.value -> ReservedBitB
-                ReservedBitC.value -> ReservedBitC
-                ReservedBitD.value -> ReservedBitD
-                ReservedBitE.value -> ReservedBitE
-                ReservedBitF.value -> ReservedBitF
-                else -> throw IllegalArgumentException("Invalid opcode found $actualValue")
-            }
+        private val VALUES = entries.toTypedArray()
+
+        fun from(byte: Byte) = fromInt(byte.toInt() and 0x0F)
+
+        fun fromInt(byteInt: Int): Opcode = VALUES[byteInt and 0x0F]
     }
 }

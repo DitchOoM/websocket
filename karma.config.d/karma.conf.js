@@ -1,5 +1,5 @@
 config.client = config.client || {}
 config.client.mocha = config.client.mocha || {}
-config.client.mocha.timeout = 40000
-config.browserNoActivityTimeout = 40000
-config.browserDisconnectTimeout = 40000
+// Increase timeout for large payload tests (case9 tests with 16MB payloads)
+config.client.mocha.timeout = 120000 // 2 minutes
+

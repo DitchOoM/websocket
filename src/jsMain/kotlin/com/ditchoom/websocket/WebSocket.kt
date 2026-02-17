@@ -3,14 +3,11 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.AllocationZone
 import kotlinx.coroutines.CoroutineScope
 
+internal actual val supportsCustomDeflateWindowBits: Boolean = false
+internal actual val supportsDeflateContextTakeover: Boolean = false
+
 actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
-    zone: AllocationZone,
     parentScope: CoroutineScope?,
-): WebSocketClient {
-    return try {
-        DefaultWebSocketClient(connectionOptions, zone, parentScope)
-    } catch (e: UnsupportedOperationException) {
-        BrowserWebSocketController(connectionOptions, zone, parentScope)
-    }
-}
+    allocationZone: AllocationZone,
+): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, allocationZone)

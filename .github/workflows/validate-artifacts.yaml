@@ -1,0 +1,165 @@
+name: "Validate Merged Artifacts"
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version string to validate"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: "Validate Artifacts"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-linux
+          path: /tmp/maven-local/com/ditchoom
+
+      - name: Download Apple artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: maven-local-apple
+          path: /tmp/maven-local/com/ditchoom
+
+      - name: Validate artifacts
+        run: |
+          version="${{ inputs.version }}"
+          FAILED=false
+          BASE="/tmp/maven-local/com/ditchoom"
+
+          echo "=== Validating v${version} Merged Artifacts ==="
+          echo ""
+
+          # 1. Root module metadata - all platform variants
+          PLATFORMS="jvm js linuxx64 linuxarm64 macosarm64 macosx64 iosarm64 iossimulatorarm64"
+
+          echo "--- websocket module metadata ---"
+          MODULE_FILE="${BASE}/websocket/${version}/websocket-${version}.module"
+          if [ ! -f "$MODULE_FILE" ]; then
+            echo "FAIL: ${MODULE_FILE} not found"
+            FAILED=true
+          else
+            for platform in $PLATFORMS; do
+              if grep -q "$platform" "$MODULE_FILE"; then
+                echo "  $platform variant present"
+              else
+                echo "  FAIL: ${platform} variant not found in websocket metadata"
+                FAILED=true
+              fi
+            done
+          fi
+          echo ""
+
+          # 2. JVM jar
+          echo "--- JVM JAR ---"
+          JAR_FILE=$(find "${BASE}/websocket-jvm" -name "websocket-jvm-${version}.jar" | head -1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "FAIL: websocket-jvm JAR not found"
+            FAILED=true
+          else
+            echo "  websocket-jvm JAR present"
+          fi
+          echo ""
+
+          # 3. JS klib
+          echo "--- JS klib ---"
+          JS_KLIB=$(find "${BASE}/websocket-js" -name "websocket-js-${version}.klib" 2>/dev/null | head -1)
+          if [ -z "$JS_KLIB" ]; then
+            echo "FAIL: websocket-js klib not found"
+            FAILED=true
+          else
+            echo "  websocket-js klib present"
+          fi
+          echo ""
+
+          # 4. Android AAR
+          echo "--- Android AAR ---"
+          AAR_DIR="${BASE}/websocket-android/${version}"
+          if [ -d "$AAR_DIR" ]; then
+            AAR=$(find "$AAR_DIR" -name "*.aar" | head -1)
+            if [ -z "$AAR" ]; then
+              echo "FAIL: websocket-android AAR not found in ${AAR_DIR}"
+              FAILED=true
+            else
+              echo "  websocket-android AAR present"
+            fi
+          else
+            echo "FAIL: websocket-android directory not found"
+            FAILED=true
+          fi
+          echo ""
+
+          # 5. Linux klibs
+          echo "--- Linux klibs ---"
+          for arch in linuxx64 linuxarm64; do
+            KLIB=$(find "${BASE}/websocket-${arch}" -name "websocket-${arch}-${version}.klib" 2>/dev/null | head -1)
+            if [ -z "$KLIB" ]; then
+              echo "FAIL: ${arch} klib not found"
+              FAILED=true
+            else
+              echo "  ${arch} klib present"
+            fi
+          done
+          echo ""
+
+          # 6. Apple klibs
+          echo "--- Apple klibs ---"
+          for target in macosarm64 macosx64 iosarm64 iossimulatorarm64 iosx64 tvosarm64 tvossimulatorarm64 tvosx64 watchosarm64 watchossimulatorarm64 watchosx64; do
+            KLIB=$(find "${BASE}/websocket-${target}" -name "websocket-${target}-${version}.klib" 2>/dev/null | head -1)
+            if [ -z "$KLIB" ]; then
+              echo "FAIL: ${target} klib not found"
+              FAILED=true
+            else
+              echo "  ${target} klib present"
+            fi
+          done
+          echo ""
+
+          # 7. Signing coverage - detect file types not covered by publish signing glob
+          echo "--- Signing Coverage Check ---"
+          KNOWN_SIGNABLE="jar klib pom module aar json"
+          KNOWN_METADATA="xml repositories"
+          UNCOVERED=0
+          while IFS= read -r file; do
+            ext="${file##*.}"
+            COVERED=false
+            for known in $KNOWN_SIGNABLE $KNOWN_METADATA; do
+              if [ "$ext" = "$known" ]; then
+                COVERED=true
+                break
+              fi
+            done
+            if [ "$COVERED" = "false" ]; then
+              REL=$(echo "$file" | sed "s|${BASE}/||")
+              echo "  FAIL: Unsignable file type '.${ext}': ${REL}"
+              UNCOVERED=$((UNCOVERED + 1))
+            fi
+          done < <(find "${BASE}" -type f ! -name "*.md5" ! -name "*.sha1" ! -name "*.asc")
+          if [ "$UNCOVERED" -gt 0 ]; then
+            echo "  ${UNCOVERED} files with types not covered by publish signing glob"
+            FAILED=true
+          else
+            echo "  All artifact file types covered by signing glob"
+          fi
+          echo ""
+
+          # 8. Kotlin tooling metadata
+          echo "--- Metadata Artifacts ---"
+          METADATA="${BASE}/websocket/${version}/websocket-${version}-kotlin-tooling-metadata.json"
+          if [ -f "$METADATA" ]; then
+            echo "  websocket kotlin-tooling-metadata.json present"
+          else
+            echo "  WARN: websocket kotlin-tooling-metadata.json not found (may not be generated for all modules)"
+          fi
+          echo ""
+
+          if [ "$FAILED" = true ]; then
+            echo "=== VALIDATION FAILED ==="
+            exit 1
+          fi
+          echo "=== ALL VALIDATIONS PASSED ==="

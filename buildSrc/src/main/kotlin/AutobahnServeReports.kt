@@ -1,13 +1,10 @@
-import io.ktor.application.install
-import io.ktor.http.content.default
-import io.ktor.http.content.files
-import io.ktor.http.content.static
-import io.ktor.http.content.staticRootFolder
-import io.ktor.routing.IgnoreTrailingSlash
-import io.ktor.routing.routing
+import io.ktor.server.application.install
+import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.http.content.staticFiles
 import io.ktor.server.netty.Netty
-import io.ktor.server.netty.NettyApplicationEngine
+import io.ktor.server.plugins.autohead.AutoHeadResponse
+import io.ktor.server.routing.routing
 import org.gradle.api.DefaultTask
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
@@ -43,7 +40,7 @@ interface AutobahnServerParameters : WorkParameters {
     var projectDir: File
 }
 
-private var serverGlobal: NettyApplicationEngine? = null
+private var serverGlobal: ApplicationEngine? = null
 
 abstract class AutobahnHttpServer : WorkAction<AutobahnServerParameters> {
 
@@ -51,11 +48,10 @@ abstract class AutobahnHttpServer : WorkAction<AutobahnServerParameters> {
         val path = File("${parameters.projectDir}/.docker/reports/clients")
         println("Starting http server port: ${parameters.port} @ ${path.absolutePath} exists: ${path.exists()}")
         val server = embeddedServer(Netty, port = parameters.port) {
-            install(IgnoreTrailingSlash)
+            install(AutoHeadResponse)
             routing {
-                static {
-                    files(path)
-                    default(File(path, "index.html"))
+                staticFiles("/", path) {
+                    default("index.html")
                 }
             }
         }
