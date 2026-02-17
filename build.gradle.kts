@@ -350,8 +350,8 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
         // BrowserJS excluded: browser Autobahn tests silently skip (DefaultWebSocketClient
-// needs raw socket access unavailable in browsers). See jsTest/TestUtils.js.kt.
-val allAgents = listOf("JVM", "NodeJS", "macOS", "iOS", "LinuxX64", "Android")
+        // needs raw socket access unavailable in browsers). See jsTest/TestUtils.js.kt.
+        val allAgents = listOf("JVM", "NodeJS", "macOS", "iOS", "LinuxX64", "Android")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
