@@ -173,6 +173,30 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     }
 }
 
+// Workaround: KMP doesn't create linuxArm64Test execution task on ARM64 hosts.
+// Register an Exec-based task that links the test binary and runs it directly.
+if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_ARM64) {
+    afterEvaluate {
+        if (tasks.findByName("linuxArm64Test") == null) {
+            tasks.register<Exec>("linuxArm64Test") {
+                group = "verification"
+                description = "Runs linuxArm64 native tests"
+                dependsOn("linkDebugTestLinuxArm64")
+                val testBinary = project.layout.buildDirectory.file("bin/linuxArm64/debugTest/test.kexe")
+                executable(testBinary.get().asFile.absolutePath)
+                val negativeFilters = mutableListOf<String>()
+                negativeFilters.addAll(profilingTestPatterns)
+                if (!runIntegrationTests) {
+                    negativeFilters.addAll(integrationTestPatterns)
+                }
+                if (negativeFilters.isNotEmpty()) {
+                    args("--ktest_negative_filter=${negativeFilters.joinToString(",")}")
+                }
+            }
+        }
+    }
+}
+
 // Filter Kotlin/JS tests
 tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
     // Always exclude profiling tests from CI

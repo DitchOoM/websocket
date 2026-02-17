@@ -13,6 +13,10 @@ on:
       - '*.md'
       - 'docs/**'
 
+concurrency:
+  group: autobahn-${{ github.ref }}
+  cancel-in-progress: true
+
 # Reusable PyPy2 install script. autobahntestsuite is Python 2 only,
 # so we use prebuilt PyPy2 binaries instead of Docker.
 env:
