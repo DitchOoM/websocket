@@ -24,7 +24,7 @@ env:
 
 jobs:
   autobahn-linux:
-    name: "Autobahn (JVM, LinuxX64, NodeJS, BrowserJS)"
+    name: "Autobahn (JVM, LinuxX64, NodeJS)"
     runs-on: ubuntu-latest
     timeout-minutes: 60
     continue-on-error: ${{ github.event_name == 'pull_request' }}
@@ -36,9 +36,6 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
-
-      - name: Setup Chrome
-        uses: browser-actions/setup-chrome@v1
 
       - name: Install PyPy2 and autobahntestsuite
         run: |
@@ -94,7 +91,9 @@ jobs:
         env:
           AUTOBAHN_HOST: 127.0.0.1
         run: |
-          ./gradlew :jvmTest :linuxX64Test :jsNodeTest :jsBrowserTest \
+          # Note: jsBrowserTest excluded — browser Autobahn tests silently skip
+          # because DefaultWebSocketClient needs raw socket access unavailable in browsers.
+          ./gradlew :jvmTest :linuxX64Test :jsNodeTest \
             -PintegrationTests --no-build-cache
 
       - name: Upload report
