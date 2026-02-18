@@ -501,6 +501,16 @@ val validateAutobahnResults =
         doLast(createAutobahnValidationAction(null))
     }
 
+// Skip Cat 12/13 heavy compression tests (used on Apple CI where K/N text
+// compression is ~25x slower due to missing simdutf for writeString).
+val skipHeavyCompression = project.hasProperty("skipHeavyCompression")
+if (skipHeavyCompression) {
+    tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
+        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase12*")
+        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
+    }
+}
+
 // Wire Docker/echo server dependencies only when integration tests are requested
 if (runIntegrationTests) {
     // Wire actual test execution tasks (not compile/process tasks) to validation
