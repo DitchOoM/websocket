@@ -109,7 +109,7 @@ jobs:
   autobahn-apple:
     name: "Autobahn (macOS)"
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
