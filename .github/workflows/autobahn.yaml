@@ -107,9 +107,11 @@ jobs:
   # sets), so x64 testing provides equivalent coverage.
 
   autobahn-apple:
+    # K/N compression is ~10x slower than JVM: 216 test cases × 1000 messages
+    # = 216k compress/decompress cycles that need 100+ min on macOS runners.
     name: "Autobahn (macOS)"
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
