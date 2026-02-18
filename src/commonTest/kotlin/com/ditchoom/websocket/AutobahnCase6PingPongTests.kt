@@ -1,11 +1,13 @@
 package com.ditchoom.websocket
 
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.seconds
 
 class AutobahnCase6PingPongTests {
+    // Extended timeout: ~66 sequential websocket connections
     @Test
     fun category6_valid_utf8() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = 60.seconds) {
             // 6.1: Empty/zero-length fragments
             for (case in 65..67) echoMessageAndClose(case)
             // 6.2: Valid UTF-8 with fragmentation boundaries
@@ -30,9 +32,10 @@ class AutobahnCase6PingPongTests {
             for (case in 203..209) echoMessageAndClose(case)
         }
 
+    // Extended timeout: ~63 sequential websocket connections
     @Test
     fun category6_invalid_utf8() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = 60.seconds) {
             // 6.3: Invalid unfragmented
             for (case in 72..73) prepareConnection(case)
             // 6.4: Invalid with fragmentation
