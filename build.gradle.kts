@@ -351,8 +351,7 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 fun createAutobahnValidationAction(
     agentsToValidate: Set<String>?,
     failOnError: Boolean = true,
-) =
-    Action<Task> {
+) = Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
         val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
         allAgents.forEach { agent ->
