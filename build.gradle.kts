@@ -352,113 +352,113 @@ fun createAutobahnValidationAction(
     agentsToValidate: Set<String>?,
     failOnError: Boolean = true,
 ) = Action<Task> {
-        val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
-        allAgents.forEach { agent ->
-            try {
-                val socket = Socket(autobahnHost, 9001)
-                socket.soTimeout = 5000
-                val output = socket.getOutputStream()
-                val input = socket.getInputStream()
-                val path = "/updateReports?agent=$agent"
-                val keyBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
-                val key = Base64.getEncoder().encodeToString(keyBytes)
-                val request =
-                    "GET $path HTTP/1.1\r\n" +
-                        "Host: $autobahnHost:9001\r\n" +
-                        "Upgrade: websocket\r\n" +
-                        "Connection: Upgrade\r\n" +
-                        "Sec-WebSocket-Key: $key\r\n" +
-                        "Sec-WebSocket-Version: 13\r\n" +
-                        "\r\n"
-                output.write(request.toByteArray())
-                output.flush()
-                // Read response headers
-                val buffer = StringBuilder()
-                while (!buffer.endsWith("\r\n\r\n")) {
-                    val b = input.read()
-                    if (b == -1) break
-                    buffer.append(b.toChar())
-                }
-                // Send close frame (opcode 0x88, mask bit set, 2-byte payload with code 1000)
-                val closeFrame =
-                    byteArrayOf(
-                        0x88.toByte(),
-                        0x82.toByte(),
-                        0x00,
-                        0x00,
-                        0x00,
-                        0x00,
-                        0x03,
-                        0xE8.toByte(),
-                    )
-                output.write(closeFrame)
-                output.flush()
-                Thread.sleep(200)
-                socket.close()
-                println("Updated Autobahn reports for agent: $agent")
-            } catch (e: Exception) {
-                println("Warning: Could not update reports for agent $agent: ${e.message}")
-            }
-        }
-
-        // Read index.json from the container via docker exec (avoids file permission issues)
-        var indexJson: String? = null
+    val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
+    val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
+    allAgents.forEach { agent ->
         try {
-            val execProcess =
-                ProcessBuilder("docker", "exec", "fuzzingserver", "cat", "/reports/clients/index.json")
-                    .start()
-            indexJson = execProcess.inputStream.bufferedReader().readText()
-            val exitCode = execProcess.waitFor()
-            if (exitCode != 0 || indexJson.isNullOrBlank()) {
-                val err = execProcess.errorStream.bufferedReader().readText()
-                println("Warning: Could not read index.json from container (exit=$exitCode): $err")
-                indexJson = null
+            val socket = Socket(autobahnHost, 9001)
+            socket.soTimeout = 5000
+            val output = socket.getOutputStream()
+            val input = socket.getInputStream()
+            val path = "/updateReports?agent=$agent"
+            val keyBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
+            val key = Base64.getEncoder().encodeToString(keyBytes)
+            val request =
+                "GET $path HTTP/1.1\r\n" +
+                    "Host: $autobahnHost:9001\r\n" +
+                    "Upgrade: websocket\r\n" +
+                    "Connection: Upgrade\r\n" +
+                    "Sec-WebSocket-Key: $key\r\n" +
+                    "Sec-WebSocket-Version: 13\r\n" +
+                    "\r\n"
+            output.write(request.toByteArray())
+            output.flush()
+            // Read response headers
+            val buffer = StringBuilder()
+            while (!buffer.endsWith("\r\n\r\n")) {
+                val b = input.read()
+                if (b == -1) break
+                buffer.append(b.toChar())
             }
+            // Send close frame (opcode 0x88, mask bit set, 2-byte payload with code 1000)
+            val closeFrame =
+                byteArrayOf(
+                    0x88.toByte(),
+                    0x82.toByte(),
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x00,
+                    0x03,
+                    0xE8.toByte(),
+                )
+            output.write(closeFrame)
+            output.flush()
+            Thread.sleep(200)
+            socket.close()
+            println("Updated Autobahn reports for agent: $agent")
         } catch (e: Exception) {
-            println("Warning: Could not read index.json from container: ${e.message}")
-        }
-        // Fall back to host file if container read failed
-        if (indexJson == null) {
-            val hostFile = File(file(".docker/reports/clients"), "index.json")
-            if (hostFile.exists()) {
-                indexJson = hostFile.readText()
-            }
-        }
-
-        // Parse results and fail on failures (filtered to agentsToValidate if specified)
-        if (!indexJson.isNullOrBlank()) {
-            @Suppress("UNCHECKED_CAST")
-            val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
-            val failures = mutableListOf<String>()
-            json.forEach { (agent, cases) ->
-                // Skip agents not in the filter set (when a filter is specified)
-                if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
-                @Suppress("UNCHECKED_CAST")
-                (cases as? Map<String, Any>)?.forEach { (caseId, result) ->
-                    @Suppress("UNCHECKED_CAST")
-                    val r = result as? Map<String, Any>
-                    if (r?.get("behavior") == "FAILED") {
-                        failures.add("$agent case $caseId: behaviorClose=${r["behaviorClose"]}")
-                    }
-                }
-            }
-            if (failures.isNotEmpty()) {
-                val msg =
-                    "Autobahn test failures (${failures.size}):\n" +
-                        failures.joinToString("\n") { "  - $it" }
-                if (failOnError) {
-                    throw GradleException(msg)
-                } else {
-                    println("Warning (non-fatal): $msg")
-                }
-            }
-            val scope = agentsToValidate?.joinToString(", ") ?: "all agents"
-            if (failures.isEmpty()) println("All Autobahn tests passed for $scope!")
-        } else {
-            println("Warning: No Autobahn report index.json found")
+            println("Warning: Could not update reports for agent $agent: ${e.message}")
         }
     }
+
+    // Read index.json from the container via docker exec (avoids file permission issues)
+    var indexJson: String? = null
+    try {
+        val execProcess =
+            ProcessBuilder("docker", "exec", "fuzzingserver", "cat", "/reports/clients/index.json")
+                .start()
+        indexJson = execProcess.inputStream.bufferedReader().readText()
+        val exitCode = execProcess.waitFor()
+        if (exitCode != 0 || indexJson.isNullOrBlank()) {
+            val err = execProcess.errorStream.bufferedReader().readText()
+            println("Warning: Could not read index.json from container (exit=$exitCode): $err")
+            indexJson = null
+        }
+    } catch (e: Exception) {
+        println("Warning: Could not read index.json from container: ${e.message}")
+    }
+    // Fall back to host file if container read failed
+    if (indexJson == null) {
+        val hostFile = File(file(".docker/reports/clients"), "index.json")
+        if (hostFile.exists()) {
+            indexJson = hostFile.readText()
+        }
+    }
+
+    // Parse results and fail on failures (filtered to agentsToValidate if specified)
+    if (!indexJson.isNullOrBlank()) {
+        @Suppress("UNCHECKED_CAST")
+        val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
+        val failures = mutableListOf<String>()
+        json.forEach { (agent, cases) ->
+            // Skip agents not in the filter set (when a filter is specified)
+            if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
+            @Suppress("UNCHECKED_CAST")
+            (cases as? Map<String, Any>)?.forEach { (caseId, result) ->
+                @Suppress("UNCHECKED_CAST")
+                val r = result as? Map<String, Any>
+                if (r?.get("behavior") == "FAILED") {
+                    failures.add("$agent case $caseId: behaviorClose=${r["behaviorClose"]}")
+                }
+            }
+        }
+        if (failures.isNotEmpty()) {
+            val msg =
+                "Autobahn test failures (${failures.size}):\n" +
+                    failures.joinToString("\n") { "  - $it" }
+            if (failOnError) {
+                throw GradleException(msg)
+            } else {
+                println("Warning (non-fatal): $msg")
+            }
+        }
+        val scope = agentsToValidate?.joinToString(", ") ?: "all agents"
+        if (failures.isEmpty()) println("All Autobahn tests passed for $scope!")
+    } else {
+        println("Warning: No Autobahn report index.json found")
+    }
+}
 
 // Per-platform validation tasks: each only checks its own agent in the report
 val validateAutobahnResultsJvm =
