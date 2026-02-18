@@ -173,7 +173,7 @@ jobs:
         run: |
           # iOS shares the same appleMain source set as macOS — testing one
           # platform provides equivalent coverage without doubling CI time.
-          # Cat 12/13 excluded: text compression timeouts due to missing simdutf
+          # Cat 9/12/13 excluded: text compression timeouts due to missing simdutf
           # on Apple (writeString 25x slower). Compression code is in commonMain
           # and fully tested on JVM + Linux K/N.
           ./gradlew macosArm64Test \
