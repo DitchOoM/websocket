@@ -348,7 +348,10 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 // Shared logic for Autobahn validation tasks. When agentsToValidate is null, all agents are checked.
 // Set failOnError=false for platforms with known protocol-level limitations (e.g. BrowserJS
 // can't control close codes since the browser's native WebSocket API handles them internally).
-fun createAutobahnValidationAction(agentsToValidate: Set<String>?, failOnError: Boolean = true) =
+fun createAutobahnValidationAction(
+    agentsToValidate: Set<String>?,
+    failOnError: Boolean = true,
+) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
         val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
@@ -442,8 +445,9 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?, failOnError: 
                 }
             }
             if (failures.isNotEmpty()) {
-                val msg = "Autobahn test failures (${failures.size}):\n" +
-                    failures.joinToString("\n") { "  - $it" }
+                val msg =
+                    "Autobahn test failures (${failures.size}):\n" +
+                        failures.joinToString("\n") { "  - $it" }
                 if (failOnError) {
                     throw GradleException(msg)
                 } else {
