@@ -1,11 +1,13 @@
 package com.ditchoom.websocket
 
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.seconds
 
 class AutobahnCase9CompressionTests {
+    // Extended timeout: ~20 cases echoing up to 4MB compressed messages
     @Test
     fun category9_text() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = 120.seconds) {
             // 9.1: Large text (single message echo)
             for (case in 247..252) echoMessageAndClose(case, requestCompression = true)
             // 9.3: Fragmented text 4MB
@@ -14,9 +16,10 @@ class AutobahnCase9CompressionTests {
             for (case in 277..282) echoMessageAndClose(case, requestCompression = true)
         }
 
+    // Extended timeout: ~20 cases echoing up to 4MB compressed messages
     @Test
     fun category9_binary() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = 120.seconds) {
             // 9.2: Large binary (single message echo)
             for (case in 253..258) echoBinaryMessageAndClose(case, requestCompression = true)
             // 9.4: Fragmented binary 4MB

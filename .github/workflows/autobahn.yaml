@@ -109,7 +109,7 @@ jobs:
   autobahn-apple:
     name: "Autobahn (macOS)"
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
@@ -173,11 +173,11 @@ jobs:
         run: |
           # iOS shares the same appleMain source set as macOS — testing one
           # platform provides equivalent coverage without doubling CI time.
-          # Cat 9/12/13 excluded: text compression timeouts due to missing simdutf
-          # on Apple (writeString 25x slower). Compression code is in commonMain
-          # and fully tested on JVM + Linux K/N.
+          # Only text-heavy batch tests excluded (12.1, 12.4, 13.x): writeString
+          # is 25x slower on Apple K/N without simdutf. Binary compression and
+          # Cat 9 (single-message echo) run with extended timeouts.
           ./gradlew macosArm64Test \
-            -PintegrationTests -PskipHeavyCompression --no-build-cache
+            -PintegrationTests -PskipHeavyTextCompression --no-build-cache
 
       - name: Upload report
         if: always()
@@ -189,9 +189,9 @@ jobs:
 
   autobahn-android:
     name: "Autobahn (Android)"
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
 

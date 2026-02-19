@@ -501,15 +501,19 @@ val validateAutobahnResults =
         doLast(createAutobahnValidationAction(null))
     }
 
-// Skip Cat 9/12/13 heavy compression tests (used on Apple CI where K/N text
-// compression is ~25x slower due to missing simdutf for writeString).
-// Cat 9 includes 4MB message compression that exceeds the 10s default timeout.
+// Skip heavy TEXT compression tests on Apple CI where writeString is ~25x slower
+// without simdutf. Binary compression tests (12.2, 12.3, 12.5) pass fine.
+// Cat 9 runs with extended 120s timeout instead of being excluded.
 // Compression code is in commonMain and fully tested on JVM + Linux K/N.
-val skipHeavyCompression = project.hasProperty("skipHeavyCompression")
-if (skipHeavyCompression) {
+val skipHeavyTextCompression = project.hasProperty("skipHeavyTextCompression")
+if (skipHeavyTextCompression) {
     tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest>().configureEach {
-        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase9*")
-        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase12*")
+        // 9.7: 1000 text messages with compression (same bottleneck as 12.1)
+        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase9CompressionTests.category9_text_latency")
+        // 12.1 (text echo, context takeover) and 12.4 (text echo, no context takeover)
+        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase12CompressionTests.category12_1*")
+        filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase12CompressionTests.category12_4*")
+        // 13.x: All text echo with 1000 messages
         filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
     }
 }
