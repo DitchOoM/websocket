@@ -6,8 +6,9 @@ import kotlin.time.Duration.Companion.seconds
 
 expect class TestRunResult
 
-// Timeout for simple echo/connect tests (ping/pong, payload, UTF-8, close, fragmentation)
-internal val testTimeout = 10.seconds
+// Timeout for echo/connect tests. 60s accommodates tests with many sequential
+// websocket connections on Apple K/N where each connection is slower than JVM.
+internal val testTimeout = 60.seconds
 
 // Extended timeout for heavy compression tests (6 cases x 1000 messages each per batch)
 // Linux K/N compression is ~10x slower than JVM, and Cat 12 payloads reach 512KB per message
