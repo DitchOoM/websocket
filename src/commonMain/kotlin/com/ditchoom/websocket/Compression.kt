@@ -157,6 +157,7 @@ internal fun decompressToBufferSync(
     buffer: ReadBuffer,
     decompressor: StreamingDecompressor,
     zone: AllocationZone = AllocationZone.Heap,
+    pool: BufferPool? = null,
 ): ReadBuffer {
     var totalSize = 0
     val chunks = mutableListOf<ReadBuffer>()
@@ -186,7 +187,7 @@ internal fun decompressToBufferSync(
     }
 
     // Combine chunks into final output
-    val output = PlatformBuffer.allocate(totalSize, zone)
+    val output = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, zone)
     for (chunk in chunks) {
         chunk.position(0)
         output.write(chunk)

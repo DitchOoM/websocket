@@ -12,9 +12,10 @@ actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
+    bufferPool: BufferPool?,
 ): WebSocketClient =
     if (isNodeJs) {
-        DefaultWebSocketClient(connectionOptions, parentScope, allocationZone)
+        DefaultWebSocketClient(connectionOptions, parentScope, allocationZone, externalPool = bufferPool)
     } else {
-        BrowserWebSocketController(connectionOptions, BufferPool(), parentScope, allocationZone)
+        BrowserWebSocketController(connectionOptions, bufferPool ?: BufferPool(), parentScope, allocationZone)
     }

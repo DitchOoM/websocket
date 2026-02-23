@@ -5,6 +5,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
@@ -146,6 +147,7 @@ value class FrameHeaderByte2(
  */
 class FrameReader(
     private val processor: SuspendingStreamProcessor,
+    private val pool: BufferPool? = null,
 ) {
     /**
      * Attempts to read a complete frame from the processor.
@@ -219,7 +221,7 @@ class FrameReader(
                             buffer
                         } else {
                             // Fallback: copy to writable buffer
-                            val copy = PlatformBuffer.allocate(actualPayloadLength)
+                            val copy = pool?.acquire(actualPayloadLength) ?: PlatformBuffer.allocate(actualPayloadLength)
                             copy.write(buffer)
                             copy
                         }

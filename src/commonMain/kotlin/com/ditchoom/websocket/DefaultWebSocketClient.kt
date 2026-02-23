@@ -69,12 +69,13 @@ class DefaultWebSocketClient(
     private val allocationZone: AllocationZone = AllocationZone.Direct,
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
     internal val socketOverride: ClientToServerSocket? = null,
+    externalPool: BufferPool? = null,
 ) : WebSocketClient {
     // Lock-free pool for thread-safe buffer reuse across read loop and caller coroutines.
     // Must be multi-threaded: the read loop runs on Dispatchers.Default while
     // write()/close() are called from the caller's coroutine context.
     private val pool =
-        BufferPool(
+        externalPool ?: BufferPool(
             threadingMode = ThreadingMode.MultiThreaded,
             defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
             allocationZone = allocationZone,
@@ -370,8 +371,8 @@ class DefaultWebSocketClient(
 
     private fun startReadLoop(autoFillingStream: AutoFillingSuspendingStreamProcessor) {
         scope.launch {
-            val frameReader = FrameReader(autoFillingStream)
-            val messageAssembler = MessageAssembler(compressionEnabled)
+            val frameReader = FrameReader(autoFillingStream, pool)
+            val messageAssembler = MessageAssembler(compressionEnabled, pool)
 
             try {
                 readLoop@ while (isOpen() && isActive) {
@@ -548,7 +549,7 @@ class DefaultWebSocketClient(
         return try {
             // Stream decompress to single buffer - reduces peak memory
             // Use Direct zone so output buffer has NativeMemoryAccess for re-compression
-            decompressToBufferSync(payload, decompressor, allocationZone)
+            decompressToBufferSync(payload, decompressor, allocationZone, pool)
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {

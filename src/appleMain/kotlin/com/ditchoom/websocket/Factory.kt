@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.pool.BufferPool
 import kotlinx.coroutines.CoroutineScope
 
 internal actual val supportsCustomDeflateWindowBits: Boolean = false
@@ -10,4 +11,5 @@ actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
-): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, allocationZone)
+    bufferPool: BufferPool?,
+): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, allocationZone, externalPool = bufferPool)
