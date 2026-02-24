@@ -444,6 +444,7 @@ class DefaultWebSocketClient(
                     }
                 }
             } finally {
+                messageAssembler.reset()
                 autoFillingStream.release()
             }
         }

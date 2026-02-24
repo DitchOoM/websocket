@@ -5,6 +5,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
@@ -100,6 +101,7 @@ class MessageAssembler(
      * Resets the assembler state, discarding any partial message.
      */
     fun reset() {
+        fragmentBuffers.freeAll()
         firstFrameOpcode = null
         firstFrameRsv1 = false
         fragmentBuffers.clear()
@@ -230,6 +232,9 @@ class MessageAssembler(
         // For single-fragment messages, the payload IS the fragment (no copy), so no cleanup needed.
         val fragments = if (fragmentBuffers.size > 1) fragmentBuffers.toList() else emptyList()
         val message = assembleMessage()
+        // Clear before reset() to avoid double-free — fragments are returned
+        // to the caller via fragmentsToClose for explicit cleanup.
+        fragmentBuffers.clear()
         reset()
         return AssemblyResult.CompleteMessage(message, fragments)
     }
