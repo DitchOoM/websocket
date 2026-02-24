@@ -45,7 +45,13 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
-        browser()
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                }
+            }
+        }
         nodejs {
             testTask {
                 useMocha {
@@ -183,6 +189,10 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
+        // Browser WebSocket API doesn't support custom windowBits or context takeover control
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
+        // Browser WebSocket API controls close frame behavior; can't handle invalid close codes correctly (7.9.x)
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase7CloseTests")
     }
 }
 
@@ -346,7 +356,7 @@ val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerC
 fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "macOS", "LinuxX64")
+        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
@@ -462,6 +472,10 @@ val validateAutobahnResultsJs =
     tasks.register("validateAutobahnResultsJs") {
         doLast(createAutobahnValidationAction(setOf("NodeJS")))
     }
+val validateAutobahnResultsBrowser =
+    tasks.register("validateAutobahnResultsBrowser") {
+        doLast(createAutobahnValidationAction(setOf("BrowserJS")))
+    }
 // Validates all agents (used by the convenience integrationTest task)
 val validateAutobahnResults =
     tasks.register("validateAutobahnResults") {
@@ -484,7 +498,11 @@ if (runIntegrationTests) {
     tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
         dependsOn(echoWebsocket)
         dependsOn(autobahnContainer)
-        finalizedBy(validateAutobahnResultsJs)
+        if (name.contains("Browser", ignoreCase = true)) {
+            finalizedBy(validateAutobahnResultsBrowser)
+        } else {
+            finalizedBy(validateAutobahnResultsJs)
+        }
     }
     tasks.named("check") {
         dependsOn(echoWebsocket)

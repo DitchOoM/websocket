@@ -96,9 +96,19 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     ws.awaitConnected()
     val connectTime = mark.elapsedNow()
     try {
+        var msgIdx = 0
+        val perMsgMark = TimeSource.Monotonic.markNow()
         ws.incomingMessages.filter { it is WebSocketMessage.Text }.take(count).collect {
+            val recvTime = perMsgMark.elapsedNow()
             val m = it as WebSocketMessage.Text
             ws.write(m.value)
+            val writeTime = perMsgMark.elapsedNow()
+            if (count > 100 && (msgIdx < 5 || msgIdx % 100 == 0 || msgIdx == count - 1)) {
+                println(
+                    "  MSG[$msgIdx] recv=${recvTime.inWholeMilliseconds}ms write=${writeTime.inWholeMilliseconds}ms len=${m.value.length}",
+                )
+            }
+            msgIdx++
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
