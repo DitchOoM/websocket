@@ -10,4 +10,9 @@ actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
     allocationZone: AllocationZone,
-): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, allocationZone)
+): WebSocketClient =
+    if (connectionOptions.useNativePlatformClient) {
+        NWWebSocketClient(connectionOptions, parentScope)
+    } else {
+        DefaultWebSocketClient(connectionOptions, parentScope, allocationZone)
+    }

@@ -36,6 +36,7 @@ data class WebSocketConnectionOptions(
     val protocols: List<String> = emptyList(),
     val requestCompression: Boolean = false,
     val compressionOptions: CompressionOptions = CompressionOptions(),
+    val useNativePlatformClient: Boolean = true,
 ) {
     internal fun buildUrl(): String {
         val prefix =

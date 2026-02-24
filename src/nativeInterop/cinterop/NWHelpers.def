@@ -1,0 +1,93 @@
+language = Objective-C
+package = com.ditchoom.websocket.nwhelpers
+headers = nw_helpers.h
+headerFilter = nw_helpers.h
+linkerOpts = -framework Network -framework Foundation
+---
+#include <Network/Network.h>
+#include <Foundation/Foundation.h>
+
+void nw_helper_receive(
+    nw_connection_t _Nonnull connection,
+    uint32_t minimum_incomplete_length,
+    uint32_t maximum_length,
+    nw_receive_nsdata_handler_t _Nonnull handler)
+{
+    nw_connection_receive(connection, minimum_incomplete_length, maximum_length,
+        ^(dispatch_data_t _Nullable content, nw_content_context_t _Nullable context,
+          bool is_complete, nw_error_t _Nullable error) {
+            handler((NSData *)content, context, @(is_complete), error);
+        });
+}
+
+void nw_helper_ws_receive_message(
+    nw_connection_t _Nonnull connection,
+    nw_ws_receive_handler_t _Nonnull handler)
+{
+    nw_connection_receive_message(connection, ^(dispatch_data_t _Nullable content,
+        nw_content_context_t _Nullable context, bool is_complete, nw_error_t _Nullable error) {
+
+            __block int32_t opcode = -1;
+            __block int32_t close_code = 0;
+
+            if (context != NULL) {
+                nw_content_context_foreach_protocol_metadata(context,
+                    ^(nw_protocol_definition_t _Nonnull definition,
+                      nw_protocol_metadata_t _Nonnull metadata) {
+                        opcode = (int32_t)nw_ws_metadata_get_opcode(metadata);
+                        if (opcode == nw_ws_opcode_close) {
+                            close_code = (int32_t)nw_ws_metadata_get_close_code(metadata);
+                        }
+                    });
+            }
+
+            NSError *nsErr = nil;
+            if (error != NULL) {
+                int code = nw_error_get_error_code(error);
+                int domain = nw_error_get_error_domain(error);
+                NSString *desc = [NSString stringWithFormat:@"NW receive error domain=%d code=%d",
+                    domain, code];
+                nsErr = [[NSError alloc] initWithDomain:@"NWError" code:code
+                    userInfo:@{NSLocalizedDescriptionKey: desc}];
+            }
+
+            handler((NSData *)content, opcode, close_code, @(is_complete), nsErr);
+        });
+}
+
+void nw_helper_ws_send(
+    nw_connection_t _Nonnull connection,
+    NSData * _Nullable data,
+    int32_t opcode,
+    int32_t close_code,
+    nw_helper_send_completion_t _Nonnull completion)
+{
+    nw_protocol_metadata_t metadata = nw_ws_create_metadata((nw_ws_opcode_t)opcode);
+    if (close_code != 0) {
+        nw_ws_metadata_set_close_code(metadata, (nw_ws_close_code_t)close_code);
+    }
+
+    nw_content_context_t context = nw_content_context_create("ws");
+    nw_content_context_set_metadata_for_protocol(context, metadata);
+
+    dispatch_data_t dispatch_data = NULL;
+    if (data != nil && data.length > 0) {
+        dispatch_data = dispatch_data_create(data.bytes, data.length,
+            dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    }
+
+    nw_connection_send(connection, dispatch_data, context, true,
+        ^(nw_error_t _Nullable error) {
+            if (error == NULL) {
+                completion(nil);
+            } else {
+                int code = nw_error_get_error_code(error);
+                int domain = nw_error_get_error_domain(error);
+                NSString *desc = [NSString stringWithFormat:@"NW send error domain=%d code=%d",
+                    domain, code];
+                NSError *nsError = [[NSError alloc] initWithDomain:@"NWError"
+                    code:code userInfo:@{NSLocalizedDescriptionKey: desc}];
+                completion(nsError);
+            }
+        });
+}

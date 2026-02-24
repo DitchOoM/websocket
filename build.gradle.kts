@@ -1,5 +1,6 @@
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import java.net.Socket
 import java.security.SecureRandom
 import java.util.Base64
@@ -54,19 +55,29 @@ kotlin {
         }
     }
 
+    // Configure cinterop for NW helpers (C bridge for dispatch_data_t → NSData)
+    fun KotlinNativeTarget.configureNWHelpersCinterop() {
+        compilations["main"].cinterops {
+            create("NWHelpers") {
+                defFile("src/nativeInterop/cinterop/NWHelpers.def")
+                includeDirs("src/nativeInterop/cinterop")
+            }
+        }
+    }
+
     // Apple targets (only on macOS host)
     if (hostOs.family.isAppleFamily) {
-        macosX64()
-        macosArm64()
-        iosArm64()
-        iosSimulatorArm64()
-        iosX64()
-        tvosArm64()
-        tvosSimulatorArm64()
-        tvosX64()
-        watchosArm64()
-        watchosSimulatorArm64()
-        watchosX64()
+        macosX64 { configureNWHelpersCinterop() }
+        macosArm64 { configureNWHelpersCinterop() }
+        iosArm64 { configureNWHelpersCinterop() }
+        iosSimulatorArm64 { configureNWHelpersCinterop() }
+        iosX64 { configureNWHelpersCinterop() }
+        tvosArm64 { configureNWHelpersCinterop() }
+        tvosSimulatorArm64 { configureNWHelpersCinterop() }
+        tvosX64 { configureNWHelpersCinterop() }
+        watchosArm64 { configureNWHelpersCinterop() }
+        watchosSimulatorArm64 { configureNWHelpersCinterop() }
+        watchosX64 { configureNWHelpersCinterop() }
     }
 
     // Linux targets (only on Linux host)
