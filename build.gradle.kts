@@ -170,8 +170,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     // Always exclude profiling tests from CI
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
 }
 
@@ -180,8 +179,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     // Always exclude profiling tests from CI
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
     // Exclude tests from browser that require Node.js APIs or raw socket access
     // Browser WebSocket handles handshake/compression internally via native API
