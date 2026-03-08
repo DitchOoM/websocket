@@ -4,7 +4,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.websocket.MaskingKey
@@ -223,20 +222,19 @@ class FrameReader(
                             // Fallback: copy to writable buffer
                             val copy = pool?.acquire(actualPayloadLength) ?: PlatformBuffer.allocate(actualPayloadLength)
                             copy.write(buffer)
+                            copy.resetForRead()
                             copy
                         }
                     // Apply SIMD-optimized XOR mask in-place
-                    writableBuffer.position(0)
-                    writableBuffer.setLimit(actualPayloadLength)
+                    // Use current position (may be non-zero for sliced buffers)
+                    val payloadStart = writableBuffer.position()
                     writableBuffer.xorMask(maskingKey.packed)
-                    writableBuffer.position(0)
+                    writableBuffer.position(payloadStart)
                     writableBuffer
                 } else {
-                    // Ensure unmasked buffer is ready to read from start
-                    // Contract: ParsedFrame.payload always has position=0, remaining=payloadLength
-                    if (buffer.position() != 0) {
-                        buffer.position(0)
-                    }
+                    // readBuffer() returns a buffer positioned at the payload start.
+                    // Do NOT reset position(0) — the buffer may be a view/slice of a
+                    // larger chunk where position > 0 is correct.
                     buffer
                 }
             } else {

@@ -1,9 +1,9 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.wrap
+import com.ditchoom.buffer.shared
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
@@ -24,7 +24,7 @@ class WebSocketTests {
                 WebSocketClient.Companion.allocate(
                     connectionOptions,
                     parentScope = this,
-                    allocationZone = AllocationZone.SharedMemory,
+                    bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
             websocket.awaitConnected()
@@ -47,7 +47,7 @@ class WebSocketTests {
                 WebSocketClient.Companion.allocate(
                     connectionOptions,
                     parentScope = this,
-                    allocationZone = AllocationZone.SharedMemory,
+                    bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }
@@ -67,7 +67,7 @@ class WebSocketTests {
                 WebSocketClient.Companion.allocate(
                     connectionOptions,
                     parentScope = this,
-                    allocationZone = AllocationZone.SharedMemory,
+                    bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
             if (websocket.isPingSupported()) {
@@ -91,7 +91,7 @@ class WebSocketTests {
                 WebSocketClient.Companion.allocate(
                     connectionOptions,
                     parentScope = this,
-                    allocationZone = AllocationZone.SharedMemory,
+                    bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
             launch(Dispatchers.Default) { websocket.write(createPayload()) }

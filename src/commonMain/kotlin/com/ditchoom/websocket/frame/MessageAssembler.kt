@@ -1,11 +1,10 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
@@ -255,12 +254,10 @@ class MessageAssembler(
     }
 
     private fun combineBuffers(): ReadBuffer {
-        val combined = pool?.acquire(totalPayloadSize) ?: PlatformBuffer.allocate(totalPayloadSize, AllocationZone.Heap)
+        val combined = pool?.acquire(totalPayloadSize) ?: BufferFactory.managed().allocate(totalPayloadSize)
         for (buf in fragmentBuffers) {
-            // Reset position to re-read from start
-            // Note: position(0) is correct here - these buffers are already in read mode.
-            // resetForRead() is for write-mode buffers and would set limit=writePosition.
-            buf.position(0)
+            // Do NOT use position(0) — the buffer may be a view/slice where
+            // position > 0 is the correct payload start.
             combined.write(buf)
         }
         combined.resetForRead()

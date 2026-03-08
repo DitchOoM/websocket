@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.managed
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import kotlinx.coroutines.async
@@ -36,7 +37,7 @@ class DefaultWebSocketClientMockTest {
         DefaultWebSocketClient(
             connectionOptions = options,
             parentScope = null,
-            allocationZone = AllocationZone.Heap,
+            bufferFactory = BufferFactory.managed(),
             socketOverride = mockSocket,
         )
 

@@ -1,9 +1,9 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
@@ -30,7 +30,7 @@ import kotlin.test.assertTrue
  *   https://datatracker.ietf.org/doc/html/rfc6455#section-5.5
  */
 class FrameWriterTest {
-    private val pool = BufferPool(allocationZone = AllocationZone.Heap)
+    private val pool = BufferPool(factory = BufferFactory.managed())
 
     // Use pool-allocated FrameWriter so parseFrame's StreamProcessor doesn't
     // prematurely free NativeBuffers passed to append(). In production, the
@@ -459,6 +459,38 @@ class FrameWriterTest {
                 readData[i] = frame.payload.readByte()
             }
             assertTrue(originalData.contentEquals(readData))
+        }
+
+    // ========================================================================
+    // Non-Zero Position Payload Tests
+    //
+    // Verifies that writeFrame handles payloads where position > 0,
+    // writing only the remaining bytes (not the prefix before position).
+    // ========================================================================
+
+    @Test
+    fun `write frame with non-zero position payload`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+
+            // Create a buffer with prefix bytes, then advance position past them
+            val buffer = PlatformBuffer.allocate(10)
+            buffer.writeBytes(byteArrayOf(0xAA.toByte(), 0xBB.toByte())) // prefix (should be skipped)
+            buffer.writeBytes("Hello".encodeToByteArray()) // actual payload
+            buffer.resetForRead()
+            // Advance past the 2-byte prefix
+            buffer.readByte()
+            buffer.readByte()
+            // Now position=2, remaining=5 ("Hello")
+
+            val frameBuffer = writer.writeBinaryFrame(buffer)
+
+            val frame = parseFrame(frameBuffer)
+            assertNotNull(frame)
+            assertEquals(Opcode.Binary, frame.opcode)
+            assertEquals(5, frame.payloadLength)
+            // Verify the payload is "Hello", not the prefix bytes
+            assertEquals("Hello", frame.payload.readString(5, Charset.UTF8))
         }
 
     // ========================================================================

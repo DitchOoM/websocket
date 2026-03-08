@@ -1,7 +1,8 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
@@ -66,7 +67,7 @@ import kotlin.coroutines.coroutineContext
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
-    private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val bufferFactory: BufferFactory = BufferFactory.Default,
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
     internal val socketOverride: ClientToServerSocket? = null,
     externalPool: BufferPool? = null,
@@ -78,7 +79,7 @@ class DefaultWebSocketClient(
         externalPool ?: BufferPool(
             threadingMode = ThreadingMode.MultiThreaded,
             defaultBufferSize = DEFAULT_NETWORK_BUFFER_SIZE,
-            allocationZone = allocationZone,
+            factory = bufferFactory,
         )
 
     // Create a dedicated Job for this client - NOT a child of parent scope.
@@ -95,7 +96,7 @@ class DefaultWebSocketClient(
                 ),
         )
 
-    private val socket = socketOverride ?: ClientSocket.allocate(allocationZone)
+    private val socket = socketOverride ?: ClientSocket.allocate()
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
 
@@ -250,7 +251,7 @@ class DefaultWebSocketClient(
                             compressor = outgoingCompressor,
                             compressionEnabled = outgoingCompressionEnabled,
                             clientMode = true,
-                            allocationZone = allocationZone,
+                            bufferFactory = bufferFactory,
                             pool = pool,
                             resetCompressorPerMessage = clientNoContextTakeover,
                         )
@@ -451,20 +452,20 @@ class DefaultWebSocketClient(
     }
 
     private suspend fun handleControlFrame(frame: ParsedFrame) {
-        // Note: FrameReader guarantees payload.position() == 0
         when (frame.opcode) {
             Opcode.Ping -> {
-                // Auto-respond with pong
+                // Auto-respond with pong, preserving payload position for consumers
                 val pongData =
                     if (frame.payloadLength > 0) {
                         frame.payload
                     } else {
                         EMPTY_BUFFER
                     }
+                val payloadStart = frame.payload.position()
                 writePongFrame(pongData)
-                // Reset position after pong write so consumers can read the payload
+                // Restore position after pong write so consumers can read the payload
                 if (frame.payloadLength > 0) {
-                    frame.payload.position(0)
+                    frame.payload.position(payloadStart)
                 }
                 incomingMessageChannel.trySend(WebSocketMessage.Ping(frame.payload))
             }
@@ -550,7 +551,7 @@ class DefaultWebSocketClient(
         return try {
             // Stream decompress to single buffer - reduces peak memory
             // Use Direct zone so output buffer has NativeMemoryAccess for re-compression
-            decompressToBufferSync(payload, decompressor, allocationZone, pool)
+            decompressToBufferSync(payload, decompressor, bufferFactory, pool)
         } catch (e: Exception) {
             payload // Fallback to original on error
         } finally {

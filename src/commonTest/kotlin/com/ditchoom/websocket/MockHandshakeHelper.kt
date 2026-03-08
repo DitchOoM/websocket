@@ -3,7 +3,6 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.websocket.handshake.computeAcceptKey
 
 /**

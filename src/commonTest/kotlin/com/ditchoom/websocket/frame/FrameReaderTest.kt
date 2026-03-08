@@ -1,9 +1,10 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
@@ -13,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -29,7 +31,7 @@ import kotlin.test.assertTrue
  *   https://datatracker.ietf.org/doc/html/rfc6455#section-5.5
  */
 class FrameReaderTest {
-    private val pool = BufferPool(allocationZone = AllocationZone.Heap)
+    private val pool = BufferPool(factory = BufferFactory.managed())
 
     // ========================================================================
     // RFC 6455 Section 5.2 - Basic Frame Parsing
@@ -457,11 +459,72 @@ class FrameReaderTest {
         }
 
     // ========================================================================
+    // Sliced Buffer Regression Tests (position > 0)
+    //
+    // StreamProcessor.readBuffer() may return buffers with position > 0
+    // when header bytes were consumed before the payload. These tests
+    // verify FrameReader handles this correctly.
+    // ========================================================================
+
+    @Test
+    fun `text frame payload readable at non-zero position`() =
+        runTest {
+            // Build a text frame: FIN=1, opcode=Text, payload="Hello"
+            val text = "Hello"
+            val frameBytes =
+                byteArrayOf(
+                    0x81.toByte(), // FIN + Text
+                    text.length.toByte(),
+                    *text.encodeToByteArray(),
+                )
+
+            val processor = StreamProcessor.builder(pool).buildSuspending()
+            processor.append(createBuffer(frameBytes))
+
+            val reader = FrameReader(processor)
+            val frame = reader.readFrame()
+
+            assertNotNull(frame)
+            assertEquals(Opcode.Text, frame.opcode)
+            // The payload may have position > 0 after header consumption.
+            // readString must work regardless of position.
+            assertEquals(text.length, frame.payload.remaining())
+            assertEquals(text, frame.payload.readString(text.length, Charset.UTF8))
+        }
+
+    @Test
+    fun `close frame payload parsed at non-zero position`() =
+        runTest {
+            // Close frame: FIN=1, opcode=Close, status=1000, reason="bye"
+            val reason = "bye"
+            val reasonBytes = reason.encodeToByteArray()
+            val frameBytes =
+                byteArrayOf(
+                    0x88.toByte(), // FIN + Close
+                    (2 + reasonBytes.size).toByte(), // status (2) + reason
+                    0x03,
+                    0xE8.toByte(), // 1000 in big-endian
+                    *reasonBytes,
+                )
+
+            val processor = StreamProcessor.builder(pool).buildSuspending()
+            processor.append(createBuffer(frameBytes))
+
+            val frame = FrameReader(processor).readFrame()
+
+            assertNotNull(frame)
+            assertIs<ParsedFrame.ControlFrame.Close>(frame)
+            assertEquals(Opcode.Close, frame.opcode)
+            assertEquals(CloseCode.NORMAL, frame.closeCode)
+            assertEquals("bye", frame.closeReason)
+        }
+
+    // ========================================================================
     // Helper Functions
     // ========================================================================
 
     private fun createBuffer(bytes: ByteArray): com.ditchoom.buffer.ReadBuffer {
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = PlatformBuffer.allocate(bytes.size, ByteOrder.BIG_ENDIAN)
         buffer.writeBytes(bytes)
         buffer.resetForRead()
         return buffer

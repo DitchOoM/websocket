@@ -1,7 +1,6 @@
 package com.ditchoom.websocket.benchmark
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
 import kotlinx.benchmark.BenchmarkTimeUnit

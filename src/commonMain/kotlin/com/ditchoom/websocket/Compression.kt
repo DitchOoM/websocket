@@ -1,14 +1,14 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
@@ -19,7 +19,7 @@ private const val SYNC_FLUSH_MARKER = 0x0000FFFF
 // access. Heap zone would create a ByteArrayBuffer requiring pin/unpin (futex) on
 // every withInputPointer() call in the zlib decompressor.
 private val SYNC_FLUSH_MARKER_BUFFER: ReadBuffer by lazy {
-    val buffer = PlatformBuffer.allocate(4, AllocationZone.Direct)
+    val buffer = PlatformBuffer.allocate(4)
     buffer.writeInt(SYNC_FLUSH_MARKER)
     buffer.resetForRead()
     buffer
@@ -36,7 +36,7 @@ internal fun totalRemaining(chunks: List<ReadBuffer>): Int = chunks.sumOf { it.r
  */
 internal fun combineChunks(
     chunks: List<ReadBuffer>,
-    zone: AllocationZone,
+    factory: BufferFactory = BufferFactory.managed(),
     pool: BufferPool? = null,
 ): ReadBuffer {
     if (chunks.isEmpty()) return ReadBuffer.EMPTY_BUFFER
@@ -45,7 +45,7 @@ internal fun combineChunks(
     // since combineChunks would have returned the same object that gets freed.
     val totalSize = chunks.sumOf { it.remaining() }
     if (totalSize == 0) return ReadBuffer.EMPTY_BUFFER
-    val result = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, zone)
+    val result = pool?.acquire(totalSize) ?: factory.allocate(totalSize)
     for (chunk in chunks) {
         result.write(chunk)
     }
@@ -79,7 +79,7 @@ private fun stripSyncFlushMarkerInPlace(buffer: ReadBuffer): ReadBuffer {
 internal fun compressSync(
     buffer: ReadBuffer,
     compressor: StreamingCompressor,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.managed(),
     pool: BufferPool? = null,
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
@@ -108,7 +108,7 @@ internal fun compressSync(
     }
 
     // Marker spans multiple chunks or doesn't match - need to combine and strip
-    val combined = combineChunks(chunks, zone, pool)
+    val combined = combineChunks(chunks, factory, pool)
     chunks.freeAll()
     return listOf(stripSyncFlushMarkerInPlace(combined))
 }
@@ -156,7 +156,7 @@ internal fun decompressToStringSync(
 internal fun decompressToBufferSync(
     buffer: ReadBuffer,
     decompressor: StreamingDecompressor,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.managed(),
     pool: BufferPool? = null,
 ): ReadBuffer {
     var totalSize = 0
@@ -187,7 +187,7 @@ internal fun decompressToBufferSync(
     }
 
     // Combine chunks into final output
-    val output = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, zone)
+    val output = pool?.acquire(totalSize) ?: factory.allocate(totalSize)
     for (chunk in chunks) {
         chunk.position(0)
         output.write(chunk)

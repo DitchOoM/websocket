@@ -3,7 +3,6 @@ package com.ditchoom.websocket.frame
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
@@ -382,6 +381,58 @@ class MessageAssemblerTest {
         val result2 = assembler.addFrame(binaryFrame(byteCount = 3))
         assertIs<AssemblyResult.CompleteMessage>(result2)
         assertEquals(Opcode.Binary, result2.message.opcode)
+    }
+
+    // ========================================================================
+    // Non-Zero Position Fragment Regression Tests
+    //
+    // Verifies that MessageAssembler correctly combines fragments where
+    // the payload buffers have position > 0 (sliced/transferred chunks).
+    // ========================================================================
+
+    @Test
+    fun `combine fragments with non-zero position payloads`() {
+        val assembler = MessageAssembler()
+
+        // Create fragment payloads with position > 0 (simulates sliced buffers)
+        val buf1 = PlatformBuffer.allocate(10)
+        buf1.writeBytes("xxHello ".encodeToByteArray()) // 2 prefix + "Hello "
+        buf1.resetForRead()
+        buf1.readByte() // skip prefix
+        buf1.readByte() // skip prefix — position=2, remaining=8 ("Hello XX")
+        // Trim to just "Hello "
+        buf1.setLimit(buf1.position() + 6)
+
+        val buf2 = PlatformBuffer.allocate(10)
+        buf2.writeBytes("yyyWorld".encodeToByteArray()) // 3 prefix + "World"
+        buf2.resetForRead()
+        buf2.readByte() // skip
+        buf2.readByte() // skip
+        buf2.readByte() // skip — position=3, remaining=5 ("World")
+        // Trim to just "World"
+        buf2.setLimit(buf2.position() + 5)
+
+        val frag1 =
+            ParsedFrame.DataFrame.Text(
+                header1 = FrameHeaderByte1.pack(fin = false, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Text),
+                header2 = FrameHeaderByte2.forPayload(buf1.remaining()),
+                payloadLength = buf1.remaining(),
+                payload = buf1,
+            )
+        val frag2 =
+            ParsedFrame.DataFrame.Continuation(
+                header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
+                header2 = FrameHeaderByte2.forPayload(buf2.remaining()),
+                payloadLength = buf2.remaining(),
+                payload = buf2,
+            )
+
+        assembler.addFrame(frag1)
+        val result = assembler.addFrame(frag2)
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertEquals(Opcode.Text, result.message.opcode)
+        assertEquals("Hello World", result.message.payload.readString(11, Charset.UTF8))
     }
 
     // ========================================================================

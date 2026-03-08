@@ -2,12 +2,11 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.SuspendCloseable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
-interface WebSocketClient : SuspendCloseable {
+interface WebSocketClient {
     val scope: CoroutineScope
 
     suspend fun connect(): WebSocketClient
@@ -34,4 +33,6 @@ interface WebSocketClient : SuspendCloseable {
 
     /** Binary messages only — avoids filterIsInstance overhead for typed consumers. */
     val incomingBinaryMessages: Flow<ReadBuffer>
+
+    suspend fun close()
 }

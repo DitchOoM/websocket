@@ -1,7 +1,8 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.shared
 import com.ditchoom.socket.isNodeJs
 import kotlinx.coroutines.CoroutineScope
 
@@ -11,11 +12,12 @@ internal actual val supportsDeflateContextTakeover: Boolean = false
 actual fun WebSocketClient.Companion.allocate(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
-    allocationZone: AllocationZone,
+    bufferFactory: BufferFactory,
     bufferPool: BufferPool?,
 ): WebSocketClient =
     if (isNodeJs) {
-        DefaultWebSocketClient(connectionOptions, parentScope, allocationZone, externalPool = bufferPool)
+        DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)
     } else {
-        BrowserWebSocketController(connectionOptions, bufferPool ?: BufferPool(), parentScope, allocationZone)
+        val useSharedMemory = bufferFactory == BufferFactory.shared()
+        BrowserWebSocketController(connectionOptions, bufferPool ?: BufferPool(), parentScope, useSharedMemory)
     }

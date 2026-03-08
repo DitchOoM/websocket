@@ -1,12 +1,11 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
@@ -110,12 +109,11 @@ class FrameWriter(
     private val compressor: StreamingCompressor? = null,
     private val compressionEnabled: Boolean = false,
     private val clientMode: Boolean = true,
-    private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val bufferFactory: BufferFactory = BufferFactory.Default,
     private val pool: BufferPool? = null,
     private val resetCompressorPerMessage: Boolean = true,
 ) {
-    private fun allocateBuffer(size: Int): ReadWriteBuffer =
-        pool?.acquire(size) ?: (PlatformBuffer.allocate(size, allocationZone) as ReadWriteBuffer)
+    private fun allocateBuffer(size: Int): ReadWriteBuffer = pool?.acquire(size) ?: (bufferFactory.allocate(size) as ReadWriteBuffer)
 
     private fun releaseBuffer(buffer: ReadBuffer) {
         if (pool != null && buffer is ReadWriteBuffer) {
@@ -246,10 +244,9 @@ class FrameWriter(
         if (clientMode) {
             val mask = MaskingKey.FourByteMaskingKey()
             buffer.writeInt(mask.packed)
-            payload.position(0)
+            // Do NOT reset position(0) — payload may be a slice with position > 0
             buffer.xorMaskCopy(payload, mask.packed)
         } else {
-            payload.position(0)
             buffer.write(payload)
         }
 
@@ -324,10 +321,8 @@ class FrameWriter(
         if (clientMode) {
             val mask = MaskingKey.FourByteMaskingKey()
             buffer.writeInt(mask.packed)
-            payload.position(0)
             buffer.xorMaskCopy(payload, mask.packed)
         } else {
-            payload.position(0)
             buffer.write(payload)
         }
 

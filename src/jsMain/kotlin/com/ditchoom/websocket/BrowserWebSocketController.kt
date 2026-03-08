@@ -1,6 +1,6 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
@@ -29,7 +29,7 @@ class BrowserWebSocketController(
     private val connectionOptions: WebSocketConnectionOptions,
     private val pool: BufferPool,
     parentScope: CoroutineScope?,
-    private val allocationZone: AllocationZone = AllocationZone.Direct,
+    private val useSharedMemory: Boolean = false,
 ) : WebSocketClient {
     override val scope =
         if (parentScope == null) {
@@ -68,7 +68,6 @@ class BrowserWebSocketController(
     override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
-    private val useSharedMemory = allocationZone == AllocationZone.SharedMemory
 
     init {
         webSocket.binaryType = BinaryType.ARRAYBUFFER

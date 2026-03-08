@@ -1,10 +1,9 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -12,6 +11,7 @@ import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.managed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -27,13 +27,13 @@ class DecompressToStringTest {
 
         try {
             val encoded = original.encodeToByteArray()
-            val buf = PlatformBuffer.allocate(encoded.size, AllocationZone.Direct)
+            val buf = PlatformBuffer.allocate(encoded.size)
             buf.writeString(original, Charset.UTF8)
             buf.resetForRead()
 
             val compressed = compressSync(buf, compressor)
             compressor.reset()
-            val combined = combineChunks(compressed, AllocationZone.Heap)
+            val combined = combineChunks(compressed, BufferFactory.managed())
             compressed.freeAll()
 
             val result = decompressToStringSync(combined, decompressor, decoder)

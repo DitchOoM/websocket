@@ -2,11 +2,12 @@ package com.ditchoom.websocket
 
 import agentName
 import autobahnHost
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.managed
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
@@ -46,7 +47,6 @@ internal suspend fun CoroutineScope.prepareConnection(
         WebSocketClient.allocate(
             connectionOptions,
             parentScope = this + CoroutineName(case.toString()),
-            allocationZone = AllocationZone.Direct,
         )
     websocket.connect()
     websocket.awaitConnected()
@@ -84,13 +84,13 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             requestCompression = requestCompression,
             compressionOptions = compressionOptions,
         )
-    val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
+    val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
             parentScope = this,
-            allocationZone = zone,
+            bufferFactory = factory,
         )
     ws.connect()
     ws.awaitConnected()
@@ -145,13 +145,13 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             requestCompression = requestCompression,
             compressionOptions = compressionOptions,
         )
-    val zone = if (case in 277..300 || count > 100) AllocationZone.Heap else AllocationZone.Direct
+    val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
         WebSocketClient.allocate(
             connectionOptions,
             parentScope = this + CoroutineName(case.toString()),
-            allocationZone = zone,
+            bufferFactory = factory,
         )
     ws.connect()
     ws.awaitConnected()
@@ -200,7 +200,6 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
         WebSocketClient.allocate(
             connectionOptions,
             parentScope = this + CoroutineName(case.toString()),
-            allocationZone = AllocationZone.Direct,
         )
     ws.connect()
     ws.awaitConnected()

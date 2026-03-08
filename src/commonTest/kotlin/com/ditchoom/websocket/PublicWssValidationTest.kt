@@ -1,7 +1,6 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.wrap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first

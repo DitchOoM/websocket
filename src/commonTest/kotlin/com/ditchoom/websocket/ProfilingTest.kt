@@ -1,9 +1,10 @@
 package com.ditchoom.websocket
 
 import agentName
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.coroutines.flow.first
@@ -41,7 +42,7 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Heap)
+            val ws = WebSocketClient.allocate(connectionOptions, bufferFactory = BufferFactory.managed())
             ws.connect()
             ws.awaitConnected()
 
@@ -50,7 +51,7 @@ class ProfilingTest {
             val memBefore = getUsedMemoryMB()
 
             repeat(iterations) { i ->
-                val buf = PlatformBuffer.allocate(payloadSize, AllocationZone.Heap)
+                val buf = BufferFactory.managed().allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
                 ws.write(buf)
@@ -92,7 +93,7 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Direct)
+                val ws = WebSocketClient.allocate(connectionOptions)
                 ws.connect()
                 ws.awaitConnected()
                 times.add(mark.elapsedNow().inWholeMilliseconds)
@@ -164,7 +165,7 @@ class ProfilingTest {
         size: Int,
         iterations: Int,
     ) {
-        val pool = BufferPool(allocationZone = AllocationZone.Heap)
+        val pool = BufferPool(factory = BufferFactory.managed())
         val writer = FrameWriter(clientMode = true, pool = pool)
         val payload = PlatformBuffer.allocate(size)
         repeat(size) { payload.writeByte(0x42) }
@@ -200,7 +201,7 @@ class ProfilingTest {
         isBinary: Boolean,
         iterations: Int,
     ) {
-        val zone = if (payloadSize > 16384) AllocationZone.Heap else AllocationZone.Direct
+        val factory = if (payloadSize > 16384) BufferFactory.managed() else BufferFactory.Default
 
         // Connect (with independent scope - null parentScope)
         val connectMark = TimeSource.Monotonic.markNow()
@@ -210,7 +211,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = WebSocketClient.allocate(connectionOptions, allocationZone = zone)
+        val ws = WebSocketClient.allocate(connectionOptions, bufferFactory = factory)
         ws.connect()
         ws.awaitConnected()
         val connectTime = connectMark.elapsedNow()
@@ -228,7 +229,7 @@ class ProfilingTest {
             // Write
             val wMark = TimeSource.Monotonic.markNow()
             if (isBinary) {
-                val buf = PlatformBuffer.allocate(payloadSize, zone)
+                val buf = factory.allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
                 ws.write(buf)

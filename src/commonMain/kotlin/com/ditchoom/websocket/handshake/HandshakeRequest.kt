@@ -2,7 +2,6 @@ package com.ditchoom.websocket.handshake
 
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 
 /**
  * Builder for WebSocket client handshake requests.

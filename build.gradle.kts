@@ -27,6 +27,7 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
+    mavenLocal()
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -78,7 +79,7 @@ kotlin {
     // Linux targets (only on Linux host)
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
-        linuxArm64()
+        // linuxArm64() // disabled until buffer publishes linuxArm64 SNAPSHOT
     }
 
     applyDefaultHierarchyTemplate()

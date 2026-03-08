@@ -3,7 +3,6 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.socket.ClientToServerSocket
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketOptions
