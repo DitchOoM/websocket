@@ -12,15 +12,38 @@ import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
-private const val SYNC_FLUSH_MARKER = 0x0000FFFF
+
+/**
+ * Checks if the next 4 bytes at the buffer's current position are the sync flush marker.
+ * Reads bytes individually to avoid byte order issues.
+ * Does NOT advance the buffer position (restores it after reading).
+ */
+private fun isSyncFlushMarker(buffer: ReadBuffer): Boolean {
+    if (buffer.remaining() < 4) return false
+    val pos = buffer.position()
+    val b0 = buffer.readByte()
+    val b1 = buffer.readByte()
+    val b2 = buffer.readByte()
+    val b3 = buffer.readByte()
+    buffer.position(pos)
+    return b0 == 0x00.toByte() && b1 == 0x00.toByte() && b2 == 0xFF.toByte() && b3 == 0xFF.toByte()
+}
 
 // Pre-allocated sync marker buffer to avoid allocation on every decompression.
 // Uses Direct zone so that on Linux K/N, this is a NativeBuffer with direct pointer
 // access. Heap zone would create a ByteArrayBuffer requiring pin/unpin (futex) on
 // every withInputPointer() call in the zlib decompressor.
+//
+// IMPORTANT: Write individual bytes, not writeInt(). PlatformBuffer.allocate() defaults
+// to ByteOrder.NATIVE which is LITTLE_ENDIAN on x86/ARM. writeInt(0x0000FFFF) on a
+// little-endian buffer produces bytes FF FF 00 00 — wrong sync flush marker. The marker
+// must be the exact byte sequence 00 00 FF FF regardless of platform byte order.
 private val SYNC_FLUSH_MARKER_BUFFER: ReadBuffer by lazy {
     val buffer = PlatformBuffer.allocate(4)
-    buffer.writeInt(SYNC_FLUSH_MARKER)
+    buffer.writeByte(0x00)
+    buffer.writeByte(0x00)
+    buffer.writeByte(0xFF.toByte())
+    buffer.writeByte(0xFF.toByte())
     buffer.resetForRead()
     buffer
 }
@@ -61,10 +84,11 @@ private fun stripSyncFlushMarkerInPlace(buffer: ReadBuffer): ReadBuffer {
     if (remaining >= 4) {
         val pos = buffer.position()
         buffer.position(pos + remaining - 4)
-        val marker = buffer.readInt()
-        buffer.position(pos)
-        if (marker == SYNC_FLUSH_MARKER) {
+        if (isSyncFlushMarker(buffer)) {
+            buffer.position(pos)
             buffer.setLimit(buffer.limit() - 4)
+        } else {
+            buffer.position(pos)
         }
     }
     return buffer
@@ -95,8 +119,7 @@ internal fun compressSync(
         val pos = lastChunk.position()
         val endPos = pos + lastChunk.remaining()
         lastChunk.position(endPos - 4)
-        val marker = lastChunk.readInt()
-        if (marker == SYNC_FLUSH_MARKER) {
+        if (isSyncFlushMarker(lastChunk)) {
             lastChunk.position(pos)
             lastChunk.setLimit(endPos - 4)
             if (lastChunk.remaining() == 0) {
