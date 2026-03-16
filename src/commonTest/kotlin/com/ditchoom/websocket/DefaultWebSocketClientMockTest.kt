@@ -7,6 +7,8 @@ import com.ditchoom.socket.SocketException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -201,6 +203,96 @@ class DefaultWebSocketClientMockTest {
             }
 
             assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            client.close()
+        }
+
+    /**
+     * Regression: server TCP close without WS close frame must unblock
+     * incomingMessages collectors. Before the fix, take(N).collect hung
+     * forever because incomingMessageChannel was never closed.
+     *
+     * Uses enqueueReadError (not simulateDisconnect) because simulateDisconnect
+     * sets open=false synchronously, which causes the read loop to exit at the
+     * isOpen() check before processing queued frames.
+     */
+    @Test
+    fun tcpCloseWithoutWsCloseUnblocksCollector() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            // Send 2 text messages, then TCP-level close (no WS close frame).
+            // enqueueReadError queues the error inline so the read loop processes
+            // frames in order: text1 → text2 → SocketClosedException.
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg1"))
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg2"))
+            mockSocket.enqueueReadError(SocketClosedException("Server TCP close"))
+
+            // Collect with take(5) — we'll only get 2 messages before the
+            // channel closes. This must NOT hang.
+            val messages =
+                withTimeout(5.seconds) {
+                    client.incomingMessages.take(5).toList()
+                }
+
+            assertEquals(2, messages.size)
+            assertIs<WebSocketMessage.Text>(messages[0])
+            assertEquals("msg1", (messages[0] as WebSocketMessage.Text).value)
+            assertIs<WebSocketMessage.Text>(messages[1])
+            assertEquals("msg2", (messages[1] as WebSocketMessage.Text).value)
+            client.close()
+        }
+
+    /**
+     * Regression: zero messages before TCP disconnect must also unblock collectors.
+     * This is the worst case — the collector has received nothing when the channel closes.
+     */
+    @Test
+    fun tcpCloseImmediatelyAfterConnectUnblocksCollector() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            // TCP disconnect immediately — no messages at all
+            mockSocket.enqueueReadError(SocketClosedException("Server TCP close"))
+
+            // Collector on incomingMessages must complete (channel closes with no messages)
+            val messages =
+                withTimeout(5.seconds) {
+                    client.incomingMessages.take(1).toList()
+                }
+
+            // Channel closed before any message — should get empty list
+            assertTrue(messages.isEmpty())
+            client.close()
+        }
+
+    /**
+     * Regression: mid-frame TCP disconnect must unblock collector.
+     * Server sends partial frame header then disconnects.
+     */
+    @Test
+    fun midFrameTcpCloseUnblocksCollector() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            // Send complete message, then partial frame header, then disconnect
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("before-crash"))
+            mockSocket.enqueueReadBytes(0x81.toByte(), 0x0A) // Partial: FIN+Text, length=10, no payload
+            mockSocket.enqueueReadError(SocketClosedException("Connection lost"))
+
+            val messages =
+                withTimeout(5.seconds) {
+                    client.incomingMessages.take(5).toList()
+                }
+
+            // Should get the one complete message before the crash
+            assertEquals(1, messages.size)
+            assertEquals("before-crash", (messages[0] as WebSocketMessage.Text).value)
             client.close()
         }
 

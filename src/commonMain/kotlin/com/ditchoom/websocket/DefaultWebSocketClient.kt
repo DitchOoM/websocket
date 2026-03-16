@@ -23,6 +23,7 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
 import com.ditchoom.socket.ClientSocket
 import com.ditchoom.socket.ClientToServerSocket
+import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketException
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.allocate
@@ -203,6 +204,9 @@ class DefaultWebSocketClient(
                             stream.append(buffer)
                         } catch (e: EndOfStreamException) {
                             throw e
+                        } catch (e: SocketClosedException) {
+                            buffer.freeIfNeeded()
+                            throw EndOfStreamException("Socket closed by peer", e)
                         } catch (e: Exception) {
                             buffer.freeIfNeeded()
                             throw e
@@ -451,6 +455,12 @@ class DefaultWebSocketClient(
             } finally {
                 messageAssembler.reset()
                 autoFillingStream.release()
+                // Close channels so any collectors (e.g. take(N).collect) unblock.
+                // Without this, server TCP close without a WS close frame leaves
+                // collectors hanging forever.
+                incomingMessageChannel.close()
+                incomingTextChannel.close()
+                incomingBinaryChannel.close()
             }
         }
     }
