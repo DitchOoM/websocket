@@ -1,7 +1,8 @@
 package com.ditchoom.websocket.frame
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.websocket.Opcode
@@ -395,7 +396,7 @@ class MessageAssemblerTest {
         val assembler = MessageAssembler()
 
         // Create fragment payloads with position > 0 (simulates sliced buffers)
-        val buf1 = PlatformBuffer.allocate(10)
+        val buf1 = BufferFactory.Default.allocate(10)
         buf1.writeBytes("xxHello ".encodeToByteArray()) // 2 prefix + "Hello "
         buf1.resetForRead()
         buf1.readByte() // skip prefix
@@ -403,7 +404,7 @@ class MessageAssemblerTest {
         // Trim to just "Hello "
         buf1.setLimit(buf1.position() + 6)
 
-        val buf2 = PlatformBuffer.allocate(10)
+        val buf2 = BufferFactory.Default.allocate(10)
         buf2.writeBytes("yyyWorld".encodeToByteArray()) // 3 prefix + "World"
         buf2.resetForRead()
         buf2.readByte() // skip
@@ -470,7 +471,7 @@ class MessageAssemblerTest {
             if (byteCount == 0) {
                 ReadBuffer.EMPTY_BUFFER
             } else {
-                PlatformBuffer.allocate(byteCount).apply {
+                BufferFactory.Default.allocate(byteCount).apply {
                     repeat(byteCount) { writeByte(0xFE.toByte()) }
                     resetForRead()
                 }
@@ -533,7 +534,7 @@ class MessageAssemblerTest {
      */
     private fun closeFrame(code: CloseCode = CloseCode.NORMAL): ParsedFrame.ControlFrame.Close {
         val buffer =
-            PlatformBuffer.allocate(2).apply {
+            BufferFactory.Default.allocate(2).apply {
                 writeUShort(code.code)
                 resetForRead()
             }
@@ -552,7 +553,7 @@ class MessageAssemblerTest {
      */
     private fun oversizedPingFrame(byteCount: Int): ParsedFrame.ControlFrame.Ping {
         val buffer =
-            PlatformBuffer.allocate(byteCount).apply {
+            BufferFactory.Default.allocate(byteCount).apply {
                 repeat(byteCount) { writeByte(0x00) }
                 resetForRead()
             }

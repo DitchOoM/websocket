@@ -1,7 +1,8 @@
 package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.pool.BufferPool
@@ -220,7 +221,7 @@ class FrameReader(
                             buffer
                         } else {
                             // Fallback: copy to writable buffer
-                            val copy = pool?.acquire(actualPayloadLength) ?: PlatformBuffer.allocate(actualPayloadLength)
+                            val copy = pool?.acquire(actualPayloadLength) ?: BufferFactory.Default.allocate(actualPayloadLength)
                             copy.write(buffer)
                             copy.resetForRead()
                             copy

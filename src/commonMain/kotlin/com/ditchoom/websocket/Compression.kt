@@ -1,7 +1,6 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -29,23 +28,11 @@ private fun isSyncFlushMarker(buffer: ReadBuffer): Boolean {
     return b0 == 0x00.toByte() && b1 == 0x00.toByte() && b2 == 0xFF.toByte() && b3 == 0xFF.toByte()
 }
 
-// Pre-allocated sync marker buffer to avoid allocation on every decompression.
-// Uses Direct zone so that on Linux K/N, this is a NativeBuffer with direct pointer
-// access. Heap zone would create a ByteArrayBuffer requiring pin/unpin (futex) on
-// every withInputPointer() call in the zlib decompressor.
-//
-// IMPORTANT: Write individual bytes, not writeInt(). PlatformBuffer.allocate() defaults
-// to ByteOrder.NATIVE which is LITTLE_ENDIAN on x86/ARM. writeInt(0x0000FFFF) on a
-// little-endian buffer produces bytes FF FF 00 00 — wrong sync flush marker. The marker
-// must be the exact byte sequence 00 00 FF FF regardless of platform byte order.
+// Pre-allocated sync marker: exact byte sequence 00 00 FF FF (RFC 7692).
+// Wrapped from a constant byte array — no buffer allocation needed for 4 bytes.
+private val SYNC_FLUSH_MARKER_BYTES = byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte())
 private val SYNC_FLUSH_MARKER_BUFFER: ReadBuffer by lazy {
-    val buffer = PlatformBuffer.allocate(4)
-    buffer.writeByte(0x00)
-    buffer.writeByte(0x00)
-    buffer.writeByte(0xFF.toByte())
-    buffer.writeByte(0xFF.toByte())
-    buffer.resetForRead()
-    buffer
+    BufferFactory.managed().wrap(SYNC_FLUSH_MARKER_BYTES)
 }
 
 /**

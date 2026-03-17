@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.nativeMemoryAccess
 import com.ditchoom.buffer.pool.BufferPool
@@ -18,7 +19,7 @@ import kotlin.test.assertTrue
 class BufferTypeAssumptionTests {
     @Test
     fun directAllocateHasNativeMemoryAccess() {
-        val buffer = PlatformBuffer.allocate(64)
+        val buffer = BufferFactory.Default.allocate(64)
         assertNotNull(
             buffer.nativeMemoryAccess,
             "Direct allocation should have nativeMemoryAccess",
@@ -80,7 +81,7 @@ class BufferTypeAssumptionTests {
     @Test
     fun syncFlushMarkerBufferIsDirect() {
         // Verify the SYNC_FLUSH_MARKER_BUFFER is Direct (not Heap) to avoid futex overhead
-        val buffer = PlatformBuffer.allocate(4)
+        val buffer = BufferFactory.Default.allocate(4)
         buffer.writeInt(0x0000FFFF)
         buffer.resetForRead()
         assertNotNull(

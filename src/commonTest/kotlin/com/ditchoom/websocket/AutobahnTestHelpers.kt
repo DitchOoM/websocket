@@ -4,7 +4,6 @@ import agentName
 import autobahnHost
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
@@ -255,7 +254,7 @@ internal suspend fun sendBinaryWithPayloadLengthOf(
         if (length < 1) {
             EMPTY_BUFFER
         } else {
-            val b = PlatformBuffer.allocate(length)
+            val b = BufferFactory.Default.allocate(length)
             repeat(length) {
                 b.writeByte(0xfe.toByte())
             }

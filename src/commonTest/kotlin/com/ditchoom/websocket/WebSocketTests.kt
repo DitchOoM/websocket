@@ -1,7 +1,7 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.shared
 import kotlinx.coroutines.Dispatchers
@@ -128,13 +128,13 @@ class WebSocketTests {
     private fun createPayload(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
         // wrap() returns buffer with position=0, limit=length, ready to read
-        return PlatformBuffer.wrap(bytes)
+        return BufferFactory.Default.wrap(bytes)
     }
 
     private fun createPayloadReverse(): ReadBuffer {
         val bytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8).reversedArray()
         // wrap() returns buffer with position=0, limit=length, ready to read
-        return PlatformBuffer.wrap(bytes)
+        return BufferFactory.Default.wrap(bytes)
     }
 
     private fun validatePayload(buffer: ReadBuffer) {

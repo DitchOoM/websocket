@@ -3,8 +3,8 @@ package com.ditchoom.websocket
 import agentName
 import autobahnHost
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -56,7 +56,7 @@ class TimingProfilingTest {
 
                 // Warmup
                 repeat(10) {
-                    val buf = PlatformBuffer.allocate(size)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.writeString(text, Charset.UTF8)
                     buf.resetForRead()
                     val compressed = compressSync(buf, compressor)
@@ -78,7 +78,7 @@ class TimingProfilingTest {
                 repeat(iterations) {
                     // String encode
                     var mark = TimeSource.Monotonic.markNow()
-                    val buf = PlatformBuffer.allocate(size)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.writeString(text, Charset.UTF8)
                     buf.resetForRead()
                     stringEncodeTotal += mark.elapsedNow()
@@ -242,7 +242,7 @@ class TimingProfilingTest {
                 // Direct (NativeBuffer = malloc/free on Linux)
                 val directMark = TimeSource.Monotonic.markNow()
                 repeat(iterations) {
-                    val buf = PlatformBuffer.allocate(size)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.freeIfNeeded()
                 }
                 val directTime = directMark.elapsedNow()

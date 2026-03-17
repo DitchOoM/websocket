@@ -2,7 +2,7 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
@@ -109,7 +109,7 @@ class FrameWriter(
     private val compressor: StreamingCompressor? = null,
     private val compressionEnabled: Boolean = false,
     private val clientMode: Boolean = true,
-    private val bufferFactory: BufferFactory = BufferFactory.Default,
+    private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
     private val pool: BufferPool? = null,
     private val resetCompressorPerMessage: Boolean = true,
 ) {

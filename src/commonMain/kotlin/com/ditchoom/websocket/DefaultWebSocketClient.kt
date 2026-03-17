@@ -2,7 +2,7 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
@@ -68,7 +68,7 @@ import kotlin.coroutines.coroutineContext
 class DefaultWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
-    private val bufferFactory: BufferFactory = BufferFactory.Default,
+    private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
     internal val socketOverride: ClientToServerSocket? = null,
     externalPool: BufferPool? = null,

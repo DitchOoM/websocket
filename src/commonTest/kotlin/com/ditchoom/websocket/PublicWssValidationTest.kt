@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -133,7 +134,7 @@ class PublicWssValidationTest {
                 ws.connect()
                 ws.awaitConnected()
                 val payload = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0xF0.toByte(), 0xFF.toByte())
-                launch(Dispatchers.Default) { ws.write(PlatformBuffer.wrap(payload)) }
+                launch(Dispatchers.Default) { ws.write(BufferFactory.Default.wrap(payload)) }
                 val echo =
                     withTimeout(10.seconds) {
                         ws.incomingBinaryMessages.first()
@@ -241,7 +242,7 @@ class PublicWssValidationTest {
                 val binaryPayload = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
 
                 ws.write(textMsg)
-                ws.write(PlatformBuffer.wrap(binaryPayload))
+                ws.write(BufferFactory.Default.wrap(binaryPayload))
 
                 // Collect both echoes
                 var gotText = false

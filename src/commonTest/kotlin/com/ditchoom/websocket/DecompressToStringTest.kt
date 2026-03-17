@@ -1,8 +1,8 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -27,7 +27,7 @@ class DecompressToStringTest {
 
         try {
             val encoded = original.encodeToByteArray()
-            val buf = PlatformBuffer.allocate(encoded.size)
+            val buf = BufferFactory.Default.allocate(encoded.size)
             buf.writeString(original, Charset.UTF8)
             buf.resetForRead()
 

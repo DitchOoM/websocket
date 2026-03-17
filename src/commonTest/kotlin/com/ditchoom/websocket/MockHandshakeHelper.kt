@@ -1,7 +1,8 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.handshake.computeAcceptKey
 
@@ -24,7 +25,7 @@ object MockHandshakeHelper {
     }
 
     private fun bytesToBuffer(bytes: ByteArray): ReadBuffer {
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         buffer.writeBytes(bytes)
         // Leave in write mode - mock socket will call resetForRead()
         return buffer
@@ -109,7 +110,7 @@ object MockHandshakeHelper {
                 payload.size <= 65535 -> 4
                 else -> 10
             }
-        val buffer = PlatformBuffer.allocate(headerSize + payload.size)
+        val buffer = BufferFactory.Default.allocate(headerSize + payload.size)
 
         buffer.writeByte(byte1.toByte())
         when {

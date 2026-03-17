@@ -1,5 +1,7 @@
 package com.ditchoom.websocket.benchmark
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.WebSocketMessage
@@ -37,7 +39,7 @@ class MessageDispatchBenchmark {
 
     @Setup
     fun setup() {
-        binaryPayload = PlatformBuffer.allocate(128).apply {
+        binaryPayload = BufferFactory.Default.allocate(128).apply {
             repeat(128) { writeByte(it.toByte()) }
             resetForRead()
         }

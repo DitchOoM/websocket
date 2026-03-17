@@ -1,5 +1,7 @@
 package com.ditchoom.websocket.benchmark
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -20,7 +22,7 @@ import kotlin.random.Random
  * - Extended payload length handling (16-bit and 64-bit)
  * - Masking key generation and XOR masking
  *
- * Uses PlatformBuffer directly to avoid ByteArray allocations and memory copies.
+ * Uses BufferFactory.Default directly to avoid ByteArray allocations and memory copies.
  */
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.Throughput)
@@ -43,15 +45,15 @@ class FrameSerializationBenchmark {
         maskInt = random.nextInt()
 
         // Pre-allocate buffers with random data
-        smallPayload = PlatformBuffer.allocate(SMALL_SIZE).apply {
+        smallPayload = BufferFactory.Default.allocate(SMALL_SIZE).apply {
             repeat(SMALL_SIZE) { writeByte(random.nextInt().toByte()) }
             resetForRead()
         }
-        mediumPayload = PlatformBuffer.allocate(MEDIUM_SIZE).apply {
+        mediumPayload = BufferFactory.Default.allocate(MEDIUM_SIZE).apply {
             repeat(MEDIUM_SIZE) { writeByte(random.nextInt().toByte()) }
             resetForRead()
         }
-        largePayload = PlatformBuffer.allocate(LARGE_SIZE).apply {
+        largePayload = BufferFactory.Default.allocate(LARGE_SIZE).apply {
             repeat(LARGE_SIZE) { writeByte(random.nextInt().toByte()) }
             resetForRead()
         }
@@ -61,7 +63,7 @@ class FrameSerializationBenchmark {
     fun frame_serialize_small(bh: Blackhole) {
         val payloadSize = SMALL_SIZE
         val frameSize = 2 + 4 + payloadSize // header + mask + payload
-        val buffer = PlatformBuffer.allocate(frameSize)
+        val buffer = BufferFactory.Default.allocate(frameSize)
 
         // Byte 1: FIN=1, opcode=1 (Text)
         buffer.writeByte(0x81.toByte())
@@ -91,7 +93,7 @@ class FrameSerializationBenchmark {
         val payloadSize = MEDIUM_SIZE
         // 16-bit extended length for payloads 126-65535
         val frameSize = 2 + 2 + 4 + payloadSize // header + ext len + mask + payload
-        val buffer = PlatformBuffer.allocate(frameSize)
+        val buffer = BufferFactory.Default.allocate(frameSize)
 
         buffer.writeByte(0x81.toByte()) // FIN=1, opcode=1 (Text)
         buffer.writeByte((0x80 or 126).toByte()) // MASK=1, len=126 (16-bit follows)
@@ -115,7 +117,7 @@ class FrameSerializationBenchmark {
         val payloadSize = LARGE_SIZE
         // 16-bit extended length (65536 fits in 16 bits)
         val frameSize = 2 + 2 + 4 + payloadSize // header + ext len + mask + payload
-        val buffer = PlatformBuffer.allocate(frameSize)
+        val buffer = BufferFactory.Default.allocate(frameSize)
 
         buffer.writeByte(0x82.toByte()) // FIN=1, opcode=2 (Binary)
         buffer.writeByte((0x80 or 126).toByte()) // MASK=1, len=126 (16-bit follows)

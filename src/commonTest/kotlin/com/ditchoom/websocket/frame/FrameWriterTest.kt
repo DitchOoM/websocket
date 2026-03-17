@@ -1,8 +1,8 @@
 package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -474,7 +474,7 @@ class FrameWriterTest {
             val writer = createWriter(clientMode = false)
 
             // Create a buffer with prefix bytes, then advance position past them
-            val buffer = PlatformBuffer.allocate(10)
+            val buffer = BufferFactory.Default.allocate(10)
             buffer.writeBytes(byteArrayOf(0xAA.toByte(), 0xBB.toByte())) // prefix (should be skipped)
             buffer.writeBytes("Hello".encodeToByteArray()) // actual payload
             buffer.resetForRead()
@@ -498,7 +498,7 @@ class FrameWriterTest {
     // ========================================================================
 
     private fun createBuffer(bytes: ByteArray): com.ditchoom.buffer.ReadBuffer {
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         buffer.writeBytes(bytes)
         buffer.resetForRead()
         return buffer

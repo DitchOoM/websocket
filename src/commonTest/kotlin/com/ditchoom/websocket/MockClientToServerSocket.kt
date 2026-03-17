@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.WriteBuffer
 import com.ditchoom.socket.ClientToServerSocket
@@ -29,7 +30,7 @@ class MockClientToServerSocket : ClientToServerSocket {
     }
 
     fun enqueueReadBytes(vararg bytes: Byte) {
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         for (b in bytes) buffer.writeByte(b)
         enqueueRead(buffer)
     }
@@ -85,7 +86,7 @@ class MockClientToServerSocket : ClientToServerSocket {
     ): Int {
         if (!open) throw SocketClosedException("Mock socket is closed")
         val bytes = buffer.remaining()
-        val copy = PlatformBuffer.allocate(bytes)
+        val copy = BufferFactory.Default.allocate(bytes)
         copy.write(buffer)
         copy.resetForRead()
         writtenBuffers.add(copy)

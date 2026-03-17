@@ -1,7 +1,8 @@
 package com.ditchoom.websocket.benchmark
 
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.CompressionAlgorithm
@@ -311,7 +312,7 @@ class CompressedMessageBenchmark {
             chunk.freeIfNeeded()
         }
 
-        val marker = PlatformBuffer.allocate(4)
+        val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
         decomp.decompress(marker) { chunk ->
@@ -353,7 +354,7 @@ class CompressedMessageBenchmark {
 
         val maskKey = if (masked) frame.readInt() else 0
 
-        val payload = PlatformBuffer.allocate(payloadLen)
+        val payload = BufferFactory.Default.allocate(payloadLen)
         for (i in 0 until payloadLen) {
             payload.writeByte(frame.readByte())
         }
@@ -400,7 +401,7 @@ class CompressedMessageBenchmark {
             chunk.freeIfNeeded()
         }
 
-        val marker = PlatformBuffer.allocate(4)
+        val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
         decomp.decompress(marker) { chunk ->
@@ -423,7 +424,7 @@ class CompressedMessageBenchmark {
 
     private fun appendMarker(compressed: ReadBuffer): ReadBuffer {
         val size = compressed.remaining()
-        val withMarker = PlatformBuffer.allocate(size + 4)
+        val withMarker = BufferFactory.Default.allocate(size + 4)
         compressed.position(0)
         withMarker.write(compressed)
         compressed.position(0)
@@ -434,7 +435,7 @@ class CompressedMessageBenchmark {
 
     private fun textToBuffer(text: String): ReadBuffer {
         val size = text.encodeToByteArray().size
-        val buf = PlatformBuffer.allocate(size)
+        val buf = BufferFactory.Default.allocate(size)
         buf.writeString(text, Charset.UTF8)
         buf.resetForRead()
         return buf
@@ -448,7 +449,7 @@ class CompressedMessageBenchmark {
 
         var totalSize = 0
         for (chunk in chunks) totalSize += chunk.remaining()
-        val combined = PlatformBuffer.allocate(totalSize)
+        val combined = BufferFactory.Default.allocate(totalSize)
         for (chunk in chunks) {
             chunk.position(0)
             combined.write(chunk)

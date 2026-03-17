@@ -1,6 +1,7 @@
 package com.ditchoom.websocket.handshake
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 
 /**
@@ -94,7 +95,7 @@ class HandshakeRequest private constructor(
             }
 
         val bytes = request.encodeToByteArray()
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         buffer.writeBytes(bytes)
         buffer.resetForRead()
         return buffer
