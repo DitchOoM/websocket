@@ -147,7 +147,7 @@ class BrowserWebSocketController(
                     throw SocketClosedException(
                         "Failed to connect. Reason: ${connectionStateValue.reason}," +
                             " Code: ${connectionStateValue.code}",
-                        connectionStateValue.t,
+                        cause = connectionStateValue.t,
                     )
                 ConnectionState.Connected -> {} // nothing to wait for
             }

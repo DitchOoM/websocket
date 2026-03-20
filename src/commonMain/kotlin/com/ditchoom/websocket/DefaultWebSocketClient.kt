@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
@@ -12,6 +11,7 @@ import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
@@ -39,6 +39,7 @@ import com.ditchoom.websocket.handshake.HandshakeRequest
 import com.ditchoom.websocket.handshake.HandshakeResponseParser
 import com.ditchoom.websocket.handshake.HandshakeValidator
 import com.ditchoom.websocket.handshake.ValidationResult
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +53,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlin.coroutines.coroutineContext
 
 /**
  * Modular WebSocket client implementation using composable components.
@@ -153,7 +153,7 @@ class DefaultWebSocketClient(
                         port = connectionOptions.port,
                         path = connectionOptions.websocketEndpoint,
                     ).apply {
-                        useTls(connectionOptions.tls)
+                        useTls(connectionOptions.isTls)
                         if (connectionOptions.protocols.isNotEmpty()) {
                             protocols(*connectionOptions.protocols.toTypedArray())
                         }
@@ -176,7 +176,9 @@ class DefaultWebSocketClient(
 
             // Open socket connection
             val socketOptions =
-                if (connectionOptions.tls) SocketOptions.tlsDefault() else SocketOptions.LOW_LATENCY
+                connectionOptions.tls?.let {
+                    SocketOptions(tcpNoDelay = true, tls = it)
+                } ?: SocketOptions.LOW_LATENCY
             withTimeout(connectionOptions.connectionTimeout) {
                 socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name, socketOptions)
             }
