@@ -165,15 +165,6 @@ val profilingTestPatterns =
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
-// Mock tests use DefaultWebSocketClient directly with mock sockets and runBlocking
-// + Dispatchers.Default. They only work reliably on JVM and macOS native — on Android
-// unit tests the JVM socket classes aren't available, and on iOS/tvOS/watchOS simulators
-// the test runner has issues writing results. Run via jvmTest and macosArm64Test only.
-val mockTestPatterns =
-    listOf(
-        "com.ditchoom.websocket.DefaultWebSocketClientMockTest",
-    )
-
 // Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
     failFast = true
@@ -183,12 +174,6 @@ tasks.withType<Test>().configureEach {
     // Always exclude profiling tests from CI - run manually when needed
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
-    }
-    // Exclude mock tests from Android unit tests
-    if (name.contains("UnitTest")) {
-        filter {
-            mockTestPatterns.forEach { excludeTestsMatching(it) }
-        }
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
@@ -207,15 +192,6 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
         integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
-    }
-    // Exclude mock tests from simulator targets — they only work reliably on macOS native
-    val isSimulatorOrEmbedded =
-        name.contains("Simulator", ignoreCase = true) ||
-            name.contains("ios", ignoreCase = true) ||
-            name.contains("tvos", ignoreCase = true) ||
-            name.contains("watchos", ignoreCase = true)
-    if (isSimulatorOrEmbedded) {
-        mockTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
 }
 

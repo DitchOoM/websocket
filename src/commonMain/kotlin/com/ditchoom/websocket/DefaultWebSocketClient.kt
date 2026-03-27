@@ -425,7 +425,7 @@ class DefaultWebSocketClient(
                     }
                 }
                 // Read loop exited normally (isOpen() returned false or !isActive).
-                println("READ_LOOP_EXIT: normal exit, isOpen=${isOpen()}, isActive=$isActive")
+                // Normal read loop exit
                 // Ensure state transitions to Disconnected so waiters don't hang.
                 connectionStateFlow.update { current ->
                     if (current !is ConnectionState.Disconnected) {
@@ -436,7 +436,7 @@ class DefaultWebSocketClient(
                 }
             } catch (e: EndOfStreamException) {
                 // Clean disconnection — socket closed or read returned 0 bytes
-                println("READ_LOOP_EXIT: EndOfStreamException")
+                // Clean disconnection — socket closed or read returned 0 bytes
                 connectionStateFlow.update { current ->
                     if (current !is ConnectionState.Disconnected) {
                         ConnectionState.Disconnected()
@@ -447,8 +447,7 @@ class DefaultWebSocketClient(
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
-                println("READ_LOOP_EXIT: ${e::class.simpleName}: ${e.message}")
-                e.printStackTrace()
+                // Unexpected read loop exit
                 connectionStateFlow.update { current ->
                     when {
                         current is ConnectionState.Disconnected -> current
@@ -667,7 +666,7 @@ class DefaultWebSocketClient(
                 socket.write(buffer, connectionOptions.writeTimeout)
             }
         } catch (e: Exception) {
-            println("WRITE_SOCKET_ERROR: ${e::class.simpleName}: ${e.message}")
+            // Write failed — socket likely closed
             connectionStateFlow.value = ConnectionState.Disconnected(e)
         }
     }
