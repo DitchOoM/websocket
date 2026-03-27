@@ -94,4 +94,4 @@ jobs:
       - name: Run ARM64 tests
         run: |
           chmod +x test.kexe
-          ./test.kexe --ktest_negative_filter=com.ditchoom.websocket.Autobahn*,com.ditchoom.websocket.WebSocketTests,com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.ProfilingTest,com.ditchoom.websocket.TimingProfilingTest
+          ./test.kexe "--ktest_negative_filter=com.ditchoom.websocket.Autobahn*,com.ditchoom.websocket.WebSocketTests,com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.ProfilingTest,com.ditchoom.websocket.TimingProfilingTest"
