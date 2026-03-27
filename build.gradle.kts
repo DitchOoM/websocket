@@ -79,7 +79,7 @@ kotlin {
     // Linux targets (only on Linux host)
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
-        // linuxArm64() // disabled until buffer publishes linuxArm64 SNAPSHOT
+        linuxArm64()
     }
 
     applyDefaultHierarchyTemplate()
