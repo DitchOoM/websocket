@@ -165,10 +165,11 @@ val profilingTestPatterns =
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
-// Tests that use DefaultWebSocketClient directly with mock sockets — these reference
-// JVM socket internals that aren't available in the Android unit test runtime.
-// They run via jvmTest instead.
-val jvmOnlyTestPatterns =
+// Mock tests use DefaultWebSocketClient directly with mock sockets and runBlocking
+// + Dispatchers.Default. They only work reliably on JVM and macOS native — on Android
+// unit tests the JVM socket classes aren't available, and on iOS/tvOS/watchOS simulators
+// the test runner has issues writing results. Run via jvmTest and macosArm64Test only.
+val mockTestPatterns =
     listOf(
         "com.ditchoom.websocket.DefaultWebSocketClientMockTest",
     )
@@ -183,10 +184,10 @@ tasks.withType<Test>().configureEach {
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
     }
-    // Exclude JVM-only mock tests from Android unit tests
+    // Exclude mock tests from Android unit tests
     if (name.contains("UnitTest")) {
         filter {
-            jvmOnlyTestPatterns.forEach { excludeTestsMatching(it) }
+            mockTestPatterns.forEach { excludeTestsMatching(it) }
         }
     }
     if (runIntegrationTests) {
@@ -206,6 +207,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
         integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
+    }
+    // Exclude mock tests from simulator targets — they only work reliably on macOS native
+    if (name.contains("Simulator", ignoreCase = true) || name.contains("ios", ignoreCase = true) ||
+        name.contains("tvos", ignoreCase = true) || name.contains("watchos", ignoreCase = true)
+    ) {
+        mockTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
 }
 
