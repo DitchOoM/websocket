@@ -688,11 +688,12 @@ class DefaultWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Close the socket first so the read loop exits naturally on the I/O exception,
+        // Close the socket so the read loop exits naturally on the I/O exception,
         // then join to wait for the read loop's finally block (which releases the stream
-        // processor) to complete. This avoids cancel() which races with the Darwin GCD
-        // dispatcher on K/N — cancel() can invalidate a continuation while a GCD block
-        // still holds a reference to it, causing a native crash.
+        // processor) to complete. We never call cancel() — on K/N Darwin, cancel() races
+        // with in-flight GCD dispatch blocks, crashing the runtime. Closing the socket
+        // unblocks any pending read, the read loop catches the exception and exits, and
+        // the job transitions to COMPLETED without needing cancellation.
         try {
             socket.close()
         } catch (_: Exception) {
@@ -705,8 +706,6 @@ class DefaultWebSocketClient(
         } catch (_: Exception) {
             // Ignore join errors
         }
-        // Cancel only after join to clean up any remaining coroutine state
-        clientJob.cancel()
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()
         // Atomic state update to avoid race with read loop
