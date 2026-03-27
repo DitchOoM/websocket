@@ -209,9 +209,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
         integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
     // Exclude mock tests from simulator targets — they only work reliably on macOS native
-    if (name.contains("Simulator", ignoreCase = true) || name.contains("ios", ignoreCase = true) ||
-        name.contains("tvos", ignoreCase = true) || name.contains("watchos", ignoreCase = true)
-    ) {
+    val isSimulatorOrEmbedded = name.contains("Simulator", ignoreCase = true) ||
+        name.contains("ios", ignoreCase = true) ||
+        name.contains("tvos", ignoreCase = true) ||
+        name.contains("watchos", ignoreCase = true)
+    if (isSimulatorOrEmbedded) {
         mockTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
 }
