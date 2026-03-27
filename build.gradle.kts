@@ -134,6 +134,10 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation(kotlin("test"))
+                // atomicfu runtime is needed because the atomicfu compiler plugin
+                // doesn't transform Android unit test bytecode — kotlinx-coroutines
+                // references AtomicFU at runtime
+                implementation(libs.atomicfu)
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
@@ -175,13 +179,6 @@ tasks.withType<Test>().configureEach {
     // Always exclude profiling tests from CI - run manually when needed
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
-    }
-    // Exclude mock tests from Android unit tests — NoClassDefFoundError for a transitive
-    // dependency class that's not on the Android unit test classpath. Covered by jvmTest.
-    if (name.contains("UnitTest")) {
-        filter {
-            excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
-        }
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
