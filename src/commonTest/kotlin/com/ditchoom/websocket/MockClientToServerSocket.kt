@@ -41,7 +41,7 @@ class MockClientToServerSocket : ClientToServerSocket {
 
     fun simulateDisconnect() {
         open = false
-        readQueue.trySend(Result.failure(SocketClosedException("Mock disconnect")))
+        readQueue.trySend(Result.failure(SocketClosedException.General("Mock disconnect")))
     }
 
     override suspend fun open(
@@ -57,14 +57,14 @@ class MockClientToServerSocket : ClientToServerSocket {
     override fun isOpen() = open
 
     override suspend fun read(timeout: Duration): ReadBuffer {
-        if (!open) throw SocketClosedException("Mock socket is closed")
+        if (!open) throw SocketClosedException.General("Mock socket is closed")
         val result =
             try {
                 withTimeout(timeout) {
                     readQueue.receive()
                 }
             } catch (e: ClosedReceiveChannelException) {
-                throw SocketClosedException("Mock socket channel closed")
+                throw SocketClosedException.General("Mock socket channel closed")
             }
         return result.getOrThrow()
     }
@@ -84,7 +84,7 @@ class MockClientToServerSocket : ClientToServerSocket {
         buffer: ReadBuffer,
         timeout: Duration,
     ): Int {
-        if (!open) throw SocketClosedException("Mock socket is closed")
+        if (!open) throw SocketClosedException.General("Mock socket is closed")
         val bytes = buffer.remaining()
         val copy = BufferFactory.Default.allocate(bytes)
         copy.write(buffer)

@@ -144,7 +144,7 @@ class BrowserWebSocketController(
                     connectionState.first { it is ConnectionState.Connected }
                 }
                 is ConnectionState.Disconnected ->
-                    throw SocketClosedException(
+                    throw SocketClosedException.General(
                         "Failed to connect. Reason: ${connectionStateValue.reason}," +
                             " Code: ${connectionStateValue.code}",
                         cause = connectionStateValue.t,

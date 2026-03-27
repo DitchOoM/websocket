@@ -3,7 +3,8 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.managed
 import com.ditchoom.socket.SocketClosedException
-import com.ditchoom.socket.SocketException
+import com.ditchoom.socket.SocketConnectionException
+import com.ditchoom.socket.SocketIOException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -100,12 +101,14 @@ class DefaultWebSocketClientMockTest {
             val client = createClient(mockSocket)
 
             // Enqueue error before connect attempt reads anything
-            mockSocket.enqueueReadError(SocketException("Connection refused"))
+            mockSocket.enqueueReadError(SocketConnectionException.Refused("localhost", 9001))
 
             client.connect()
 
             val state = client.connectionState.value
             assertIs<ConnectionState.Disconnected>(state)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.TransportFailed>(state.t)
         }
 
     @Test
@@ -165,7 +168,7 @@ class DefaultWebSocketClientMockTest {
             assertIs<ConnectionState.Connected>(client.connectionState.value)
 
             // Inject socket error
-            mockSocket.enqueueReadError(SocketException("Connection reset"))
+            mockSocket.enqueueReadError(SocketIOException("Connection reset"))
 
             // Wait for state to transition
             withTimeout(5.seconds) {
@@ -177,7 +180,7 @@ class DefaultWebSocketClientMockTest {
             val state = client.connectionState.value
             assertIs<ConnectionState.Disconnected>(state)
             assertNotNull(state.t)
-            assertIs<SocketException>(state.t)
+            assertIs<WebSocketException.TransportFailed>(state.t)
             client.close()
         }
 
@@ -193,7 +196,7 @@ class DefaultWebSocketClientMockTest {
             // simulateDisconnect to avoid race where isOpen() returns false
             // (from open=false) before the read loop hits the exception path.
             mockSocket.enqueueReadBytes(0x81.toByte(), 0x0A) // FIN + Text, length=10
-            mockSocket.enqueueReadError(SocketClosedException("Connection lost mid-frame"))
+            mockSocket.enqueueReadError(SocketClosedException.General("Connection lost mid-frame"))
 
             // Wait for disconnection
             withTimeout(5.seconds) {
@@ -227,7 +230,7 @@ class DefaultWebSocketClientMockTest {
             // frames in order: text1 → text2 → SocketClosedException.
             mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg1"))
             mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg2"))
-            mockSocket.enqueueReadError(SocketClosedException("Server TCP close"))
+            mockSocket.enqueueReadError(SocketClosedException.General("Server TCP close"))
 
             // Collect with take(5) — we'll only get 2 messages before the
             // channel closes. This must NOT hang.
@@ -256,7 +259,7 @@ class DefaultWebSocketClientMockTest {
             connectWithHandshake(client, mockSocket)
 
             // TCP disconnect immediately — no messages at all
-            mockSocket.enqueueReadError(SocketClosedException("Server TCP close"))
+            mockSocket.enqueueReadError(SocketClosedException.General("Server TCP close"))
 
             // Collector on incomingMessages must complete (channel closes with no messages)
             val messages =
@@ -283,7 +286,7 @@ class DefaultWebSocketClientMockTest {
             // Send complete message, then partial frame header, then disconnect
             mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("before-crash"))
             mockSocket.enqueueReadBytes(0x81.toByte(), 0x0A) // Partial: FIN+Text, length=10, no payload
-            mockSocket.enqueueReadError(SocketClosedException("Connection lost"))
+            mockSocket.enqueueReadError(SocketClosedException.General("Connection lost"))
 
             val messages =
                 withTimeout(5.seconds) {

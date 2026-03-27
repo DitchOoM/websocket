@@ -2,11 +2,11 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.compression.StreamingCompressor
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool

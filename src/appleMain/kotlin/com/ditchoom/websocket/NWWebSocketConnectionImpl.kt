@@ -6,7 +6,7 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.toNativeData
 import com.ditchoom.socket.NWSocketWrapper
 import com.ditchoom.socket.SocketClosedException
-import com.ditchoom.socket.SocketException
+import com.ditchoom.socket.SocketIOException
 import com.ditchoom.socket.nwhelpers.nw_helper_cancel
 import com.ditchoom.socket.nwhelpers.nw_helper_create_ws_connection
 import com.ditchoom.socket.nwhelpers.nw_helper_set_state_handler
@@ -35,14 +35,14 @@ internal class NWWebSocketConnectionImpl(
     override val isOpen: Boolean get() = ready && !closedLocally
 
     override suspend fun receiveMessage(): NativeWebSocketMessage {
-        val conn = connection ?: throw SocketClosedException("WebSocket is closed")
-        if (closedLocally) throw SocketClosedException("WebSocket is closed")
+        val conn = connection ?: throw SocketClosedException.General("WebSocket is closed")
+        if (closedLocally) throw SocketClosedException.General("WebSocket is closed")
 
         return suspendCancellableCoroutine { continuation ->
             nw_helper_ws_receive_message(conn) { data, opcode, closeCode, _, error ->
                 if (error != null) {
                     continuation.resumeWithException(
-                        SocketException(error.localizedDescription),
+                        SocketIOException(error.localizedDescription),
                     )
                 } else {
                     val buffer =
@@ -73,8 +73,8 @@ internal class NWWebSocketConnectionImpl(
         opcode: Int,
         closeCode: Int,
     ) {
-        val conn = connection ?: throw SocketClosedException("WebSocket is closed")
-        if (closedLocally) throw SocketClosedException("WebSocket is closed")
+        val conn = connection ?: throw SocketClosedException.General("WebSocket is closed")
+        if (closedLocally) throw SocketClosedException.General("WebSocket is closed")
 
         val nsData: NSData? = data?.toNativeData()?.nsData
 
@@ -82,7 +82,7 @@ internal class NWWebSocketConnectionImpl(
             nw_helper_ws_send(conn, nsData, opcode, closeCode) { error ->
                 if (error != null) {
                     if (continuation.isActive) {
-                        continuation.resumeWithException(SocketException(error.localizedDescription))
+                        continuation.resumeWithException(SocketIOException(error.localizedDescription))
                     }
                 } else {
                     if (continuation.isActive) {
@@ -153,7 +153,7 @@ actual suspend fun connectNativeWebSocket(
                 5 -> { // cancelled
                     resumed = true
                     continuation.resumeWithException(
-                        SocketException(errorDesc ?: "Connection cancelled"),
+                        SocketIOException(errorDesc ?: "Connection cancelled"),
                     )
                 }
             }

@@ -39,7 +39,6 @@ import com.ditchoom.websocket.handshake.HandshakeRequest
 import com.ditchoom.websocket.handshake.HandshakeResponseParser
 import com.ditchoom.websocket.handshake.HandshakeValidator
 import com.ditchoom.websocket.handshake.ValidationResult
-import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +52,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.coroutineContext
 
 /**
  * Modular WebSocket client implementation using composable components.
@@ -273,7 +273,7 @@ class DefaultWebSocketClient(
                 }
             }
         } catch (e: Exception) {
-            connectionStateFlow.value = ConnectionState.Disconnected(e)
+            connectionStateFlow.value = ConnectionState.Disconnected(wrapException(e))
         }
 
         return this
@@ -351,6 +351,15 @@ class DefaultWebSocketClient(
     companion object {
         /** Default read buffer size (64KB) - matches typical socket receive buffer */
         const val DEFAULT_READ_BUFFER_SIZE = 65536
+
+        /** Wraps platform/socket exceptions in domain-specific [WebSocketException] subtypes. */
+        internal fun wrapException(e: Exception): Exception =
+            when (e) {
+                is WebSocketException -> e
+                is HandshakeException -> WebSocketException.HandshakeRejected(e.message ?: "Handshake failed", cause = e)
+                is SocketException -> WebSocketException.TransportFailed(e.message ?: "Transport error", e)
+                else -> e
+            }
     }
 
     /**
@@ -447,11 +456,11 @@ class DefaultWebSocketClient(
                         e is kotlinx.coroutines.CancellationException -> ConnectionState.Disconnected()
                         // Socket errors: only report as error for unexpected disconnects
                         e is SocketException && (!serverInitiatedClose.value && current is ConnectionState.Connected) ->
-                            ConnectionState.Disconnected(e)
+                            ConnectionState.Disconnected(WebSocketException.TransportFailed(e.message ?: "Transport error", e))
                         e is SocketException -> ConnectionState.Disconnected()
                         // Catch-all for unexpected exceptions (e.g., ClosedReceiveChannelException
                         // when socket channel closes during read)
-                        else -> ConnectionState.Disconnected(e)
+                        else -> ConnectionState.Disconnected(wrapException(e))
                     }
                 }
             } finally {
