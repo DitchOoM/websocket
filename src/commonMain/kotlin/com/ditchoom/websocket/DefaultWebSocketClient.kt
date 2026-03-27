@@ -52,7 +52,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.yield
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -689,27 +688,25 @@ class DefaultWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Cancel and join the read loop coroutine. This ensures the read loop's
-        // finally block (which releases the stream processor) completes before we
-        // close the socket or clear the pool. Without joining, pool.clear() could
-        // free buffers the stream processor still references (use-after-free on K/N).
-        // Use cancel() + timed join() instead of cancelAndJoin() to avoid a native crash
-        // on K/N Darwin where cancelAndJoin() races with in-flight GCD dispatch blocks.
-        try {
-            yield()
-            clientJob.cancel()
-            withTimeoutOrNull(1000) {
-                clientJob.join()
-            }
-        } catch (_: Exception) {
-            // Ignore cancel/join errors
-        }
-        // Close socket after read loop is done
+        // Close the socket first so the read loop exits naturally on the I/O exception,
+        // then join to wait for the read loop's finally block (which releases the stream
+        // processor) to complete. This avoids cancel() which races with the Darwin GCD
+        // dispatcher on K/N — cancel() can invalidate a continuation while a GCD block
+        // still holds a reference to it, causing a native crash.
         try {
             socket.close()
         } catch (_: Exception) {
             // Ignore close errors
         }
+        try {
+            withTimeoutOrNull(2000) {
+                clientJob.join()
+            }
+        } catch (_: Exception) {
+            // Ignore join errors
+        }
+        // Cancel only after join to clean up any remaining coroutine state
+        clientJob.cancel()
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()
         // Atomic state update to avoid race with read loop
