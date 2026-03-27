@@ -542,4 +542,3 @@ tasks.register("integrationTest") {
     dependsOn(autobahnContainer)
     finalizedBy(validateAutobahnResults)
 }
-
