@@ -5,5 +5,4 @@ import platform.posix.getenv
 actual fun agentName(): String = "macOS"
 
 @OptIn(ExperimentalForeignApi::class)
-actual fun autobahnHost(): String =
-    getenv("AUTOBAHN_HOST")?.toKString() ?: "localhost"
+actual fun autobahnHost(): String = getenv("AUTOBAHN_HOST")?.toKString() ?: "localhost"
