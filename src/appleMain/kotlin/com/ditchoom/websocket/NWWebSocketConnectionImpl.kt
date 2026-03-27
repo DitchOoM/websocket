@@ -4,7 +4,6 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.NSDataBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.toNativeData
-import com.ditchoom.socket.NWSocketWrapper
 import com.ditchoom.socket.SocketClosedException
 import com.ditchoom.socket.SocketIOException
 import com.ditchoom.socket.nwhelpers.nw_helper_cancel
@@ -147,7 +146,7 @@ actual suspend fun connectNativeWebSocket(
                 1, 4 -> { // waiting or failed
                     resumed = true
                     continuation.resumeWithException(
-                        NWSocketWrapper.mapSocketException(errorDomain, errorDesc),
+                        SocketIOException(errorDesc ?: "Connection failed"),
                     )
                 }
                 5 -> { // cancelled

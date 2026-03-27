@@ -145,6 +145,14 @@ val profilingTestPatterns =
 
 val runIntegrationTests = project.hasProperty("integrationTests")
 
+// Tests that use DefaultWebSocketClient directly with mock sockets — these reference
+// JVM socket internals that aren't available in the Android unit test runtime.
+// They run via jvmTest instead.
+val jvmOnlyTestPatterns =
+    listOf(
+        "com.ditchoom.websocket.DefaultWebSocketClientMockTest",
+    )
+
 // Filter JVM/Android tests
 tasks.withType<Test>().configureEach {
     failFast = true
@@ -154,6 +162,12 @@ tasks.withType<Test>().configureEach {
     // Always exclude profiling tests from CI - run manually when needed
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
+    }
+    // Exclude JVM-only mock tests from Android unit tests
+    if (name.contains("UnitTest")) {
+        filter {
+            jvmOnlyTestPatterns.forEach { excludeTestsMatching(it) }
+        }
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
