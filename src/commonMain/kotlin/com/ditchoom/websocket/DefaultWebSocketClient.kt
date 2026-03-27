@@ -42,6 +42,7 @@ import com.ditchoom.websocket.handshake.ValidationResult
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,7 +52,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -687,23 +687,21 @@ class DefaultWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Close the socket so the read loop exits naturally on the I/O exception,
-        // then join to wait for the read loop's finally block (which releases the stream
-        // processor) to complete. We never call cancel() — on K/N Darwin, cancel() races
-        // with in-flight GCD dispatch blocks, crashing the runtime. Closing the socket
-        // unblocks any pending read, the read loop catches the exception and exits, and
-        // the job transitions to COMPLETED without needing cancellation.
+        // Close socket first to break any pending I/O, then cancelAndJoin.
+        // Order matters for K/N Darwin: cancel() on a coroutine suspended in a
+        // GCD-dispatched I/O operation crashes because GCD still holds a reference
+        // to the continuation. Closing the socket first completes the I/O (with an
+        // error), the coroutine exits its suspension point, and cancelAndJoin() is
+        // safe — no in-flight GCD blocks remain.
         try {
             socket.close()
         } catch (_: Exception) {
             // Ignore close errors
         }
         try {
-            withTimeoutOrNull(2000) {
-                clientJob.join()
-            }
+            clientJob.cancelAndJoin()
         } catch (_: Exception) {
-            // Ignore join errors
+            // Ignore cancel/join errors
         }
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()
