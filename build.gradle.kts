@@ -170,10 +170,18 @@ tasks.withType<Test>().configureEach {
     failFast = true
     testLogging {
         showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
     // Always exclude profiling tests from CI - run manually when needed
     filter {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
+    }
+    // Exclude mock tests from Android unit tests — NoClassDefFoundError for a transitive
+    // dependency class that's not on the Android unit test classpath. Covered by jvmTest.
+    if (name.contains("UnitTest")) {
+        filter {
+            excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
+        }
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
