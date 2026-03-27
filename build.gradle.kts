@@ -340,6 +340,26 @@ dokka {
         }
         reportUndocumented.set(false)
     }
+
+    // Suppress duplicate Apple source sets that share appleNativeImpl - keep only macosArm64
+    val suppressedAppleTargets =
+        listOf(
+            "macosX64",
+            "iosArm64",
+            "iosSimulatorArm64",
+            "iosX64",
+            "tvosArm64",
+            "tvosSimulatorArm64",
+            "tvosX64",
+            "watchosArm64",
+            "watchosSimulatorArm64",
+            "watchosX64",
+        )
+    dokkaSourceSets {
+        suppressedAppleTargets.forEach { target ->
+            findByName("${target}Main")?.suppress?.set(true)
+        }
+    }
 }
 
 tasks.register<Copy>("copyDokkaToDocusaurus") {
