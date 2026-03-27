@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -693,6 +694,10 @@ class DefaultWebSocketClient(
         // close the socket or clear the pool. Without joining, pool.clear() could
         // free buffers the stream processor still references (use-after-free on K/N).
         try {
+            // Yield first to let the Darwin GCD dispatcher process any pending blocks.
+            // Without this, cancelAndJoin() can race with in-flight GCD dispatch blocks,
+            // causing a native crash on K/N (not a catchable Kotlin exception).
+            yield()
             clientJob.cancelAndJoin()
         } catch (_: Exception) {
             // Ignore cancel/join errors
