@@ -84,6 +84,26 @@ kotlin {
 
     applyDefaultHierarchyTemplate()
     sourceSets {
+        // Cannot use appleMain directly because compileAppleMainKotlinMetadata
+        // can't resolve Apple-specific types (NSData, nw_connection_t, etc.) from dependencies.
+        if (hostOs.family.isAppleFamily) {
+            val appleNativeImplDir = file("src/appleNativeImpl/kotlin")
+            listOf(
+                "macosArm64Main",
+                "macosX64Main",
+                "iosArm64Main",
+                "iosSimulatorArm64Main",
+                "iosX64Main",
+                "tvosArm64Main",
+                "tvosSimulatorArm64Main",
+                "tvosX64Main",
+                "watchosArm64Main",
+                "watchosSimulatorArm64Main",
+                "watchosX64Main",
+            ).forEach { sourceSetName ->
+                findByName(sourceSetName)?.kotlin?.srcDir(appleNativeImplDir)
+            }
+        }
         commonMain.dependencies {
             implementation(libs.buffer)
             implementation(libs.buffer.compression)
