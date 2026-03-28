@@ -143,11 +143,9 @@ internal class NativeWebSocketClientAdapter(
 
     override suspend fun isPingSupported(): Boolean = true
 
-    override suspend fun localPort(): Int =
-        throw UnsupportedOperationException("Port info not available on native WebSocket")
+    override suspend fun localPort(): Int = throw UnsupportedOperationException("Port info not available on native WebSocket")
 
-    override suspend fun remotePort(): Int =
-        throw UnsupportedOperationException("Port info not available on native WebSocket")
+    override suspend fun remotePort(): Int = throw UnsupportedOperationException("Port info not available on native WebSocket")
 
     override suspend fun close() {
         try {
