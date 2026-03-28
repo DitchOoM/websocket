@@ -14,6 +14,7 @@ actual fun WebSocketClient.Companion.allocate(
     parentScope: CoroutineScope?,
     bufferFactory: BufferFactory,
     bufferPool: BufferPool?,
+    preferNative: Boolean,
 ): WebSocketClient =
     if (isNodeJs) {
         DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)

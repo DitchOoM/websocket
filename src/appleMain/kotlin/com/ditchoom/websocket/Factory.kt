@@ -12,4 +12,10 @@ actual fun WebSocketClient.Companion.allocate(
     parentScope: CoroutineScope?,
     bufferFactory: BufferFactory,
     bufferPool: BufferPool?,
-): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)
+    preferNative: Boolean,
+): WebSocketClient =
+    if (preferNative) {
+        NativeWebSocketClientAdapter(connectionOptions, parentScope)
+    } else {
+        DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)
+    }
