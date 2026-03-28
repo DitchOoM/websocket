@@ -27,7 +27,6 @@ internal class NativeWebSocketClientAdapter(
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
 ) : WebSocketClient {
-
     private val job = Job()
     override val scope: CoroutineScope =
         CoroutineScope(
@@ -99,14 +98,16 @@ internal class NativeWebSocketClientAdapter(
                             incomingMessageChannel.trySend(WebSocketMessage.Pong(msg.data ?: EMPTY_BUFFER))
                         }
                         NativeWebSocketConnection.OPCODE_CLOSE -> {
-                            val closeMsg = WebSocketMessage.Close(
-                                code = msg.closeCode.toUShort(),
-                                reason = msg.data?.let { it.readString(it.remaining(), Charset.UTF8) } ?: "",
-                            )
+                            val closeMsg =
+                                WebSocketMessage.Close(
+                                    code = msg.closeCode.toUShort(),
+                                    reason = msg.data?.let { it.readString(it.remaining(), Charset.UTF8) } ?: "",
+                                )
                             incomingMessageChannel.trySend(closeMsg)
-                            connectionStateFlow.value = ConnectionState.Disconnected(
-                                code = msg.closeCode.toUShort(),
-                            )
+                            connectionStateFlow.value =
+                                ConnectionState.Disconnected(
+                                    code = msg.closeCode.toUShort(),
+                                )
                             return@launch
                         }
                     }
