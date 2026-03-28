@@ -36,3 +36,22 @@ interface WebSocketClient {
 
     suspend fun close()
 }
+
+/**
+ * Executes [block] with this client, then closes it regardless of outcome.
+ *
+ * ```kotlin
+ * WebSocketClient.allocate(options).use { client ->
+ *     client.connect()
+ *     client.write("hello")
+ *     val echo = client.incomingTextMessages.first()
+ * }
+ * ```
+ */
+suspend inline fun <R> WebSocketClient.use(block: (WebSocketClient) -> R): R {
+    try {
+        return block(this)
+    } finally {
+        close()
+    }
+}
