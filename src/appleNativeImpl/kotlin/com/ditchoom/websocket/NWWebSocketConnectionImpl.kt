@@ -48,6 +48,7 @@ internal class NWWebSocketConnectionImpl(
                         if (data != null && data.length.toInt() > 0) {
                             val buf = NSDataBuffer(data, ByteOrder.BIG_ENDIAN)
                             buf.position(data.length.toInt())
+                            buf.resetForRead()
                             buf
                         } else {
                             null

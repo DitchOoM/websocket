@@ -157,6 +157,7 @@ val integrationTestPatterns =
         "com.ditchoom.websocket.Autobahn*",
         "com.ditchoom.websocket.WebSocketTests",
         "com.ditchoom.websocket.PublicWssValidationTest",
+        "com.ditchoom.websocket.NativeWebSocketClientTest",
     )
 
 // Profiling tests are excluded from CI - they're diagnostic tools for local profiling,
