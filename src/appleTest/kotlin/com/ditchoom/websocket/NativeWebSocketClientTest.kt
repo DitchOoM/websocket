@@ -75,12 +75,13 @@ class NativeWebSocketClientTest {
                 val seqEchoes =
                     withTimeout(10.seconds) {
                         val collected = mutableListOf<String>()
-                        ws.incomingTextMessages.takeWhile { text ->
-                            if (text.startsWith("ditchoom-native-seq-")) {
-                                collected.add(text)
-                            }
-                            collected.size < messages.size
-                        }.collect {}
+                        ws.incomingTextMessages
+                            .takeWhile { text ->
+                                if (text.startsWith("ditchoom-native-seq-")) {
+                                    collected.add(text)
+                                }
+                                collected.size < messages.size
+                            }.collect {}
                         collected
                     }
                 assertEquals(messages, seqEchoes, "Sequential messages should echo in order")
