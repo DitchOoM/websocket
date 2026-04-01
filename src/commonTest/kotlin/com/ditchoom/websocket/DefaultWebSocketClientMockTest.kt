@@ -595,4 +595,122 @@ class DefaultWebSocketClientMockTest {
             assertIs<ConnectionState.Disconnected>(state)
             assertNotNull(state.t)
         }
+
+    // ========================================================================
+    // G. Exception Consistency
+    // ========================================================================
+
+    @Test
+    fun handshakeRejected403() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+
+            val connectJob =
+                client.scope.async {
+                    client.connect()
+                }
+
+            waitForWrite(mockSocket)
+            mockSocket.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
+
+            withTimeout(5.seconds) { connectJob.await() }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.HandshakeRejected>(state.t)
+        }
+
+    @Test
+    fun handshakeRejectedWrongAcceptKey() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+
+            val connectJob =
+                client.scope.async {
+                    client.connect()
+                }
+
+            waitForWrite(mockSocket)
+            mockSocket.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
+
+            withTimeout(5.seconds) { connectJob.await() }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.HandshakeRejected>(state.t)
+        }
+
+    @Test
+    fun serverCloseNormal1000HasNoException() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
+
+            withTimeout(5.seconds) {
+                while (client.connectionState.value !is ConnectionState.Disconnected) {
+                    delay(10)
+                }
+            }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertEquals(1000.toUShort(), state.code)
+            // Normal close should NOT carry an exception
+            assertEquals(null, state.t)
+            client.close()
+        }
+
+    @Test
+    fun serverCloseAbnormalSurfacesConnectionClosed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1011u, "internal error"))
+
+            withTimeout(5.seconds) {
+                while (client.connectionState.value !is ConnectionState.Disconnected) {
+                    delay(10)
+                }
+            }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertEquals(1011.toUShort(), state.code)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.ConnectionClosed>(state.t)
+            assertEquals(1011.toUShort(), (state.t as WebSocketException.ConnectionClosed).code)
+            client.close()
+        }
+
+    @Test
+    fun socketErrorSurfacesTransportFailed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            mockSocket.enqueueReadError(SocketIOException("Connection reset by peer"))
+
+            withTimeout(5.seconds) {
+                while (client.connectionState.value !is ConnectionState.Disconnected) {
+                    delay(10)
+                }
+            }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.TransportFailed>(state.t)
+            assertIs<SocketIOException>((state.t as WebSocketException.TransportFailed).cause)
+            client.close()
+        }
 }
