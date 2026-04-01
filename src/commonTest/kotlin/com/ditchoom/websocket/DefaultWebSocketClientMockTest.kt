@@ -692,6 +692,30 @@ class DefaultWebSocketClientMockTest {
         }
 
     @Test
+    fun reservedOpcodeSurfacesProtocolViolation() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            // Send a frame with reserved opcode 0x3 (RFC 6455 Section 5.2: opcodes 3-7 are reserved)
+            // FIN=1, opcode=3, no mask, payload length=0
+            mockSocket.enqueueReadBytes(0x83.toByte(), 0x00)
+
+            withTimeout(5.seconds) {
+                while (client.connectionState.value !is ConnectionState.Disconnected) {
+                    delay(10)
+                }
+            }
+
+            val state = client.connectionState.value
+            assertIs<ConnectionState.Disconnected>(state)
+            assertNotNull(state.t)
+            assertIs<WebSocketException.ProtocolViolation>(state.t)
+            client.close()
+        }
+
+    @Test
     fun socketErrorSurfacesTransportFailed() =
         runStrictTest {
             val mockSocket = MockClientToServerSocket()
