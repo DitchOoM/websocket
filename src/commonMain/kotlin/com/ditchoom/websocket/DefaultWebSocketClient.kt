@@ -414,9 +414,9 @@ class DefaultWebSocketClient(
                         }
                         is AssemblyResult.Error -> {
                             sendCloseFrame(result.code.code, result.reason)
-                            // Update state to prevent close() from sending another close frame
                             connectionStateFlow.value =
                                 ConnectionState.Disconnected(
+                                    t = WebSocketException.ProtocolViolation(result.reason),
                                     code = result.code.code,
                                     reason = result.reason,
                                 )
@@ -517,7 +517,17 @@ class DefaultWebSocketClient(
                 }
 
                 incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
-                connectionStateFlow.value = ConnectionState.Disconnected(code = code, reason = reason)
+                val closeException =
+                    if (code != CloseCode.NORMAL.code) {
+                        WebSocketException.ConnectionClosed(
+                            "Server closed: $reason",
+                            code = code,
+                            reason = reason,
+                        )
+                    } else {
+                        null
+                    }
+                connectionStateFlow.value = ConnectionState.Disconnected(t = closeException, code = code, reason = reason)
             }
             else -> {
                 // Unexpected control opcode

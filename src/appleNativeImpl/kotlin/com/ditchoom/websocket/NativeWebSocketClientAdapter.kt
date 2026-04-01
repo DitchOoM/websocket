@@ -106,6 +106,15 @@ internal class NativeWebSocketClientAdapter(
                             incomingMessageChannel.trySend(closeMsg)
                             connectionStateFlow.value =
                                 ConnectionState.Disconnected(
+                                    t =
+                                        if (msg.closeCode != 1000) {
+                                            WebSocketException.ConnectionClosed(
+                                                "Server closed",
+                                                code = msg.closeCode.toUShort(),
+                                            )
+                                        } else {
+                                            null
+                                        },
                                     code = msg.closeCode.toUShort(),
                                 )
                             return@launch
@@ -114,7 +123,8 @@ internal class NativeWebSocketClientAdapter(
                 }
                 connectionStateFlow.value = ConnectionState.Disconnected()
             } catch (e: Exception) {
-                connectionStateFlow.value = ConnectionState.Disconnected(e)
+                connectionStateFlow.value =
+                    ConnectionState.Disconnected(WebSocketException.TransportFailed(e.message ?: "Connection lost", e))
             } finally {
                 incomingMessageChannel.close()
                 incomingTextChannel.close()

@@ -4,7 +4,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.socket.SocketClosedException
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -80,15 +79,20 @@ class BrowserWebSocketController(
     override suspend fun connect(): WebSocketClient {
         webSocket.onclose = {
             val closeEvent = it as CloseEvent
-            connectionStateFlow.value =
-                ConnectionState.Disconnected(
-                    code = closeEvent.code.toUShort(),
-                    reason = closeEvent.reason,
-                )
+            val code = closeEvent.code.toUShort()
+            val reason = closeEvent.reason
+            val closeException =
+                if (code != 1000.toUShort()) {
+                    WebSocketException.ConnectionClosed("WebSocket closed", code = code, reason = reason)
+                } else {
+                    null
+                }
+            connectionStateFlow.value = ConnectionState.Disconnected(t = closeException, code = code, reason = reason)
             closeInternal()
         }
         webSocket.onerror = {
-            connectionStateFlow.value = ConnectionState.Disconnected(Exception("Error on websocket: $it"))
+            connectionStateFlow.value =
+                ConnectionState.Disconnected(WebSocketException.TransportFailed("WebSocket error", Exception("$it")))
             closeInternal()
         }
         webSocket.onmessage = {
@@ -144,10 +148,10 @@ class BrowserWebSocketController(
                     connectionState.first { it is ConnectionState.Connected }
                 }
                 is ConnectionState.Disconnected ->
-                    throw SocketClosedException.General(
+                    throw WebSocketException.TransportFailed(
                         "Failed to connect. Reason: ${connectionStateValue.reason}," +
                             " Code: ${connectionStateValue.code}",
-                        cause = connectionStateValue.t,
+                        connectionStateValue.t ?: Exception("Connection failed"),
                     )
                 ConnectionState.Connected -> {} // nothing to wait for
             }
