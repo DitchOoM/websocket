@@ -129,9 +129,14 @@ class FrameWriterTest {
 
             val frameBuffer = writer.writeTextFrame("Hello")
 
+            // Check MASK bit directly in raw byte2
+            val byte2 = frameBuffer.get(1).toInt() and 0xFF
+            assertTrue((byte2 and 0x80) != 0, "Client frames must have MASK bit set")
+            // Verify payload is correctly unmasked after parsing
+            frameBuffer.position(0)
             val frame = parseFrame(frameBuffer)
             assertNotNull(frame)
-            assertTrue(frame.masked, "Client frames must be masked")
+            assertEquals("Hello", frame.payload.readString(frame.payloadLength, Charset.UTF8))
         }
 
     @Test
@@ -142,9 +147,9 @@ class FrameWriterTest {
 
             val frameBuffer = writer.writeTextFrame("Hello")
 
-            val frame = parseFrame(frameBuffer)
-            assertNotNull(frame)
-            assertFalse(frame.masked, "Server frames must not be masked")
+            // Check MASK bit directly in raw byte2
+            val byte2 = frameBuffer.get(1).toInt() and 0xFF
+            assertFalse((byte2 and 0x80) != 0, "Server frames must not have MASK bit set")
         }
 
     @Test
@@ -326,9 +331,12 @@ class FrameWriterTest {
         runTest {
             val writer = createWriter(clientMode = true)
 
-            val frame = parseFrame(writer.writeCloseFrame(1000u, "Going away"))
+            val closeBuffer = writer.writeCloseFrame(1000u, "Going away")
+            val byte2 = closeBuffer.get(1).toInt() and 0xFF
+            assertTrue((byte2 and 0x80) != 0, "Client close frames must be masked")
+            closeBuffer.position(0)
+            val frame = parseFrame(closeBuffer)
             assertNotNull(frame)
-            assertTrue(frame.masked)
             val statusCode = frame.payload.readShort().toInt() and 0xFFFF
             assertEquals(1000, statusCode)
             val reason = frame.payload.readString(frame.payloadLength - 2, Charset.UTF8)

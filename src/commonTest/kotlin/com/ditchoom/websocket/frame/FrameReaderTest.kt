@@ -62,7 +62,7 @@ class FrameReaderTest {
             assertNotNull(frame)
             assertTrue(frame.fin)
             assertEquals(Opcode.Text, frame.opcode)
-            assertFalse(frame.masked)
+            // masked field removed — codec handles unmasking transparently
             assertEquals(2, frame.payloadLength)
             assertEquals("Hi", frame.payload.readString(2, Charset.UTF8))
         }
@@ -94,7 +94,7 @@ class FrameReaderTest {
             val frame = reader.readFrame()
 
             assertNotNull(frame)
-            assertTrue(frame.masked)
+            // masked field removed — codec handles unmasking transparently
             assertEquals("Hi", frame.payload.readString(2, Charset.UTF8))
         }
 

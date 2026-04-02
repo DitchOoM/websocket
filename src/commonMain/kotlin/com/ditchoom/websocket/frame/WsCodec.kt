@@ -76,6 +76,21 @@ object WsFrameLengthCodec : Codec<WsFrameLength> {
             value.payloadLength <= 65535 -> 3
             else -> 9
         }
+
+    /**
+     * Returns the wire size of the length field given byte2's raw 7-bit length indicator.
+     * Used by the streaming layer to determine header size without decoding.
+     *
+     * - 0-125: 1 byte (just byte2)
+     * - 126: 3 bytes (byte2 + UShort)
+     * - 127: 9 bytes (byte2 + ULong)
+     */
+    fun wireSize(payloadLen7: Int): Int =
+        when (payloadLen7) {
+            126 -> 3
+            127 -> 9
+            else -> 1
+        }
 }
 
 /**

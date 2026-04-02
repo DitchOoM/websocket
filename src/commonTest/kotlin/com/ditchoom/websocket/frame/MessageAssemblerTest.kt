@@ -416,14 +416,12 @@ class MessageAssemblerTest {
         val frag1 =
             ParsedFrame.DataFrame.Text(
                 header1 = FrameHeaderByte1.pack(fin = false, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Text),
-                header2 = FrameHeaderByte2.forPayload(buf1.remaining()),
                 payloadLength = buf1.remaining(),
                 payload = buf1,
             )
         val frag2 =
             ParsedFrame.DataFrame.Continuation(
                 header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
-                header2 = FrameHeaderByte2.forPayload(buf2.remaining()),
                 payloadLength = buf2.remaining(),
                 payload = buf2,
             )
@@ -453,7 +451,6 @@ class MessageAssemblerTest {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
         return ParsedFrame.DataFrame.Text(
             header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2, rsv3, Opcode.Text),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
             payloadLength = buffer.remaining(),
             payload = buffer,
         )
@@ -478,7 +475,6 @@ class MessageAssemblerTest {
             }
         return ParsedFrame.DataFrame.Binary(
             header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, Opcode.Binary),
-            header2 = FrameHeaderByte2.forPayload(byteCount),
             payloadLength = byteCount,
             payload = buffer,
         )
@@ -494,7 +490,6 @@ class MessageAssemblerTest {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
         return ParsedFrame.DataFrame.Continuation(
             header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
             payloadLength = buffer.remaining(),
             payload = buffer,
         )
@@ -510,7 +505,6 @@ class MessageAssemblerTest {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
         return ParsedFrame.ControlFrame.Ping(
             header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
             payloadLength = buffer.remaining(),
             payload = buffer,
         )
@@ -523,7 +517,6 @@ class MessageAssemblerTest {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
         return ParsedFrame.ControlFrame.Pong(
             header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Pong),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
             payloadLength = buffer.remaining(),
             payload = buffer,
         )
@@ -540,7 +533,6 @@ class MessageAssemblerTest {
             }
         return ParsedFrame.ControlFrame.Close(
             header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Close),
-            header2 = FrameHeaderByte2.forPayload(2),
             payloadLength = 2,
             payload = buffer,
             closeCode = code,
@@ -559,7 +551,6 @@ class MessageAssemblerTest {
             }
         return ParsedFrame.ControlFrame.Ping(
             header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            header2 = FrameHeaderByte2.forPayload(byteCount),
             payloadLength = byteCount,
             payload = buffer,
         )
