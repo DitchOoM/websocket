@@ -28,22 +28,22 @@ import kotlin.jvm.JvmInline
  */
 @JvmInline
 value class FrameHeaderByte1(
-    val packed: Int,
+    val raw: UByte,
 ) {
     /** FIN bit - indicates final fragment */
-    inline val fin: Boolean get() = (packed and 0x80) != 0
+    inline val fin: Boolean get() = (raw.toInt() and 0x80) != 0
 
     /** RSV1 bit - used by extensions (e.g., compression) */
-    inline val rsv1: Boolean get() = (packed and 0x40) != 0
+    inline val rsv1: Boolean get() = (raw.toInt() and 0x40) != 0
 
     /** RSV2 bit - reserved */
-    inline val rsv2: Boolean get() = (packed and 0x20) != 0
+    inline val rsv2: Boolean get() = (raw.toInt() and 0x20) != 0
 
     /** RSV3 bit - reserved */
-    inline val rsv3: Boolean get() = (packed and 0x10) != 0
+    inline val rsv3: Boolean get() = (raw.toInt() and 0x10) != 0
 
     /** Frame opcode */
-    inline val opcode: Opcode get() = Opcode.fromInt(packed and 0x0F)
+    inline val opcode: Opcode get() = Opcode.fromInt(raw.toInt() and 0x0F)
 
     companion object {
         /** Pack header byte 1 from individual flags - zero allocation */
@@ -59,7 +59,7 @@ value class FrameHeaderByte1(
             if (rsv1) byte1 = byte1 or 0x40
             if (rsv2) byte1 = byte1 or 0x20
             if (rsv3) byte1 = byte1 or 0x10
-            return FrameHeaderByte1(byte1)
+            return FrameHeaderByte1(byte1.toUByte())
         }
     }
 }
@@ -165,7 +165,7 @@ class FrameReader(
 
         // Parse first two bytes as a short (more efficient than two peekByte calls)
         val headerShort = processor.peekShort(0).toInt() and 0xFFFF
-        val header1 = FrameHeaderByte1((headerShort ushr 8) and 0xFF)
+        val header1 = FrameHeaderByte1(((headerShort ushr 8) and 0xFF).toUByte())
         val header2 = FrameHeaderByte2(headerShort and 0xFF)
 
         // Calculate header size and actual payload length

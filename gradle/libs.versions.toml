@@ -9,8 +9,10 @@ atomicfu = "0.29.0"
 kotlinxCoroutines = "1.10.2"
 kotlinWrappers = "2025.12.6"
 kotlinxBenchmark = "0.4.15"
-buffer = "4.0.3"
-bufferCompression = "4.0.3"
+buffer = "4.2.0"
+bufferCompression = "4.2.0"
+bufferCodec = "4.2.0"
+ksp = "2.3.0"
 socket = "3.0.0"
 androidxCore = "1.17.0"
 androidxTestRunner = "1.7.0"
@@ -21,6 +23,8 @@ androidxTestCore = "1.7.0"
 kotlinx-benchmark-runtime = { module = "org.jetbrains.kotlinx:kotlinx-benchmark-runtime", version.ref = "kotlinxBenchmark" }
 buffer = { module = "com.ditchoom:buffer", version.ref = "buffer" }
 buffer-compression = { module = "com.ditchoom:buffer-compression", version.ref = "bufferCompression" }
+buffer-codec = { module = "com.ditchoom:buffer-codec", version.ref = "bufferCodec" }
+buffer-codec-processor = { module = "com.ditchoom:buffer-codec-processor", version.ref = "bufferCodec" }
 socket = { module = "com.ditchoom:socket", version.ref = "socket" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
@@ -41,3 +45,4 @@ android-library = { id = "com.android.library", version.ref = "androidGradlePlug
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

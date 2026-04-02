@@ -7,6 +7,7 @@ import java.util.Base64
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.ksp)
     alias(libs.plugins.dokka)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
@@ -107,6 +108,7 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.buffer)
             implementation(libs.buffer.compression)
+            implementation(libs.buffer.codec)
             implementation(libs.socket)
             implementation(libs.kotlinx.coroutines.core)
         }
@@ -149,6 +151,23 @@ kotlin {
             implementation(libs.androidx.test.rules)
             implementation(libs.androidx.test.core.ktx)
         }
+    }
+}
+
+// KSP: generate codecs for commonMain (visible to all targets)
+dependencies {
+    add("kspCommonMainMetadata", libs.buffer.codec.processor)
+}
+
+// Wire KSP commonMain output into each target's source set
+kotlin.sourceSets.commonMain {
+    kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
+}
+
+// Ensure KSP runs before compilation for all targets
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    if (name != "kspCommonMainKotlinMetadata") {
+        dependsOn("kspCommonMainKotlinMetadata")
     }
 }
 
