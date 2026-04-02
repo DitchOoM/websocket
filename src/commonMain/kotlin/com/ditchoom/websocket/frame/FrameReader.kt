@@ -210,7 +210,12 @@ class FrameReader(
             Opcode.Ping -> ParsedFrame.ControlFrame.Ping(byte1, payloadLength, payload)
             Opcode.Pong -> ParsedFrame.ControlFrame.Pong(byte1, payloadLength, payload)
             Opcode.Close -> parseCloseFrame(byte1, payloadLength, payload)
-            else ->
+            // Reserved opcodes (0x3-0x7 non-control, 0xB-0xF control) per RFC 6455
+            Opcode.ReservedBit3, Opcode.ReservedBit4, Opcode.ReservedBit5,
+            Opcode.ReservedBit6, Opcode.ReservedBit7, Opcode.ReservedBitB,
+            Opcode.ReservedBitC, Opcode.ReservedBitD, Opcode.ReservedBitE,
+            Opcode.ReservedBitF,
+            ->
                 ParsedFrame.InvalidFrame(
                     byte1,
                     payloadLength,

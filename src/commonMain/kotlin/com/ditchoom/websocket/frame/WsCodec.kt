@@ -18,7 +18,11 @@ import kotlin.jvm.JvmInline
 data class WsFrameLength(
     val payloadLength: Long,
     val masked: Boolean,
-)
+) {
+    init {
+        require(payloadLength >= 0) { "Payload length must be non-negative, got $payloadLength" }
+    }
+}
 
 /**
  * Custom codec for WebSocket's variable-width payload length encoding.
@@ -106,7 +110,13 @@ data class WsFrameHeader(
     val byte1: FrameHeaderByte1,
     @UseCodec(WsFrameLengthCodec::class) val length: WsFrameLength,
     @WhenTrue("length.masked") val maskingKey: WsMaskingKey? = null,
-)
+) {
+    init {
+        require(length.masked == (maskingKey != null)) {
+            "maskingKey must be non-null when masked=true and null when masked=false"
+        }
+    }
+}
 
 /**
  * 4-byte masking key packed as UInt for zero-allocation access.
