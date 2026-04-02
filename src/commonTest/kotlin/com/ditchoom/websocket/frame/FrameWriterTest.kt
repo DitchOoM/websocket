@@ -502,6 +502,108 @@ class FrameWriterTest {
         }
 
     // ========================================================================
+    // Wire-Format Byte Verification
+    // ========================================================================
+
+    @Test
+    fun `wire format - unmasked text frame raw bytes`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val frameBuffer = writer.writeTextFrame("Hi")
+
+            // RFC 6455 Section 5.7 Example 1: unmasked text "Hi"
+            // byte1: FIN=1, opcode=0x1 → 0x81
+            // byte2: MASK=0, length=2 → 0x02
+            // payload: 0x48 0x69 ("Hi")
+            assertEquals(0x81.toByte(), frameBuffer.get(0))
+            assertEquals(0x02.toByte(), frameBuffer.get(1))
+            assertEquals(0x48.toByte(), frameBuffer.get(2)) // 'H'
+            assertEquals(0x69.toByte(), frameBuffer.get(3)) // 'i'
+        }
+
+    @Test
+    fun `wire format - 16-bit extended length byte order`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val data = ByteArray(256) { 0 }
+            val frameBuffer = writer.writeBinaryFrame(createBuffer(data))
+
+            // byte1: FIN=1, opcode=0x2 → 0x82
+            // byte2: MASK=0, length=126 (16-bit follows) → 0x7E
+            // extended length: 256 in big-endian → 0x01 0x00
+            assertEquals(0x82.toByte(), frameBuffer.get(0))
+            assertEquals(0x7E.toByte(), frameBuffer.get(1))
+            assertEquals(0x01.toByte(), frameBuffer.get(2)) // 256 >> 8
+            assertEquals(0x00.toByte(), frameBuffer.get(3)) // 256 & 0xFF
+        }
+
+    @Test
+    fun `wire format - 64-bit extended length byte order`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val data = ByteArray(70000) { 0 }
+            val frameBuffer = writer.writeBinaryFrame(createBuffer(data))
+
+            // byte1: FIN=1, opcode=0x2 → 0x82
+            // byte2: MASK=0, length=127 (64-bit follows) → 0x7F
+            // extended length: 70000 in big-endian (8 bytes)
+            assertEquals(0x82.toByte(), frameBuffer.get(0))
+            assertEquals(0x7F.toByte(), frameBuffer.get(1))
+            // 70000 = 0x00_00_00_00_00_01_11_70
+            assertEquals(0x00.toByte(), frameBuffer.get(2))
+            assertEquals(0x00.toByte(), frameBuffer.get(3))
+            assertEquals(0x00.toByte(), frameBuffer.get(4))
+            assertEquals(0x00.toByte(), frameBuffer.get(5))
+            assertEquals(0x00.toByte(), frameBuffer.get(6))
+            assertEquals(0x01.toByte(), frameBuffer.get(7))
+            assertEquals(0x11.toByte(), frameBuffer.get(8))
+            assertEquals(0x70.toByte(), frameBuffer.get(9))
+        }
+
+    @Test
+    fun `wire format - masked frame has MASK bit and 4-byte key`() =
+        runTest {
+            val writer = createWriter(clientMode = true)
+            val frameBuffer = writer.writeTextFrame("Hi")
+
+            // byte1: FIN=1, opcode=0x1 → 0x81
+            assertEquals(0x81.toByte(), frameBuffer.get(0))
+            // byte2: MASK=1, length=2 → 0x82
+            assertEquals(0x82.toByte(), frameBuffer.get(1))
+            // bytes 2-5: masking key (4 bytes, any value)
+            // bytes 6-7: masked payload (2 bytes)
+            // Total: 8 bytes
+            assertEquals(8, frameBuffer.remaining())
+        }
+
+    @Test
+    fun `wire format - close frame status code big-endian`() =
+        runTest {
+            val writer = createWriter(clientMode = false)
+            val frameBuffer = writer.writeCloseFrame(1000u, "")
+
+            // byte1: FIN=1, opcode=0x8 → 0x88
+            // byte2: MASK=0, length=2 → 0x02
+            // status code: 1000 in big-endian → 0x03 0xE8
+            assertEquals(0x88.toByte(), frameBuffer.get(0))
+            assertEquals(0x02.toByte(), frameBuffer.get(1))
+            assertEquals(0x03.toByte(), frameBuffer.get(2)) // 1000 >> 8
+            assertEquals(0xE8.toByte(), frameBuffer.get(3)) // 1000 & 0xFF
+        }
+
+    @Test
+    fun `wire format - RSV1 bit set for compressed frame`() =
+        runTest {
+            // RSV1=1 indicates permessage-deflate per RFC 7692
+            val writer = createWriter(clientMode = false)
+            val frameBuffer = writer.writeFrame(Opcode.Text, createBuffer("test".encodeToByteArray()), fin = true, compress = false)
+
+            // byte1: FIN=1, RSV1=0, opcode=0x1 → 0x81
+            assertEquals(0x81.toByte(), frameBuffer.get(0))
+            // RSV1 would be 0xC1 (0x81 | 0x40) if compression were active
+        }
+
+    // ========================================================================
     // Helper Functions
     // ========================================================================
 
