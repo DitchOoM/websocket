@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.freeAll
@@ -14,81 +13,6 @@ import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import com.ditchoom.websocket.compressSync
 import com.ditchoom.websocket.totalRemaining
-import kotlin.jvm.JvmInline
-
-/**
- * Packed WebSocket frame header (first 2 bytes) stored in a Short.
- * Zero allocation - all field access via inline bit operations.
- *
- * Layout: [FIN:1][RSV1:1][RSV2:1][RSV3:1][OPCODE:4][MASK:1][PAYLOAD_LEN:7]
- */
-@JvmInline
-internal value class PackedFrameHeader(
-    val packed: Short,
-) {
-    companion object {
-        /** Creates a packed header for client frames (always masked). */
-        fun forClient(
-            fin: Boolean,
-            rsv1: Boolean,
-            opcode: Opcode,
-            payloadSize: Int,
-        ): PackedFrameHeader {
-            val byte1 =
-                (opcode.value.toInt() and 0x0F) or
-                    (if (fin) 0x80 else 0) or
-                    (if (rsv1) 0x40 else 0)
-
-            val payloadLen7 =
-                when {
-                    payloadSize <= 125 -> payloadSize
-                    payloadSize <= 65535 -> 126
-                    else -> 127
-                }
-            // Client frames are always masked
-            val byte2 = payloadLen7 or 0x80
-
-            return PackedFrameHeader(((byte1 shl 8) or byte2).toShort())
-        }
-
-        /** Creates a packed header for server frames (never masked). */
-        fun forServer(
-            fin: Boolean,
-            rsv1: Boolean,
-            opcode: Opcode,
-            payloadSize: Int,
-        ): PackedFrameHeader {
-            val byte1 =
-                (opcode.value.toInt() and 0x0F) or
-                    (if (fin) 0x80 else 0) or
-                    (if (rsv1) 0x40 else 0)
-
-            val payloadLen7 =
-                when {
-                    payloadSize <= 125 -> payloadSize
-                    payloadSize <= 65535 -> 126
-                    else -> 127
-                }
-
-            return PackedFrameHeader(((byte1 shl 8) or payloadLen7).toShort())
-        }
-    }
-
-    /** Calculates total header size including extended length and mask. */
-    fun headerSize(
-        payloadSize: Int,
-        masked: Boolean,
-    ): Int {
-        val extendedLen =
-            when {
-                payloadSize <= 125 -> 0
-                payloadSize <= 65535 -> 2
-                else -> 8
-            }
-        val maskSize = if (masked) 4 else 0
-        return 2 + extendedLen + maskSize
-    }
-}
 
 /**
  * WebSocket frame writer with optional compression support.
@@ -225,34 +149,7 @@ class FrameWriter(
     private fun writeControlFrame(
         opcode: Opcode,
         payload: ReadBuffer,
-    ): ReadBuffer {
-        val payloadSize = payload.remaining()
-
-        val header =
-            if (clientMode) {
-                PackedFrameHeader.forClient(true, false, opcode, payloadSize)
-            } else {
-                PackedFrameHeader.forServer(true, false, opcode, payloadSize)
-            }
-        val headerSize = header.headerSize(payloadSize, clientMode)
-        val frameSize = headerSize + payloadSize
-
-        val buffer = allocateBuffer(frameSize)
-
-        buffer.writeShort(header.packed)
-
-        if (clientMode) {
-            val mask = MaskingKey.FourByteMaskingKey()
-            buffer.writeInt(mask.packed)
-            // Do NOT reset position(0) — payload may be a slice with position > 0
-            buffer.xorMaskCopy(payload, mask.packed)
-        } else {
-            buffer.write(payload)
-        }
-
-        buffer.resetForRead()
-        return buffer
-    }
+    ): ReadBuffer = serializeFrame(fin = true, rsv1 = false, opcode, payload)
 
     /**
      * Writes a data frame with optional compression.
@@ -292,6 +189,23 @@ class FrameWriter(
     }
 
     /**
+     * Builds a [WsFrameHeader] for the given frame parameters.
+     */
+    private fun buildHeader(
+        fin: Boolean,
+        rsv1: Boolean,
+        opcode: Opcode,
+        payloadSize: Int,
+    ): WsFrameHeader {
+        val mask = if (clientMode) WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt()) else null
+        return WsFrameHeader(
+            byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, opcode),
+            length = WsFrameLength(payloadSize.toLong(), masked = clientMode),
+            maskingKey = mask,
+        )
+    }
+
+    /**
      * Serializes a frame from a single payload buffer with fused copy + mask.
      */
     private fun serializeFrame(
@@ -301,27 +215,15 @@ class FrameWriter(
         payload: ReadBuffer,
     ): ReadBuffer {
         val payloadSize = payload.remaining()
+        val header = buildHeader(fin, rsv1, opcode, payloadSize)
+        val headerSize = WsFrameHeaderCodec.sizeOf(header) ?: error("Header size must be known")
+        val buffer = allocateBuffer(headerSize + payloadSize)
 
-        val header =
-            if (clientMode) {
-                PackedFrameHeader.forClient(fin, rsv1, opcode, payloadSize)
-            } else {
-                PackedFrameHeader.forServer(fin, rsv1, opcode, payloadSize)
-            }
-        val headerSize = header.headerSize(payloadSize, clientMode)
-        val frameSize = headerSize + payloadSize
-
-        val buffer = allocateBuffer(frameSize)
-
-        // Write header
-        buffer.writeShort(header.packed)
-        writeExtendedLength(buffer, payloadSize)
+        WsFrameHeaderCodec.encode(buffer, header)
 
         // Write payload with fused copy + mask (single pass)
-        if (clientMode) {
-            val mask = MaskingKey.FourByteMaskingKey()
-            buffer.writeInt(mask.packed)
-            buffer.xorMaskCopy(payload, mask.packed)
+        if (header.maskingKey != null) {
+            buffer.xorMaskCopy(payload, header.maskingKey.raw.toInt())
         } else {
             buffer.write(payload)
         }
@@ -332,8 +234,6 @@ class FrameWriter(
 
     /**
      * Serializes a frame directly from compressed chunks with fused copy + mask.
-     * Eliminates the intermediate combineChunks() buffer — chunks go directly
-     * into the frame buffer with masking applied in a single pass per chunk.
      */
     private fun serializeFrameFromChunks(
         fin: Boolean,
@@ -342,29 +242,19 @@ class FrameWriter(
         chunks: List<ReadBuffer>,
         payloadSize: Int,
     ): ReadBuffer {
-        val header =
-            if (clientMode) {
-                PackedFrameHeader.forClient(fin, rsv1, opcode, payloadSize)
-            } else {
-                PackedFrameHeader.forServer(fin, rsv1, opcode, payloadSize)
-            }
-        val headerSize = header.headerSize(payloadSize, clientMode)
-        val frameSize = headerSize + payloadSize
+        val header = buildHeader(fin, rsv1, opcode, payloadSize)
+        val headerSize = WsFrameHeaderCodec.sizeOf(header) ?: error("Header size must be known")
+        val buffer = allocateBuffer(headerSize + payloadSize)
 
-        val buffer = allocateBuffer(frameSize)
-
-        // Write header
-        buffer.writeShort(header.packed)
-        writeExtendedLength(buffer, payloadSize)
+        WsFrameHeaderCodec.encode(buffer, header)
 
         // Write each chunk with fused copy + mask, tracking mask offset
-        if (clientMode) {
-            val mask = MaskingKey.FourByteMaskingKey()
-            buffer.writeInt(mask.packed)
+        if (header.maskingKey != null) {
+            val maskInt = header.maskingKey.raw.toInt()
             var maskOffset = 0
             for (chunk in chunks) {
                 val chunkSize = chunk.remaining()
-                buffer.xorMaskCopy(chunk, mask.packed, maskOffset)
+                buffer.xorMaskCopy(chunk, maskInt, maskOffset)
                 maskOffset += chunkSize
             }
         } else {
@@ -375,16 +265,5 @@ class FrameWriter(
 
         buffer.resetForRead()
         return buffer
-    }
-
-    /** Writes extended payload length if needed. */
-    private fun writeExtendedLength(
-        buffer: ReadWriteBuffer,
-        payloadSize: Int,
-    ) {
-        when {
-            payloadSize > 65535 -> buffer.writeLong(payloadSize.toLong())
-            payloadSize > 125 -> buffer.writeShort(payloadSize.toShort())
-        }
     }
 }
