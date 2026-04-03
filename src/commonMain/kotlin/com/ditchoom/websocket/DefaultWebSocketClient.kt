@@ -682,7 +682,15 @@ class DefaultWebSocketClient(
     }
 
     override suspend fun close() {
-        if (connectionState.value is ConnectionState.Connected && !serverInitiatedClose.value) {
+        // Guard against double close — if already disconnected or closing, skip everything.
+        // This also prevents the TOCTOU race where close() and the read loop's close handler
+        // both try to send a close frame concurrently.
+        val currentState = connectionStateFlow.value
+        if (currentState is ConnectionState.Disconnected) return
+        // Atomically transition to Disconnected to prevent concurrent close() calls
+        if (!connectionStateFlow.compareAndSet(currentState, ConnectionState.Disconnected())) return
+
+        if (currentState is ConnectionState.Connected && !serverInitiatedClose.value) {
             sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
         }
         // Clear frameWriter to prevent writes after close (avoids infinite loop
@@ -715,13 +723,5 @@ class DefaultWebSocketClient(
         }
         // Free all pooled NativeBuffers (no-op on JVM/JS)
         pool.clear()
-        // Atomic state update to avoid race with read loop
-        connectionStateFlow.update { current ->
-            if (current !is ConnectionState.Disconnected) {
-                ConnectionState.Disconnected()
-            } else {
-                current
-            }
-        }
     }
 }
