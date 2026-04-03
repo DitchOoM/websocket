@@ -337,7 +337,9 @@ ktlint {
     outputToConsole.set(true)
     android.set(true)
     filter {
-        exclude("**/generated/**")
+        exclude { element ->
+            element.file.path.contains("/build/")
+        }
     }
 }
 
