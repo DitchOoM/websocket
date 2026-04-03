@@ -142,15 +142,21 @@ class ReconnectingWebSocketClient(
     override suspend fun remotePort(): Int = currentClient?.remotePort() ?: -1
 
     override suspend fun write(string: String) {
-        currentClient?.write(string)
+        val client = currentClient
+            ?: throw WebSocketException.ConnectionClosed("Cannot write: WebSocket is reconnecting or closed")
+        client.write(string)
     }
 
     override suspend fun write(buffer: ReadBuffer) {
-        currentClient?.write(buffer)
+        val client = currentClient
+            ?: throw WebSocketException.ConnectionClosed("Cannot write: WebSocket is reconnecting or closed")
+        client.write(buffer)
     }
 
     override suspend fun ping(payloadData: ReadBuffer) {
-        currentClient?.ping(payloadData)
+        val client = currentClient
+            ?: throw WebSocketException.ConnectionClosed("Cannot ping: WebSocket is reconnecting or closed")
+        client.ping(payloadData)
     }
 
     override suspend fun close() {

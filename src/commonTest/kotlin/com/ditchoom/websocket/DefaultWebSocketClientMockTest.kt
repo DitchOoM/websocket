@@ -737,4 +737,90 @@ class DefaultWebSocketClientMockTest {
             assertIs<SocketIOException>((state.t as WebSocketException.TransportFailed).cause)
             client.close()
         }
+
+    // ========================================================================
+    // H. Write-After-Close and Double-Close Guards
+    // ========================================================================
+
+    @Test
+    fun writeAfterCloseThrowsConnectionClosed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            client.close()
+
+            assertFailsWith<WebSocketException.ConnectionClosed> {
+                client.write("should fail")
+            }
+        }
+
+    @Test
+    fun writeBinaryAfterCloseThrowsConnectionClosed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            client.close()
+
+            val buffer = BufferFactory.managed().allocate(5)
+            buffer.writeBytes("hello".encodeToByteArray())
+            buffer.resetForRead()
+
+            assertFailsWith<WebSocketException.ConnectionClosed> {
+                client.write(buffer)
+            }
+        }
+
+    @Test
+    fun pingAfterCloseThrowsConnectionClosed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            client.close()
+
+            assertFailsWith<WebSocketException.ConnectionClosed> {
+                client.ping()
+            }
+        }
+
+    @Test
+    fun doubleCloseIsIdempotent() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            client.close()
+            // Second close should return without error
+            client.close()
+
+            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+        }
+
+    @Test
+    fun writeAfterServerCloseThrowsConnectionClosed() =
+        runStrictTest {
+            val mockSocket = MockClientToServerSocket()
+            val client = createClient(mockSocket)
+            connectWithHandshake(client, mockSocket)
+
+            // Server sends close frame
+            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
+
+            withTimeout(5.seconds) {
+                while (client.connectionState.value !is ConnectionState.Disconnected) {
+                    delay(10)
+                }
+            }
+
+            assertFailsWith<WebSocketException.ConnectionClosed> {
+                client.write("should fail after server close")
+            }
+            client.close()
+        }
 }

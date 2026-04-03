@@ -628,21 +628,24 @@ class DefaultWebSocketClient(
     }
 
     override suspend fun write(string: String) {
-        val writer = frameWriter ?: return
+        val writer = frameWriter
+            ?: throw WebSocketException.ConnectionClosed("Cannot write to a closed WebSocket")
         val frameBuffer = writer.writeTextFrame(string)
         writeToSocket(frameBuffer)
-        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
+        frameBuffer.freeIfNeeded()
     }
 
     override suspend fun write(buffer: ReadBuffer) {
-        val writer = frameWriter ?: return
+        val writer = frameWriter
+            ?: throw WebSocketException.ConnectionClosed("Cannot write to a closed WebSocket")
         val frameBuffer = writer.writeBinaryFrame(buffer)
         writeToSocket(frameBuffer)
-        frameBuffer.freeIfNeeded() // Free native frame buffer after sending
+        frameBuffer.freeIfNeeded()
     }
 
     override suspend fun ping(payloadData: ReadBuffer) {
-        val writer = frameWriter ?: return
+        val writer = frameWriter
+            ?: throw WebSocketException.ConnectionClosed("Cannot ping a closed WebSocket")
         val frameBuffer = writer.writePingFrame(payloadData)
         writeToSocket(frameBuffer)
         frameBuffer.freeIfNeeded()
