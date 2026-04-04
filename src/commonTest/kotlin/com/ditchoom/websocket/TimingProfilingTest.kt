@@ -146,12 +146,12 @@ class TimingProfilingTest {
             var readTotal = Duration.ZERO
 
             try {
-                ws.incomingMessages.take(count).collect { msg ->
+                ws.receive().take(count).collect { msg ->
                     val text = (msg as WebSocketMessage.Text).value
 
                     // Measure write (includes compress + frame + socket write)
                     val writeMark = TimeSource.Monotonic.markNow()
-                    ws.write(text)
+                    ws.send(WebSocketMessage.Text(text))
                     writeTotal += writeMark.elapsedNow()
                 }
             } catch (_: Exception) {
@@ -202,11 +202,11 @@ class TimingProfilingTest {
             var writeTotal = Duration.ZERO
 
             try {
-                ws.incomingMessages.take(count).collect { msg ->
+                ws.receive().take(count).collect { msg ->
                     val text = (msg as WebSocketMessage.Text).value
 
                     val writeMark = TimeSource.Monotonic.markNow()
-                    ws.write(text)
+                    ws.send(WebSocketMessage.Text(text))
                     writeTotal += writeMark.elapsedNow()
                 }
             } catch (_: Exception) {

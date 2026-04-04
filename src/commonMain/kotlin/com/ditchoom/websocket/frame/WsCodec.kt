@@ -124,7 +124,24 @@ data class WsFrameHeader(
 @JvmInline
 value class WsMaskingKey(
     val raw: UInt,
-)
+) {
+    companion object {
+        /** Wire size of a masking key: always 4 bytes. */
+        const val SIZE = 4
+    }
+}
+
+/**
+ * Computes the wire size of a [WsFrameHeader].
+ *
+ * The KSP-generated [WsFrameHeaderCodec] doesn't emit `sizeOf`, so we provide it here.
+ * Size = 1 (byte1) + length field size + optional 4-byte masking key.
+ */
+fun headerWireSize(header: WsFrameHeader): Int {
+    val lengthSize = WsFrameLengthCodec.sizeOf(header.length) ?: error("Length size must be known")
+    val maskSize = if (header.maskingKey != null) WsMaskingKey.SIZE else 0
+    return 1 + lengthSize + maskSize
+}
 
 /**
  * WebSocket close frame body: 2-byte status code + UTF-8 reason string.

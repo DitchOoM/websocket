@@ -1,8 +1,8 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.deterministic
+import com.ditchoom.socket.ConnectionState
 import com.ditchoom.socket.ReconnectDecision
 import com.ditchoom.socket.ReconnectionClassifier
 import kotlinx.coroutines.CoroutineScope
@@ -24,14 +24,7 @@ import kotlinx.coroutines.launch
  * Creates a fresh [DefaultWebSocketClient] on each connection attempt.
  * When the underlying client disconnects with an error, the [classifier]
  * decides whether to retry (with delay) or give up. Incoming messages from
- * successive connections are merged into a single [incomingMessages] flow.
- *
- * Usage:
- * ```kotlin
- * val ws = ReconnectingWebSocketClient(options)
- * ws.connect()
- * ws.incomingTextMessages.collect { text -> ... }
- * ```
+ * successive connections are merged into a single [receive] flow.
  */
 class ReconnectingWebSocketClient(
     private val connectionOptions: WebSocketConnectionOptions,
@@ -46,13 +39,8 @@ class ReconnectingWebSocketClient(
     override val connectionState: StateFlow<ConnectionState> = connectionStateFlow.asStateFlow()
 
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
-    override val incomingMessages: Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
 
-    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
-    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
-
-    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
-    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
+    override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
 
     @kotlin.concurrent.Volatile
     private var currentClient: DefaultWebSocketClient? = null
@@ -81,8 +69,9 @@ class ReconnectingWebSocketClient(
                         connectionStateFlow.value = ConnectionState.Connected
                         if (classifier is WebSocketReconnectionClassifier) classifier.reset()
 
-                        // Forward messages from this client
-                        val forwardJob = launch { forwardMessages(client) }
+                        val forwardJob = launch {
+                            client.receive().collect { incomingMessageChannel.trySend(it) }
+                        }
 
                         // Wait for disconnection
                         client.connectionState.collect { state ->
@@ -119,17 +108,6 @@ class ReconnectingWebSocketClient(
             }
     }
 
-    private suspend fun forwardMessages(client: DefaultWebSocketClient) {
-        client.incomingMessages.collect { msg ->
-            incomingMessageChannel.trySend(msg)
-            when (msg) {
-                is WebSocketMessage.Text -> incomingTextChannel.trySend(msg.value)
-                is WebSocketMessage.Binary -> incomingBinaryChannel.trySend(msg.value)
-                else -> {} // Ping/Pong/Close handled internally
-            }
-        }
-    }
-
     private fun createClient(): DefaultWebSocketClient =
         DefaultWebSocketClient(
             connectionOptions = connectionOptions,
@@ -141,22 +119,10 @@ class ReconnectingWebSocketClient(
 
     override suspend fun remotePort(): Int = currentClient?.remotePort() ?: -1
 
-    override suspend fun write(string: String) {
+    override suspend fun send(message: WebSocketMessage) {
         val client = currentClient
-            ?: throw WebSocketException.ConnectionClosed("Cannot write: WebSocket is reconnecting or closed")
-        client.write(string)
-    }
-
-    override suspend fun write(buffer: ReadBuffer) {
-        val client = currentClient
-            ?: throw WebSocketException.ConnectionClosed("Cannot write: WebSocket is reconnecting or closed")
-        client.write(buffer)
-    }
-
-    override suspend fun ping(payloadData: ReadBuffer) {
-        val client = currentClient
-            ?: throw WebSocketException.ConnectionClosed("Cannot ping: WebSocket is reconnecting or closed")
-        client.ping(payloadData)
+            ?: throw WebSocketException.ConnectionClosed("Cannot send: not connected")
+        client.send(message)
     }
 
     override suspend fun close() {
@@ -170,8 +136,6 @@ class ReconnectingWebSocketClient(
         }
         currentClient = null
         incomingMessageChannel.close()
-        incomingTextChannel.close()
-        incomingBinaryChannel.close()
         connectionStateFlow.value = ConnectionState.Disconnected()
     }
 }

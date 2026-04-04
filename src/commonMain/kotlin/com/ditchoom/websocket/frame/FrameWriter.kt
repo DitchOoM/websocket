@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.freeAll
@@ -216,7 +217,7 @@ class FrameWriter(
     ): ReadBuffer {
         val payloadSize = payload.remaining()
         val header = buildHeader(fin, rsv1, opcode, payloadSize)
-        val headerSize = WsFrameHeaderCodec.sizeOf(header) ?: error("Header size must be known")
+        val headerSize = headerWireSize(header)
         val buffer = allocateBuffer(headerSize + payloadSize)
 
         WsFrameHeaderCodec.encode(buffer, header)
@@ -243,7 +244,7 @@ class FrameWriter(
         payloadSize: Int,
     ): ReadBuffer {
         val header = buildHeader(fin, rsv1, opcode, payloadSize)
-        val headerSize = WsFrameHeaderCodec.sizeOf(header) ?: error("Header size must be known")
+        val headerSize = headerWireSize(header)
         val buffer = allocateBuffer(headerSize + payloadSize)
 
         WsFrameHeaderCodec.encode(buffer, header)

@@ -6,7 +6,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.shared
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -29,12 +28,12 @@ class WebSocketTests {
             websocket.connect()
             websocket.awaitConnected()
             val string1 = "test"
-            launch(Dispatchers.Default) { websocket.write(string1) }
-            val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string1)) }
+            val dataRead = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string1, dataRead.value)
             val string2 = "yolo"
-            launch(Dispatchers.Default) { websocket.write(string2) }
-            val dataRead2 = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string2)) }
+            val dataRead2 = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string2, dataRead2.value)
             websocket.close()
         }
@@ -50,11 +49,11 @@ class WebSocketTests {
                     bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
-            launch(Dispatchers.Default) { websocket.write(createPayload()) }
-            val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }
+            val firstBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayload(firstBuffer.value)
-            launch(Dispatchers.Default) { websocket.write(createPayloadReverse()) }
-            val secondBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayloadReverse())) }
+            val secondBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayloadReversed(secondBuffer.value)
             websocket.close()
         }
@@ -72,10 +71,10 @@ class WebSocketTests {
             websocket.connect()
             if (websocket.isPingSupported()) {
                 val payload = createPayload()
-                launch(Dispatchers.Default) { websocket.ping(payload) }
+                launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
                 val pong =
                     withTimeout(10.seconds) {
-                        val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
+                        val p = websocket.receive().first() as? WebSocketMessage.Pong
                         assertNotNull(p)
                     }
                 validatePayload(pong.value)
@@ -94,32 +93,32 @@ class WebSocketTests {
                     bufferFactory = BufferFactory.shared(),
                 )
             websocket.connect()
-            launch(Dispatchers.Default) { websocket.write(createPayload()) }
-            val firstBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }
+            val firstBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayload(firstBuffer.value)
             val string1 = "test"
-            launch(Dispatchers.Default) { websocket.write(string1) }
-            val dataRead = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string1)) }
+            val dataRead = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string1, dataRead.value)
 
             if (websocket.isPingSupported()) {
                 val payload = createPayload()
-                launch(Dispatchers.Default) { websocket.ping(payload) }
+                launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
                 val pong =
                     withTimeout(10.seconds) {
-                        val p = websocket.incomingMessages.take(1).first() as? WebSocketMessage.Pong
+                        val p = websocket.receive().first() as? WebSocketMessage.Pong
                         assertNotNull(p)
                     }
                 validatePayload(pong.value)
             }
 
-            launch(Dispatchers.Default) { websocket.write(createPayloadReverse()) }
-            val secondBuffer = websocket.incomingMessages.take(1).first() as WebSocketMessage.Binary
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayloadReverse())) }
+            val secondBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayloadReversed(secondBuffer.value)
 
             val string2 = "yolo"
-            launch(Dispatchers.Default) { websocket.write(string2) }
-            val dataRead2 = websocket.incomingMessages.take(1).first() as WebSocketMessage.Text
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string2)) }
+            val dataRead2 = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string2, dataRead2.value)
 
             websocket.close()

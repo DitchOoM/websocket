@@ -7,6 +7,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
+import com.ditchoom.socket.ConnectionState
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
@@ -26,7 +27,7 @@ import kotlin.time.TimeSource
 internal suspend fun WebSocketClient.awaitConnected() {
     val state = connectionState.first { it is ConnectionState.Connected || it is ConnectionState.Disconnected }
     if (state is ConnectionState.Disconnected) {
-        throw IllegalStateException("Connection failed: ${state.t?.message ?: state.reason ?: "unknown"}")
+        throw IllegalStateException("Connection failed: ${state.t?.message ?: (state as? WebSocketDisconnected)?.reason ?: "unknown"}")
     }
 }
 
@@ -97,10 +98,10 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     try {
         var msgIdx = 0
         val perMsgMark = TimeSource.Monotonic.markNow()
-        ws.incomingMessages.filter { it is WebSocketMessage.Text }.take(count).collect {
+        ws.receive().filter { it is WebSocketMessage.Text }.take(count).collect {
             val recvTime = perMsgMark.elapsedNow()
             val m = it as WebSocketMessage.Text
-            ws.write(m.value)
+            ws.send(WebSocketMessage.Text(m.value))
             val writeTime = perMsgMark.elapsedNow()
             if (count > 100 && (msgIdx < 5 || msgIdx % 100 == 0 || msgIdx == count - 1)) {
                 println(
@@ -156,9 +157,9 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     ws.awaitConnected()
     val connectTime = mark.elapsedNow()
     try {
-        ws.incomingMessages.filter { it is WebSocketMessage.Binary }.take(count).collect {
+        ws.receive().filter { it is WebSocketMessage.Binary }.take(count).collect {
             val m = it as WebSocketMessage.Binary
-            ws.write(m.value)
+            ws.send(WebSocketMessage.Binary(m.value))
             m.value.freeIfNeeded() // Free NativeBuffer after echo
         }
     } catch (_: Exception) {
@@ -203,8 +204,8 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     ws.connect()
     ws.awaitConnected()
     try {
-        val msg = ws.incomingMessages.first { it is WebSocketMessage.Text } as WebSocketMessage.Text
-        ws.write(msg.value)
+        val msg = ws.receive().first { it is WebSocketMessage.Text } as WebSocketMessage.Text
+        ws.send(WebSocketMessage.Text(msg.value))
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
@@ -240,7 +241,7 @@ internal suspend fun sendMessageWithPayloadLengthOf(
             randomStringByKotlinRandom(length)
         }
     try {
-        websocket.write(string)
+        websocket.send(WebSocketMessage.Text(string))
     } catch (_: Exception) {
         // Server may have already closed the connection
     }
@@ -262,7 +263,7 @@ internal suspend fun sendBinaryWithPayloadLengthOf(
             b
         }
     try {
-        websocket.write(binary)
+        websocket.send(WebSocketMessage.Binary(binary))
     } catch (_: Exception) {
         // Server may have already closed the connection
     }

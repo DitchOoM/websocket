@@ -1,15 +1,15 @@
 package com.ditchoom.websocket
 
-sealed interface ConnectionState {
-    data object Initialized : ConnectionState
+import com.ditchoom.socket.ConnectionState
 
-    data object Connecting : ConnectionState
-
-    data object Connected : ConnectionState
-
-    data class Disconnected(
-        val t: Throwable? = null,
-        val code: UShort? = null,
-        val reason: String? = null,
-    ) : ConnectionState
-}
+/**
+ * WebSocket-specific [ConnectionState.Disconnected] that carries close code and reason.
+ *
+ * Normal `ConnectionState.Disconnected` checks still work (`is ConnectionState.Disconnected`).
+ * Downcast to [WebSocketDisconnected] when close code/reason are needed.
+ */
+class WebSocketDisconnected(
+    t: Throwable? = null,
+    val code: UShort? = null,
+    val reason: String? = null,
+) : ConnectionState.Disconnected(t)

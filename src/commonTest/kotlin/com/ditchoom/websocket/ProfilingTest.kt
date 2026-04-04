@@ -5,6 +5,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.socket.ConnectionState
 import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -53,8 +54,8 @@ class ProfilingTest {
                 val buf = BufferFactory.managed().allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
-                ws.write(buf)
-                ws.incomingMessages.first()
+                ws.send(WebSocketMessage.Binary(buf))
+                ws.receive().first()
 
                 if (i == iterations / 2) {
                     forceGc()
@@ -231,15 +232,15 @@ class ProfilingTest {
                 val buf = factory.allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
-                ws.write(buf)
+                ws.send(WebSocketMessage.Binary(buf))
             } else {
-                ws.write(textPayload)
+                ws.send(WebSocketMessage.Text(textPayload))
             }
             writeTimes.add(wMark.elapsedNow().inWholeMicroseconds)
 
             // Read echo
             val rMark = TimeSource.Monotonic.markNow()
-            ws.incomingMessages.first()
+            ws.receive().first()
             readTimes.add(rMark.elapsedNow().inWholeMicroseconds)
 
             roundTripTimes.add(rtMark.elapsedNow().inWholeMicroseconds)

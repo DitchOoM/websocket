@@ -1,12 +1,17 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.socket.ConnectionState
+import com.ditchoom.socket.transport.MessageConnection
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
-interface WebSocketClient {
+/**
+ * WebSocket client as a typed [MessageConnection].
+ *
+ * Send and receive via [send]/[receive] from [MessageConnection].
+ * The sealed [WebSocketMessage] hierarchy carries the opcode.
+ */
+interface WebSocketClient : MessageConnection<WebSocketMessage> {
     val scope: CoroutineScope
 
     suspend fun connect(): WebSocketClient
@@ -15,26 +20,11 @@ interface WebSocketClient {
 
     suspend fun remotePort(): Int
 
-    suspend fun write(buffer: ReadBuffer)
-
-    suspend fun write(string: String)
-
-    suspend fun ping(payloadData: ReadBuffer = EMPTY_BUFFER)
-
     suspend fun isPingSupported(): Boolean = true
 
-    companion object
-
     val connectionState: StateFlow<ConnectionState>
-    val incomingMessages: Flow<WebSocketMessage>
 
-    /** Text messages only — avoids filterIsInstance overhead for typed consumers. */
-    val incomingTextMessages: Flow<String>
-
-    /** Binary messages only — avoids filterIsInstance overhead for typed consumers. */
-    val incomingBinaryMessages: Flow<ReadBuffer>
-
-    suspend fun close()
+    companion object
 }
 
 /**
@@ -43,8 +33,8 @@ interface WebSocketClient {
  * ```kotlin
  * WebSocketClient.allocate(options).use { client ->
  *     client.connect()
- *     client.write("hello")
- *     val echo = client.incomingTextMessages.first()
+ *     client.send(WebSocketMessage.Text("hello"))
+ *     val echo = client.receive().first()
  * }
  * ```
  */

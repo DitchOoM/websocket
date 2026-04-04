@@ -2,9 +2,12 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
+import com.ditchoom.socket.ConnectionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.flow.toList
@@ -106,10 +109,10 @@ class PublicWssValidationTest {
                 ws.awaitConnected()
                 val message = "ditchoom-wss-test"
                 // Server may send a welcome message first, so send then filter for our echo
-                ws.write(message)
+                ws.send(WebSocketMessage.Text(message))
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.incomingTextMessages.first { it == message }
+                        ws.receive().filterIsInstance<WebSocketMessage.Text>().map { it.value }.first { it == message }
                     }
                 assertEquals(message, echo)
             } finally {
@@ -134,10 +137,10 @@ class PublicWssValidationTest {
                 ws.connect()
                 ws.awaitConnected()
                 val payload = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0xF0.toByte(), 0xFF.toByte())
-                launch(Dispatchers.Default) { ws.write(BufferFactory.Default.wrap(payload)) }
+                launch(Dispatchers.Default) { ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(payload))) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.incomingBinaryMessages.first()
+                        ws.receive().filterIsInstance<WebSocketMessage.Binary>().map { it.value }.first()
                     }
                 val received = echo.readByteArray(echo.remaining())
                 assertTrue(payload.contentEquals(received), "Binary echo mismatch")
@@ -164,10 +167,10 @@ class PublicWssValidationTest {
                 ws.connect()
                 ws.awaitConnected()
                 val message = "ditchoom-echo-test"
-                launch(Dispatchers.Default) { ws.write(message) }
+                launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.incomingMessages.take(1).first() as WebSocketMessage.Text
+                        ws.receive().first() as WebSocketMessage.Text
                     }
                 assertEquals(message, echo.value)
             } finally {
@@ -201,12 +204,14 @@ class PublicWssValidationTest {
                 val messages = (1..messageCount).map { "ditchoom-multi-$it" }
                 // Send all messages
                 for (msg in messages) {
-                    ws.write(msg)
+                    ws.send(WebSocketMessage.Text(msg))
                 }
                 // Collect echoes (skip any server welcome messages)
                 val echoes =
                     withTimeout(15.seconds) {
-                        ws.incomingTextMessages
+                        ws.receive()
+                            .filterIsInstance<WebSocketMessage.Text>()
+                            .map { it.value }
                             .filter { it.startsWith("ditchoom-multi-") }
                             .take(messageCount)
                             .toList()
@@ -241,14 +246,14 @@ class PublicWssValidationTest {
                 val textMsg = "ditchoom-interleave-text"
                 val binaryPayload = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
 
-                ws.write(textMsg)
-                ws.write(BufferFactory.Default.wrap(binaryPayload))
+                ws.send(WebSocketMessage.Text(textMsg))
+                ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(binaryPayload)))
 
                 // Collect both echoes
                 var gotText = false
                 var gotBinary = false
                 withTimeout(10.seconds) {
-                    ws.incomingMessages
+                    ws.receive()
                         .takeWhile {
                             when (it) {
                                 is WebSocketMessage.Text -> if (it.value == textMsg) gotText = true

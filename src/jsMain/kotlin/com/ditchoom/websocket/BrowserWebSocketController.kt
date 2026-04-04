@@ -1,9 +1,8 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.JsBuffer
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.socket.ConnectionState
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -58,13 +57,8 @@ class BrowserWebSocketController(
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
-    override val incomingMessages = incomingMessageChannel.receiveAsFlow()
 
-    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
-    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
-
-    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
-    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
+    override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
 
@@ -87,7 +81,7 @@ class BrowserWebSocketController(
                 } else {
                     null
                 }
-            connectionStateFlow.value = ConnectionState.Disconnected(t = closeException, code = code, reason = reason)
+            connectionStateFlow.value = WebSocketDisconnected(t = closeException, code = code, reason = reason)
             closeInternal()
         }
         webSocket.onerror = {
@@ -125,13 +119,11 @@ class BrowserWebSocketController(
                         }
                     scope.launch {
                         incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
-                        incomingBinaryChannel.trySend(buffer)
                     }
                 }
                 is String ->
                     scope.launch {
                         incomingMessageChannel.trySend(WebSocketMessage.Text(data))
-                        incomingTextChannel.trySend(data)
                     }
                 else -> throw IllegalArgumentException("Received invalid message type!")
             }
@@ -147,39 +139,43 @@ class BrowserWebSocketController(
                 ConnectionState.Initialized, ConnectionState.Connecting -> {
                     connectionState.first { it is ConnectionState.Connected }
                 }
-                is ConnectionState.Disconnected ->
+                is ConnectionState.Disconnected -> {
+                    val wsDisconnected = connectionStateValue as? WebSocketDisconnected
                     throw WebSocketException.TransportFailed(
-                        "Failed to connect. Reason: ${connectionStateValue.reason}," +
-                            " Code: ${connectionStateValue.code}",
+                        "Failed to connect. Reason: ${wsDisconnected?.reason}," +
+                            " Code: ${wsDisconnected?.code}",
                         connectionStateValue.t ?: Exception("Connection failed"),
                     )
+                }
                 ConnectionState.Connected -> {} // nothing to wait for
             }
         }
         return this
     }
 
-    override suspend fun write(string: String) {
-        webSocket.send(string)
-    }
-
-    override suspend fun write(buffer: ReadBuffer) {
-        val jsBuffer = buffer as JsBuffer
-        val arrayBufferView =
-            if (jsBuffer.sharedArrayBuffer != null) {
-                // shared buffers are not allowed with websocket
-                val copy = Int8Array(buffer.capacity)
-                copy.set(jsBuffer.buffer)
-                copy
-            } else {
-                buffer.buffer.subarray(0, buffer.limit())
+    override suspend fun send(message: WebSocketMessage) {
+        when (message) {
+            is WebSocketMessage.Text -> webSocket.send(message.value)
+            is WebSocketMessage.Binary -> {
+                val jsBuffer = message.value as JsBuffer
+                val arrayBufferView =
+                    if (jsBuffer.sharedArrayBuffer != null) {
+                        val copy = Int8Array(message.value.capacity)
+                        copy.set(jsBuffer.buffer)
+                        copy
+                    } else {
+                        message.value.buffer.subarray(0, message.value.limit())
+                    }
+                webSocket.send(arrayBufferView)
             }
-        webSocket.send(arrayBufferView)
+            is WebSocketMessage.Ping,
+            is WebSocketMessage.Pong,
+            -> { /* Not surfaced on browser */ }
+            is WebSocketMessage.Close -> webSocket.close()
+        }
     }
 
     override suspend fun isPingSupported(): Boolean = false
-
-    override suspend fun ping(payloadData: ReadBuffer) { /*Not surfaced on browser*/ }
 
     override suspend fun close() {
         closeInternal()
@@ -187,8 +183,6 @@ class BrowserWebSocketController(
 
     private fun closeInternal() {
         incomingMessageChannel.close()
-        incomingTextChannel.close()
-        incomingBinaryChannel.close()
         webSocket.close()
     }
 

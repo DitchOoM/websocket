@@ -2,9 +2,9 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.managed
+import com.ditchoom.socket.ConnectionState
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
  * Adapts [NativeWebSocketConnection] (Apple Network.framework) to the [WebSocketClient] interface.
  *
  * Bridges the pull-based opcode API into Flow-based push model by running a read loop
- * coroutine that calls [NativeWebSocketConnection.receiveMessage] and emits to channels.
+ * coroutine that calls [NativeWebSocketConnection.receiveMessage] and emits to the channel.
  */
 internal class NativeWebSocketClientAdapter(
     private val connectionOptions: WebSocketConnectionOptions,
@@ -40,13 +40,8 @@ internal class NativeWebSocketClientAdapter(
     override val connectionState: StateFlow<ConnectionState> = connectionStateFlow.asStateFlow()
 
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
-    override val incomingMessages: Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
 
-    private val incomingTextChannel = Channel<String>(Channel.UNLIMITED)
-    override val incomingTextMessages: Flow<String> = incomingTextChannel.receiveAsFlow()
-
-    private val incomingBinaryChannel = Channel<ReadBuffer>(Channel.UNLIMITED)
-    override val incomingBinaryMessages: Flow<ReadBuffer> = incomingBinaryChannel.receiveAsFlow()
+    override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
 
     override suspend fun connect(): WebSocketClient {
         connectionStateFlow.value = ConnectionState.Connecting
@@ -84,12 +79,9 @@ internal class NativeWebSocketClientAdapter(
                                     ""
                                 }
                             incomingMessageChannel.trySend(WebSocketMessage.Text(text))
-                            incomingTextChannel.trySend(text)
                         }
                         NativeWebSocketConnection.OPCODE_BINARY -> {
-                            val buffer = msg.data ?: EMPTY_BUFFER
-                            incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
-                            incomingBinaryChannel.trySend(buffer)
+                            incomingMessageChannel.trySend(WebSocketMessage.Binary(msg.data ?: EMPTY_BUFFER))
                         }
                         NativeWebSocketConnection.OPCODE_PING -> {
                             incomingMessageChannel.trySend(WebSocketMessage.Ping(msg.data ?: EMPTY_BUFFER))
@@ -98,14 +90,14 @@ internal class NativeWebSocketClientAdapter(
                             incomingMessageChannel.trySend(WebSocketMessage.Pong(msg.data ?: EMPTY_BUFFER))
                         }
                         NativeWebSocketConnection.OPCODE_CLOSE -> {
-                            val closeMsg =
+                            incomingMessageChannel.trySend(
                                 WebSocketMessage.Close(
                                     code = msg.closeCode.toUShort(),
                                     reason = msg.data?.let { it.readString(it.remaining(), Charset.UTF8) } ?: "",
-                                )
-                            incomingMessageChannel.trySend(closeMsg)
+                                ),
+                            )
                             connectionStateFlow.value =
-                                ConnectionState.Disconnected(
+                                WebSocketDisconnected(
                                     t =
                                         if (msg.closeCode != 1000) {
                                             WebSocketException.ConnectionClosed(
@@ -127,28 +119,25 @@ internal class NativeWebSocketClientAdapter(
                     ConnectionState.Disconnected(WebSocketException.TransportFailed(e.message ?: "Connection lost", e))
             } finally {
                 incomingMessageChannel.close()
-                incomingTextChannel.close()
-                incomingBinaryChannel.close()
             }
         }
     }
 
-    override suspend fun write(buffer: ReadBuffer) {
-        connection?.sendMessage(buffer, NativeWebSocketConnection.OPCODE_BINARY)
+    override suspend fun send(message: WebSocketMessage) {
+        val conn = connection
             ?: throw WebSocketException.ConnectionClosed("Not connected")
-    }
-
-    override suspend fun write(string: String) {
-        val buf = BufferFactory.managed().allocate(string.length * 3) // worst-case UTF-8
-        buf.writeString(string, Charset.UTF8)
-        buf.resetForRead()
-        connection?.sendMessage(buf, NativeWebSocketConnection.OPCODE_TEXT)
-            ?: throw WebSocketException.ConnectionClosed("Not connected")
-    }
-
-    override suspend fun ping(payloadData: ReadBuffer) {
-        connection?.sendMessage(payloadData, NativeWebSocketConnection.OPCODE_PING)
-            ?: throw WebSocketException.ConnectionClosed("Not connected")
+        when (message) {
+            is WebSocketMessage.Text -> {
+                val buf = BufferFactory.managed().allocate(message.value.length * 3)
+                buf.writeString(message.value, Charset.UTF8)
+                buf.resetForRead()
+                conn.sendMessage(buf, NativeWebSocketConnection.OPCODE_TEXT)
+            }
+            is WebSocketMessage.Binary -> conn.sendMessage(message.value, NativeWebSocketConnection.OPCODE_BINARY)
+            is WebSocketMessage.Ping -> conn.sendMessage(message.value, NativeWebSocketConnection.OPCODE_PING)
+            is WebSocketMessage.Pong -> conn.sendMessage(message.value, NativeWebSocketConnection.OPCODE_PONG)
+            is WebSocketMessage.Close -> close()
+        }
     }
 
     override suspend fun isPingSupported(): Boolean = true
@@ -164,10 +153,8 @@ internal class NativeWebSocketClientAdapter(
             // Ignore close errors
         }
         connection = null
-        connectionStateFlow.value = ConnectionState.Disconnected(code = 1000u)
+        connectionStateFlow.value = WebSocketDisconnected(code = 1000u)
         incomingMessageChannel.close()
-        incomingTextChannel.close()
-        incomingBinaryChannel.close()
         job.cancel()
     }
 }
