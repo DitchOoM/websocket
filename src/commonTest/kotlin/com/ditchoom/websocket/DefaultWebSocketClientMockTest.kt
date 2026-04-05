@@ -1000,4 +1000,64 @@ class DefaultWebSocketClientMockTest {
 
             client.close()
         }
+
+    // ========================================================================
+    // L. Structured concurrency — parent cancellation propagates
+    // ========================================================================
+
+    @Test
+    fun parentScopeCancellationClosesClient() =
+        runStrictTest {
+            val parentJob = kotlinx.coroutines.Job()
+            val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
+
+            val mockSocket = MockClientToServerSocket()
+            val client =
+                DefaultWebSocketClient(
+                    connectionOptions = defaultOptions,
+                    parentScope = parentScope,
+                    bufferFactory = BufferFactory.managed(),
+                    socketOverride = mockSocket,
+                )
+            connectWithHandshake(client, mockSocket)
+
+            assertIs<ConnectionState.Connected>(client.connectionState.value)
+
+            // Cancel the PARENT scope — structured concurrency should propagate
+            parentJob.cancel()
+
+            // The client's read loop should terminate because its Job is a child of parentJob
+            withTimeout(5.seconds) {
+                while (client.connectionState.value is ConnectionState.Connected) {
+                    delay(10)
+                }
+            }
+
+            // Client should be disconnected (not stuck in Connected forever)
+            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+        }
+
+    @Test
+    fun clientCloseDoesNotCancelParent() =
+        runStrictTest {
+            val parentJob = kotlinx.coroutines.Job()
+            val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
+
+            val mockSocket = MockClientToServerSocket()
+            val client =
+                DefaultWebSocketClient(
+                    connectionOptions = defaultOptions,
+                    parentScope = parentScope,
+                    bufferFactory = BufferFactory.managed(),
+                    socketOverride = mockSocket,
+                )
+            connectWithHandshake(client, mockSocket)
+
+            // Close the CLIENT — should NOT cancel the parent
+            client.close()
+
+            // Parent job should still be active
+            assertTrue(parentJob.isActive, "Parent job must remain active after client.close()")
+            parentJob.cancel()
+        }
 }

@@ -27,7 +27,7 @@ internal class NativeWebSocketClientAdapter(
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
 ) : WebSocketClient {
-    private val job = Job()
+    private val job = Job(parentScope?.coroutineContext?.get(Job))
     override val scope: CoroutineScope =
         CoroutineScope(
             (parentScope?.coroutineContext ?: Dispatchers.Default) +
@@ -35,6 +35,7 @@ internal class NativeWebSocketClientAdapter(
                 CoroutineName("NativeWebSocket: ${connectionOptions.name}:${connectionOptions.port}"),
         )
 
+    override val id: Long = 0L
     private var connection: NativeWebSocketConnection? = null
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState: StateFlow<ConnectionState> = connectionStateFlow.asStateFlow()

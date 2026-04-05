@@ -109,6 +109,7 @@ kotlin {
             implementation(libs.buffer)
             implementation(libs.buffer.compression)
             implementation(libs.buffer.codec)
+            implementation(libs.buffer.flow)
             implementation(libs.socket)
             implementation(libs.kotlinx.coroutines.core)
         }

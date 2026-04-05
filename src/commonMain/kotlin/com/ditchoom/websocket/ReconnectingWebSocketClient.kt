@@ -32,8 +32,11 @@ class ReconnectingWebSocketClient(
     private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
     private val parentScope: CoroutineScope? = null,
 ) : WebSocketClient {
+    override val id: Long = 0L
     override val scope: CoroutineScope =
         parentScope ?: CoroutineScope(Dispatchers.Default + Job())
+    // Note: when parentScope is provided, its Job is the parent for all child coroutines.
+    // When null, the caller must call close() to cancel the standalone scope.
 
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState: StateFlow<ConnectionState> = connectionStateFlow.asStateFlow()

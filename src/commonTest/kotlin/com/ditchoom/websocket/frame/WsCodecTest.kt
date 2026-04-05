@@ -2,10 +2,12 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.PeekResult
+import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -20,137 +22,66 @@ class WsCodecTest {
     private fun allocate(size: Int) = BufferFactory.Default.allocate(size)
 
     // ========================================================================
-    // WsFrameLengthCodec
+    // WsHeaderByte2 value class
     // ========================================================================
 
     @Test
-    fun lengthCodecInline() {
-        val buf = allocate(1)
-        val length = WsFrameLength(100, masked = false)
-        WsFrameLengthCodec.encode(buf, length)
-        buf.resetForRead()
-        val decoded = WsFrameLengthCodec.decode(buf)
-        assertEquals(100L, decoded.payloadLength)
-        assertEquals(false, decoded.masked)
+    fun byte2InlineLength() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 100, masked = false)
+        assertEquals(100, byte2.lengthIndicator)
+        assertEquals(false, byte2.masked)
+        assertEquals(false, byte2.extended16)
+        assertEquals(false, byte2.extended64)
     }
 
     @Test
-    fun lengthCodecInlineMasked() {
-        val buf = allocate(1)
-        val length = WsFrameLength(50, masked = true)
-        WsFrameLengthCodec.encode(buf, length)
-        buf.resetForRead()
-        val decoded = WsFrameLengthCodec.decode(buf)
-        assertEquals(50L, decoded.payloadLength)
-        assertEquals(true, decoded.masked)
+    fun byte2InlineMasked() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 50, masked = true)
+        assertEquals(50, byte2.lengthIndicator)
+        assertTrue(byte2.masked)
     }
 
     @Test
-    fun lengthCodecInlineBoundary125() {
-        val buf = allocate(1)
-        WsFrameLengthCodec.encode(buf, WsFrameLength(125, masked = false))
-        buf.resetForRead()
-        assertEquals(125L, WsFrameLengthCodec.decode(buf).payloadLength)
+    fun byte2Boundary125() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 125, masked = false)
+        assertEquals(125, byte2.lengthIndicator)
+        assertEquals(false, byte2.extended16)
+        assertEquals(false, byte2.extended64)
     }
 
     @Test
-    fun lengthCodec16bit() {
-        val buf = allocate(3)
-        val length = WsFrameLength(256, masked = false)
-        WsFrameLengthCodec.encode(buf, length)
-        buf.resetForRead()
-
-        // byte2 should have len7=126
-        val byte2 = buf.get(0).toInt() and 0xFF
-        assertEquals(126, byte2 and 0x7F)
-
-        val decoded = WsFrameLengthCodec.decode(buf)
-        assertEquals(256L, decoded.payloadLength)
+    fun byte2Extended16() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 256, masked = false)
+        assertEquals(126, byte2.lengthIndicator)
+        assertTrue(byte2.extended16)
+        assertEquals(false, byte2.extended64)
     }
 
     @Test
-    fun lengthCodec16bitBoundary() {
-        val buf = allocate(3)
-        WsFrameLengthCodec.encode(buf, WsFrameLength(65535, masked = false))
-        buf.resetForRead()
-        assertEquals(65535L, WsFrameLengthCodec.decode(buf).payloadLength)
+    fun byte2Extended64() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 70000, masked = false)
+        assertEquals(127, byte2.lengthIndicator)
+        assertEquals(false, byte2.extended16)
+        assertTrue(byte2.extended64)
     }
 
     @Test
-    fun lengthCodec64bit() {
-        val buf = allocate(9)
-        val length = WsFrameLength(70000, masked = false)
-        WsFrameLengthCodec.encode(buf, length)
-        buf.resetForRead()
-
-        // byte2 should have len7=127
-        val byte2 = buf.get(0).toInt() and 0xFF
-        assertEquals(127, byte2 and 0x7F)
-
-        val decoded = WsFrameLengthCodec.decode(buf)
-        assertEquals(70000L, decoded.payloadLength)
-    }
-
-    @Test
-    fun lengthCodec64bitMasked() {
-        val buf = allocate(9)
-        WsFrameLengthCodec.encode(buf, WsFrameLength(70000, masked = true))
-        buf.resetForRead()
-
-        val byte2 = buf.get(0).toInt() and 0xFF
-        assertTrue((byte2 and 0x80) != 0, "MASK bit must be set")
-        assertEquals(127, byte2 and 0x7F)
-
-        val decoded = WsFrameLengthCodec.decode(buf)
-        assertEquals(70000L, decoded.payloadLength)
-        assertTrue(decoded.masked)
-    }
-
-    @Test
-    fun lengthCodecSizeOf() {
-        assertEquals(1, WsFrameLengthCodec.sizeOf(WsFrameLength(0, false)))
-        assertEquals(1, WsFrameLengthCodec.sizeOf(WsFrameLength(125, false)))
-        assertEquals(3, WsFrameLengthCodec.sizeOf(WsFrameLength(126, false)))
-        assertEquals(3, WsFrameLengthCodec.sizeOf(WsFrameLength(65535, false)))
-        assertEquals(9, WsFrameLengthCodec.sizeOf(WsFrameLength(65536, false)))
-    }
-
-    @Test
-    fun lengthCodecWireSize() {
-        assertEquals(1, WsFrameLengthCodec.wireSize(0))
-        assertEquals(1, WsFrameLengthCodec.wireSize(125))
-        assertEquals(3, WsFrameLengthCodec.wireSize(126))
-        assertEquals(9, WsFrameLengthCodec.wireSize(127))
-    }
-
-    @Test
-    fun lengthCodecRejectsNegative() {
-        assertFailsWith<IllegalArgumentException> {
-            WsFrameLength(-1, masked = false)
-        }
-    }
-
-    @Test
-    fun lengthCodecDecodesNegative64bitAsMsbError() {
-        // 64-bit length with MSB set (negative Long) is invalid per RFC 6455
-        val buf = allocate(9)
-        buf.writeByte(127.toByte()) // len7=127, unmasked
-        buf.writeLong(-1L) // all bits set = MSB is 1
-        buf.resetForRead()
-        assertFailsWith<FrameParseException> {
-            WsFrameLengthCodec.decode(buf)
-        }
+    fun byte2Extended64Masked() {
+        val byte2 = WsHeaderByte2.pack(payloadSize = 70000, masked = true)
+        assertTrue(byte2.masked)
+        assertTrue(byte2.extended64)
     }
 
     // ========================================================================
-    // WsFrameHeaderCodec
+    // WsFrameHeaderCodec (generated) — encode/decode round-trip
     // ========================================================================
 
     @Test
     fun headerCodecUnmaskedTextFrame() {
-        val header = WsFrameHeader(
+        val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            length = WsFrameLength(5, masked = false),
+            payloadSize = 5,
+            masked = false,
         )
         val buf = allocate(2)
         WsFrameHeaderCodec.encode(buf, header)
@@ -165,17 +96,18 @@ class WsCodecTest {
         val decoded = WsFrameHeaderCodec.decode(buf)
         assertTrue(decoded.byte1.fin)
         assertEquals(com.ditchoom.websocket.Opcode.Text, decoded.byte1.opcode)
-        assertEquals(5L, decoded.length.payloadLength)
-        assertEquals(false, decoded.length.masked)
+        assertEquals(5L, decoded.payloadLength)
+        assertEquals(false, decoded.masked)
         assertNull(decoded.maskingKey)
     }
 
     @Test
     fun headerCodecMaskedFrame() {
         val maskKey = WsMaskingKey(0xDEADBEEFu)
-        val header = WsFrameHeader(
+        val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
-            length = WsFrameLength(10, masked = true),
+            payloadSize = 10,
+            masked = true,
             maskingKey = maskKey,
         )
         val buf = allocate(6) // byte1 + byte2 + 4-byte mask
@@ -184,31 +116,48 @@ class WsCodecTest {
 
         val decoded = WsFrameHeaderCodec.decode(buf)
         assertEquals(com.ditchoom.websocket.Opcode.Binary, decoded.byte1.opcode)
-        assertEquals(10L, decoded.length.payloadLength)
-        assertTrue(decoded.length.masked)
+        assertEquals(10L, decoded.payloadLength)
+        assertTrue(decoded.masked)
         assertNotNull(decoded.maskingKey)
         assertEquals(0xDEADBEEFu, decoded.maskingKey!!.raw)
     }
 
     @Test
     fun headerCodec16bitLength() {
-        val header = WsFrameHeader(
+        val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            length = WsFrameLength(300, masked = false),
+            payloadSize = 300,
+            masked = false,
         )
         val buf = allocate(4) // byte1 + byte2(126) + 2-byte length
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
 
         val decoded = WsFrameHeaderCodec.decode(buf)
-        assertEquals(300L, decoded.length.payloadLength)
+        assertEquals(300L, decoded.payloadLength)
+    }
+
+    @Test
+    fun headerCodec64bitLength() {
+        val header = WsFrameHeader.build(
+            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
+            payloadSize = 70000,
+            masked = false,
+        )
+        val buf = allocate(10) // byte1 + byte2(127) + 8-byte length
+        WsFrameHeaderCodec.encode(buf, header)
+        buf.resetForRead()
+
+        val decoded = WsFrameHeaderCodec.decode(buf)
+        assertEquals(70000L, decoded.payloadLength)
     }
 
     @Test
     fun headerCodecRsv1Compression() {
-        val header = WsFrameHeader(
+        val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = true, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            length = WsFrameLength(0, masked = false),
+            payloadSize = 0,
+            masked = false,
         )
         val buf = allocate(2)
         WsFrameHeaderCodec.encode(buf, header)
@@ -225,9 +174,10 @@ class WsCodecTest {
     @Test
     fun headerCodecRoundTripAllOpcodes() {
         for (opcode in com.ditchoom.websocket.Opcode.entries) {
-            val header = WsFrameHeader(
+            val header = WsFrameHeader.build(
                 byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, opcode),
-                length = WsFrameLength(0, masked = false),
+                payloadSize = 0,
+                masked = false,
             )
             val buf = allocate(2)
             WsFrameHeaderCodec.encode(buf, header)
@@ -238,35 +188,83 @@ class WsCodecTest {
     }
 
     // ========================================================================
-    // Impossible state enforcement
+    // Generated peekFrameSize
     // ========================================================================
 
     @Test
-    fun headerRejectsMaskedWithoutKey() {
-        assertFailsWith<IllegalArgumentException> {
-            WsFrameHeader(
-                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-                length = WsFrameLength(0, masked = true),
-                maskingKey = null,
-            )
-        }
+    fun peekFrameSizeUnmaskedInline() {
+        // byte1 + byte2(len=5, no mask) → 2 bytes header
+        val buf = allocate(2)
+        buf.writeByte(0x81.toByte()) // FIN + Text
+        buf.writeByte(0x05.toByte()) // len=5, no mask
+        buf.resetForRead()
+        val stream = StreamProcessor.create(BufferPool())
+        stream.append(buf)
+
+        val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
+        assertIs<PeekResult.Size>(result)
+        assertEquals(2, result.bytes)
     }
 
     @Test
-    fun headerRejectsUnmaskedWithKey() {
-        assertFailsWith<IllegalArgumentException> {
-            WsFrameHeader(
-                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-                length = WsFrameLength(0, masked = false),
-                maskingKey = WsMaskingKey(0u),
-            )
-        }
+    fun peekFrameSizeMaskedInline() {
+        // byte1 + byte2(len=5, masked) + 4-byte mask → 6 bytes header
+        val buf = allocate(6)
+        buf.writeByte(0x81.toByte()) // FIN + Text
+        buf.writeByte(0x85.toByte()) // len=5, masked
+        buf.writeInt(0xDEADBEEF.toInt()) // mask key
+        buf.resetForRead()
+        val stream = StreamProcessor.create(BufferPool())
+        stream.append(buf)
+
+        val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
+        assertIs<PeekResult.Size>(result)
+        assertEquals(6, result.bytes)
     }
 
     @Test
-    fun lengthRejectsNegativePayload() {
-        assertFailsWith<IllegalArgumentException> {
-            WsFrameLength(-1, masked = false)
-        }
+    fun peekFrameSize16bit() {
+        // byte1 + byte2(126) + 2-byte length → 4 bytes header
+        val buf = allocate(4)
+        buf.writeByte(0x81.toByte())
+        buf.writeByte(126.toByte()) // extended 16-bit
+        buf.writeShort(300.toShort())
+        buf.resetForRead()
+        val stream = StreamProcessor.create(BufferPool())
+        stream.append(buf)
+
+        val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
+        assertIs<PeekResult.Size>(result)
+        assertEquals(4, result.bytes)
+    }
+
+    @Test
+    fun peekFrameSize64bitMasked() {
+        // byte1 + byte2(127, masked) + 8-byte length + 4-byte mask → 14 bytes header
+        val buf = allocate(14)
+        buf.writeByte(0x82.toByte())
+        buf.writeByte((0x80 or 127).toByte()) // masked + 64-bit
+        buf.writeLong(70000L)
+        buf.writeInt(0x12345678)
+        buf.resetForRead()
+        val stream = StreamProcessor.create(BufferPool())
+        stream.append(buf)
+
+        val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
+        assertIs<PeekResult.Size>(result)
+        assertEquals(14, result.bytes)
+    }
+
+    @Test
+    fun peekFrameSizeNeedsMoreData() {
+        // Only 1 byte available — need at least 2
+        val buf = allocate(1)
+        buf.writeByte(0x81.toByte())
+        buf.resetForRead()
+        val stream = StreamProcessor.create(BufferPool())
+        stream.append(buf)
+
+        val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
+        assertIs<PeekResult.NeedsMoreData>(result)
     }
 }

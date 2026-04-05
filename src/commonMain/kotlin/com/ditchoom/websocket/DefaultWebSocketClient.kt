@@ -85,10 +85,9 @@ class DefaultWebSocketClient(
             factory = bufferFactory,
         )
 
-    // Create a dedicated Job for this client - NOT a child of parent scope.
-    // This ensures the websocket can be cancelled without blocking parent scope completion.
-    // The websocket runs independently; callers must explicitly call close().
-    private val clientJob = kotlinx.coroutines.Job()
+    // Child of parentScope's Job so parent cancellation propagates (structured concurrency).
+    // Can still be cancelled independently via close().
+    private val clientJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
 
     override val scope: CoroutineScope =
         CoroutineScope(
@@ -99,6 +98,7 @@ class DefaultWebSocketClient(
                 ),
         )
 
+    override val id: Long = 0L
     private val socket = socketOverride ?: ClientSocket.allocate()
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()

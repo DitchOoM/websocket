@@ -199,9 +199,10 @@ class FrameWriter(
         payloadSize: Int,
     ): WsFrameHeader {
         val mask = if (clientMode) WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt()) else null
-        return WsFrameHeader(
+        return WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, opcode),
-            length = WsFrameLength(payloadSize.toLong(), masked = clientMode),
+            payloadSize = payloadSize.toLong(),
+            masked = clientMode,
             maskingKey = mask,
         )
     }
@@ -217,7 +218,7 @@ class FrameWriter(
     ): ReadBuffer {
         val payloadSize = payload.remaining()
         val header = buildHeader(fin, rsv1, opcode, payloadSize)
-        val headerSize = headerWireSize(header)
+        val headerSize = header.wireSize
         val buffer = allocateBuffer(headerSize + payloadSize)
 
         WsFrameHeaderCodec.encode(buffer, header)
@@ -244,7 +245,7 @@ class FrameWriter(
         payloadSize: Int,
     ): ReadBuffer {
         val header = buildHeader(fin, rsv1, opcode, payloadSize)
-        val headerSize = headerWireSize(header)
+        val headerSize = header.wireSize
         val buffer = allocateBuffer(headerSize + payloadSize)
 
         WsFrameHeaderCodec.encode(buffer, header)

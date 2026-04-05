@@ -6,6 +6,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
@@ -120,16 +121,16 @@ class FrameReader(
      * @throws FrameParseException if the frame data is malformed
      */
     suspend fun readFrame(): ParsedFrame? {
-        // Need at least 2 bytes for basic header
-        if (processor.available() < 2) return null
-
-        // Determine header size from byte2 (deterministic from 7-bit length indicator + mask bit)
-        val byte2 = processor.peekByte(1).toInt() and 0xFF
-        val len7 = byte2 and 0x7F
-        val masked = (byte2 and 0x80) != 0
-        val headerSize = 1 + WsFrameLengthCodec.wireSize(len7) + (if (masked) 4 else 0)
+        // Use the generated codec to determine header size from the stream
+        val headerSize =
+            when (val peek = WsFrameHeaderCodec.peekFrameSize(processor, 0)) {
+                is PeekResult.NeedsMoreData -> return null
+                is PeekResult.Size -> peek.bytes
+            }
 
         // Peek the payload length to verify complete frame is available
+        val byte2 = processor.peekByte(1).toInt() and 0xFF
+        val len7 = byte2 and 0x7F
         val payloadLength = peekPayloadLength(len7) ?: return null
         val totalFrameSize = headerSize + payloadLength
         if (processor.available() < totalFrameSize) return null

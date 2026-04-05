@@ -1,17 +1,17 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.socket.ConnectionState
-import com.ditchoom.socket.transport.MessageConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * WebSocket client as a typed [MessageConnection].
+ * WebSocket client as a typed [Connection].
  *
- * Send and receive via [send]/[receive] from [MessageConnection].
+ * Send and receive via [send]/[receive] from [Connection].
  * The sealed [WebSocketMessage] hierarchy carries the opcode.
  */
-interface WebSocketClient : MessageConnection<WebSocketMessage> {
+interface WebSocketClient : Connection<WebSocketMessage> {
     val scope: CoroutineScope
 
     suspend fun connect(): WebSocketClient

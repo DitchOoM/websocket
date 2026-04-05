@@ -9,9 +9,9 @@ atomicfu = "0.29.0"
 kotlinxCoroutines = "1.10.2"
 kotlinWrappers = "2025.12.6"
 kotlinxBenchmark = "0.4.15"
-buffer = "4.2.0"
-bufferCompression = "4.2.0"
-bufferCodec = "4.2.0"
+buffer = "4.2.1"
+bufferCompression = "4.2.1"
+bufferCodec = "4.2.1"
 ksp = "2.3.0"
 socket = "3.0.1-SNAPSHOT"
 androidxCore = "1.17.0"
@@ -25,6 +25,7 @@ buffer = { module = "com.ditchoom:buffer", version.ref = "buffer" }
 buffer-compression = { module = "com.ditchoom:buffer-compression", version.ref = "bufferCompression" }
 buffer-codec = { module = "com.ditchoom:buffer-codec", version.ref = "bufferCodec" }
 buffer-codec-processor = { module = "com.ditchoom:buffer-codec-processor", version.ref = "bufferCodec" }
+buffer-flow = { module = "com.ditchoom:buffer-flow", version.ref = "buffer" }
 socket = { module = "com.ditchoom:socket", version.ref = "socket" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }

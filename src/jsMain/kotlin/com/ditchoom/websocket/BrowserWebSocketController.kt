@@ -54,6 +54,7 @@ class BrowserWebSocketController(
             WebSocket(url)
         }
 
+    override val id: Long = 0L
     private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
     override val connectionState = connectionStateFlow.asStateFlow()
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
