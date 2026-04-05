@@ -3,10 +3,8 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.managed
-import com.ditchoom.socket.ConnectionState
-import com.ditchoom.socket.SocketClosedException
-import com.ditchoom.socket.SocketConnectionException
-import com.ditchoom.socket.SocketIOException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -17,15 +15,14 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Tests for [DefaultWebSocketClient] using a mock socket.
+ * Tests for [DefaultWebSocketClient] using a mock transport.
  *
  * These tests verify the full client lifecycle (connect, read, write, close)
- * without any network I/O by injecting a [MockClientToServerSocket].
+ * without any network I/O by injecting a [MockWebSocketTransport].
  */
 class DefaultWebSocketClientMockTest {
     private val defaultOptions =
@@ -37,41 +34,41 @@ class DefaultWebSocketClientMockTest {
         )
 
     private fun createClient(
-        mockSocket: MockClientToServerSocket,
+        mockTransport: MockWebSocketTransport,
         options: WebSocketConnectionOptions = defaultOptions,
     ): DefaultWebSocketClient =
         DefaultWebSocketClient(
+            transport = mockTransport,
             connectionOptions = options,
             parentScope = null,
             bufferFactory = BufferFactory.managed(),
-            socketOverride = mockSocket,
         )
 
     /**
-     * Completes the WebSocket handshake on a mock socket.
+     * Completes the WebSocket handshake on a mock transport.
      *
      * Launches connect() in the background, waits for the handshake request to be written,
      * extracts the Sec-WebSocket-Key, computes the correct accept key, and enqueues
-     * the 101 response. The mock socket's Channel-based read() suspends until we enqueue data,
+     * the 101 response. The mock transport's Channel-based read() suspends until we enqueue data,
      * giving the test full control over timing.
      *
      * @return The connected client
      */
     private suspend fun connectWithHandshake(
         client: DefaultWebSocketClient,
-        mockSocket: MockClientToServerSocket,
+        mockTransport: MockWebSocketTransport,
     ): DefaultWebSocketClient {
         val connectJob =
-            client.scope.async {
+            CoroutineScope(Dispatchers.Default).async {
                 client.connect()
             }
 
         // Wait for handshake request to be written
-        waitForWrite(mockSocket)
+        waitForWrite(mockTransport)
 
         // Extract key and enqueue valid response
-        val clientKey = MockHandshakeHelper.extractClientKey(mockSocket.writtenBuffers[0])
-        mockSocket.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
+        val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
+        mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
 
         // Wait for connect to complete
         withTimeout(5.seconds) { connectJob.await() }
@@ -80,135 +77,116 @@ class DefaultWebSocketClientMockTest {
     }
 
     /**
-     * Waits until the mock socket has at least [count] written buffers.
+     * Waits until the mock transport has at least [count] written buffers.
      */
     private suspend fun waitForWrite(
-        mockSocket: MockClientToServerSocket,
+        mockTransport: MockWebSocketTransport,
         count: Int = 1,
     ) {
         withTimeout(5.seconds) {
-            while (mockSocket.writtenBuffers.size < count) {
+            while (mockTransport.writtenBuffers.size < count) {
                 delay(10)
             }
         }
     }
 
     // ========================================================================
-    // A. Network Disruption / Socket Exceptions
+    // A. Network Disruption / Transport Errors
     // ========================================================================
 
     @Test
-    fun socketErrorDuringOpen() =
+    fun transportErrorDuringHandshake() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             // Enqueue error before connect attempt reads anything
-            mockSocket.enqueueReadError(SocketConnectionException.Refused("localhost", 9001))
+            mockTransport.enqueueReadError(Exception("Connection refused"))
 
-            client.connect()
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.TransportFailed>(state.t)
+            val exception =
+                assertFailsWith<WebSocketException> {
+                    client.connect()
+                }
+            assertIs<WebSocketException.TransportFailed>(exception)
         }
 
     @Test
-    fun socketDisconnectDuringHandshakeRead() =
+    fun transportDisconnectDuringHandshakeRead() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
             // Wait for handshake write
-            waitForWrite(mockSocket)
+            waitForWrite(mockTransport)
 
             // Simulate disconnect before sending response
-            mockSocket.simulateDisconnect()
+            mockTransport.simulateDisconnect()
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
         }
 
     @Test
-    fun socketDisconnectDuringMessageRead() =
+    fun transportDisconnectDuringMessageRead() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
-
-            assertIs<ConnectionState.Connected>(client.connectionState.value)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Simulate disconnect during read loop
-            mockSocket.simulateDisconnect()
+            mockTransport.simulateDisconnect()
 
-            // Wait for state to transition
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete (channel closes)
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().take(1).toList()
                 }
-            }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
+            assertTrue(messages.isEmpty())
             client.close()
         }
 
     @Test
-    fun socketErrorDuringReadLoop() =
+    fun transportErrorDuringReadLoop() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            assertIs<ConnectionState.Connected>(client.connectionState.value)
+            // Inject transport error
+            mockTransport.enqueueReadError(Exception("Connection reset"))
 
-            // Inject socket error
-            mockSocket.enqueueReadError(SocketIOException("Connection reset"))
-
-            // Wait for state to transition
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete (channel closes)
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().take(1).toList()
                 }
-            }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.TransportFailed>(state.t)
+            assertTrue(messages.isEmpty())
             client.close()
         }
 
     @Test
-    fun socketDisconnectMidFrame() =
+    fun transportDisconnectMidFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Send only the first 2 bytes of a frame header (text, length=10)
-            // then error before payload arrives. Use enqueueReadError instead of
-            // simulateDisconnect to avoid race where isOpen() returns false
-            // (from open=false) before the read loop hits the exception path.
-            mockSocket.enqueueReadBytes(0x81.toByte(), 0x0A) // FIN + Text, length=10
-            mockSocket.enqueueReadError(SocketClosedException.General("Connection lost mid-frame"))
+            // then error before payload arrives.
+            mockTransport.enqueueReadBytes(0x81.toByte(), 0x0A) // FIN + Text, length=10
+            mockTransport.enqueueReadError(Exception("Connection lost mid-frame"))
 
-            // Wait for disconnection
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().take(1).toList()
                 }
-            }
-
-            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            assertTrue(messages.isEmpty())
             client.close()
         }
 
@@ -216,24 +194,18 @@ class DefaultWebSocketClientMockTest {
      * Regression: server TCP close without WS close frame must unblock
      * receive() collectors. Before the fix, take(N).collect hung
      * forever because incomingMessageChannel was never closed.
-     *
-     * Uses enqueueReadError (not simulateDisconnect) because simulateDisconnect
-     * sets open=false synchronously, which causes the read loop to exit at the
-     * isOpen() check before processing queued frames.
      */
     @Test
     fun tcpCloseWithoutWsCloseUnblocksCollector() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            // Send 2 text messages, then TCP-level close (no WS close frame).
-            // enqueueReadError queues the error inline so the read loop processes
-            // frames in order: text1 → text2 → SocketClosedException.
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg1"))
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg2"))
-            mockSocket.enqueueReadError(SocketClosedException.General("Server TCP close"))
+            // Send 2 text messages, then transport-level close (no WS close frame).
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg1"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg2"))
+            mockTransport.enqueueReadError(Exception("Server TCP close"))
 
             // Collect with take(5) — we'll only get 2 messages before the
             // channel closes. This must NOT hang.
@@ -257,12 +229,12 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun tcpCloseImmediatelyAfterConnectUnblocksCollector() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // TCP disconnect immediately — no messages at all
-            mockSocket.enqueueReadError(SocketClosedException.General("Server TCP close"))
+            mockTransport.enqueueReadError(Exception("Server TCP close"))
 
             // Collector on receive() must complete (channel closes with no messages)
             val messages =
@@ -282,14 +254,14 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun midFrameTcpCloseUnblocksCollector() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Send complete message, then partial frame header, then disconnect
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("before-crash"))
-            mockSocket.enqueueReadBytes(0x81.toByte(), 0x0A) // Partial: FIN+Text, length=10, no payload
-            mockSocket.enqueueReadError(SocketClosedException.General("Connection lost"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("before-crash"))
+            mockTransport.enqueueReadBytes(0x81.toByte(), 0x0A) // Partial: FIN+Text, length=10, no payload
+            mockTransport.enqueueReadError(Exception("Connection lost"))
 
             val messages =
                 withTimeout(5.seconds) {
@@ -307,26 +279,25 @@ class DefaultWebSocketClientMockTest {
     // ========================================================================
 
     @Test
-    fun successfulHandshakeTransitionsToConnected() =
+    fun successfulHandshakeConnects() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            assertEquals(ConnectionState.Connected, client.connectionState.value)
-            assertTrue(mockSocket.openCalled)
+            assertTrue(client.isOpen())
             client.close()
         }
 
     @Test
     fun textMessageReceived() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Enqueue a server text frame
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerTextFrame("Hello, WebSocket!"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("Hello, WebSocket!"))
 
             val msg =
                 withTimeout(5.seconds) {
@@ -341,12 +312,12 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun binaryMessageReceived() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             val testData = byteArrayOf(0x01, 0x02, 0x03, 0x04, 0x05)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerBinaryFrame(testData))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerBinaryFrame(testData))
 
             val msg =
                 withTimeout(5.seconds) {
@@ -365,16 +336,16 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun clientSendTextWritesMaskedFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.send(WebSocketMessage.Text("hello"))
 
             // Wait for the write to appear (index 0 is handshake, index 1 is our frame)
-            waitForWrite(mockSocket, count = 2)
+            waitForWrite(mockTransport, count = 2)
 
-            val frameBuffer = mockSocket.writtenBuffers[1]
+            val frameBuffer = mockTransport.writtenBuffers[1]
             frameBuffer.position(0)
 
             val byte1 = frameBuffer.readByte().toInt() and 0xFF
@@ -404,12 +375,12 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun serverInitiatedClose() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Server sends close frame
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
             // Should receive close message
             val msg =
@@ -420,38 +391,35 @@ class DefaultWebSocketClientMockTest {
             assertEquals(1000.toUShort(), msg.code)
 
             // Wait for client to send close response
-            waitForWrite(mockSocket, count = 2)
+            waitForWrite(mockTransport, count = 2)
 
-            // Client should transition to Disconnected
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete
+            val remaining =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
-            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            assertTrue(remaining.isEmpty())
             client.close()
         }
 
     @Test
     fun clientInitiatedClose() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.close()
 
             // Verify close frame was sent (index 0 = handshake, index 1 = close frame)
-            assertTrue(mockSocket.writtenBuffers.size >= 2, "Expected at least 2 writes (handshake + close)")
+            assertTrue(mockTransport.writtenBuffers.size >= 2, "Expected at least 2 writes (handshake + close)")
 
-            val closeFrame = mockSocket.writtenBuffers[1]
+            val closeFrame = mockTransport.writtenBuffers[1]
             closeFrame.position(0)
 
             val byte1 = closeFrame.readByte().toInt() and 0xFF
             // FIN=1, opcode=Close(0x8) => 0x88
             assertEquals(0x88, byte1)
-
-            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
         }
 
     // ========================================================================
@@ -461,12 +429,12 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun pingAutoRespondsWithPong() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             val pingPayload = "ping-data".encodeToByteArray()
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerPingFrame(pingPayload))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerPingFrame(pingPayload))
 
             // Should emit Ping message
             val msg =
@@ -476,9 +444,9 @@ class DefaultWebSocketClientMockTest {
             assertIs<WebSocketMessage.Ping>(msg)
 
             // Wait for pong to be written
-            waitForWrite(mockSocket, count = 2)
+            waitForWrite(mockTransport, count = 2)
 
-            val pongFrame = mockSocket.writtenBuffers[1]
+            val pongFrame = mockTransport.writtenBuffers[1]
             pongFrame.position(0)
             val byte1 = pongFrame.readByte().toInt() and 0xFF
             // FIN=1, opcode=Pong(0xA) => 0x8A
@@ -504,11 +472,11 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun pongMessageEmitted() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerPongFrame("pong-data".encodeToByteArray()))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerPongFrame("pong-data".encodeToByteArray()))
 
             val msg =
                 withTimeout(5.seconds) {
@@ -525,64 +493,55 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun invalidStatusCode200() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
-            waitForWrite(mockSocket)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildErrorResponse(200, "OK"))
+            waitForWrite(mockTransport)
+            mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(200, "OK"))
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
         }
 
     @Test
     fun missingSecWebSocketAccept() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
-            waitForWrite(mockSocket)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildMissingAcceptResponse())
+            waitForWrite(mockTransport)
+            mockTransport.enqueueRead(MockHandshakeHelper.buildMissingAcceptResponse())
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
         }
 
     @Test
     fun wrongAcceptKey() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
-            waitForWrite(mockSocket)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
+            waitForWrite(mockTransport)
+            mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
         }
 
     // ========================================================================
@@ -592,138 +551,118 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun handshakeRejected403() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
-            waitForWrite(mockSocket)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
+            waitForWrite(mockTransport)
+            mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.HandshakeRejected>(state.t)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
+            assertIs<WebSocketException.HandshakeRejected>(result.exceptionOrNull())
         }
 
     @Test
     fun handshakeRejectedWrongAcceptKey() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
             val connectJob =
-                client.scope.async {
-                    client.connect()
+                CoroutineScope(Dispatchers.Default).async {
+                    runCatching { client.connect() }
                 }
 
-            waitForWrite(mockSocket)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
+            waitForWrite(mockTransport)
+            mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
 
-            withTimeout(5.seconds) { connectJob.await() }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.HandshakeRejected>(state.t)
+            val result = withTimeout(5.seconds) { connectJob.await() }
+            assertTrue(result.isFailure)
+            assertIs<WebSocketException.HandshakeRejected>(result.exceptionOrNull())
         }
 
     @Test
-    fun serverCloseNormal1000HasNoException() =
+    fun serverCloseNormal1000FlowCompletes() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // Should receive the close message then the flow completes
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
 
-            val state = client.connectionState.value
-            assertIs<WebSocketDisconnected>(state)
-            assertEquals(1000.toUShort(), state.code)
-            // Normal close should NOT carry an exception
-            assertEquals(null, state.t)
+            assertEquals(1, messages.size)
+            assertIs<WebSocketMessage.Close>(messages[0])
+            assertEquals(1000.toUShort(), (messages[0] as WebSocketMessage.Close).code)
             client.close()
         }
 
     @Test
-    fun serverCloseAbnormalSurfacesConnectionClosed() =
+    fun serverCloseAbnormalSurfacesCloseMessage() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1011u, "internal error"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1011u, "internal error"))
 
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
 
-            val state = client.connectionState.value
-            assertIs<WebSocketDisconnected>(state)
-            assertEquals(1011.toUShort(), state.code)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.ConnectionClosed>(state.t)
-            assertEquals(1011.toUShort(), (state.t as WebSocketException.ConnectionClosed).code)
+            assertEquals(1, messages.size)
+            assertIs<WebSocketMessage.Close>(messages[0])
+            assertEquals(1011.toUShort(), (messages[0] as WebSocketMessage.Close).code)
             client.close()
         }
 
     @Test
-    fun reservedOpcodeSurfacesProtocolViolation() =
+    fun reservedOpcodeClosesConnection() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Send a frame with reserved opcode 0x3 (RFC 6455 Section 5.2: opcodes 3-7 are reserved)
             // FIN=1, opcode=3, no mask, payload length=0
-            mockSocket.enqueueReadBytes(0x83.toByte(), 0x00)
+            mockTransport.enqueueReadBytes(0x83.toByte(), 0x00)
 
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete (client sends close frame and stops)
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.ProtocolViolation>(state.t)
+            // No messages expected — the reserved opcode causes immediate close
+            assertTrue(messages.isEmpty())
             client.close()
         }
 
     @Test
-    fun socketErrorSurfacesTransportFailed() =
+    fun transportErrorDuringReadLoopClosesFlow() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
-            mockSocket.enqueueReadError(SocketIOException("Connection reset by peer"))
+            mockTransport.enqueueReadError(Exception("Connection reset by peer"))
 
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
-
-            val state = client.connectionState.value
-            assertIs<ConnectionState.Disconnected>(state)
-            assertNotNull(state.t)
-            assertIs<WebSocketException.TransportFailed>(state.t)
-            assertIs<SocketIOException>((state.t as WebSocketException.TransportFailed).cause)
+            assertTrue(messages.isEmpty())
             client.close()
         }
 
@@ -734,9 +673,9 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendTextAfterCloseThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.close()
 
@@ -748,9 +687,9 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendBinaryAfterCloseThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.close()
 
@@ -766,9 +705,9 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendPingAfterCloseThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.close()
 
@@ -780,31 +719,28 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun doubleCloseIsIdempotent() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.close()
             // Second close should return without error
             client.close()
-
-            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
         }
 
     @Test
     fun sendAfterServerCloseThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Server sends close frame
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
+            // Wait for the close message to be processed
             withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
-                }
+                client.receive().toList()
             }
 
             assertFailsWith<WebSocketException.ConnectionClosed> {
@@ -820,17 +756,17 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendBinaryWritesMaskedFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             val payload = BufferFactory.managed().allocate(3)
             payload.writeBytes(byteArrayOf(0x01, 0x02, 0x03))
             payload.resetForRead()
             client.send(WebSocketMessage.Binary(payload))
 
-            waitForWrite(mockSocket, count = 2)
-            val frameBuffer = mockSocket.writtenBuffers[1]
+            waitForWrite(mockTransport, count = 2)
+            val frameBuffer = mockTransport.writtenBuffers[1]
             frameBuffer.position(0)
             val byte1 = frameBuffer.readByte().toInt() and 0xFF
             // FIN=1, opcode=Binary(0x2) => 0x82
@@ -844,17 +780,17 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendPingWritesMaskedFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             val payload = BufferFactory.managed().allocate(4)
             payload.writeBytes("test".encodeToByteArray())
             payload.resetForRead()
             client.send(WebSocketMessage.Ping(payload))
 
-            waitForWrite(mockSocket, count = 2)
-            val frameBuffer = mockSocket.writtenBuffers[1]
+            waitForWrite(mockTransport, count = 2)
+            val frameBuffer = mockTransport.writtenBuffers[1]
             frameBuffer.position(0)
             val byte1 = frameBuffer.readByte().toInt() and 0xFF
             // FIN=1, opcode=Ping(0x9) => 0x89
@@ -868,14 +804,14 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendPongWritesMaskedFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.send(WebSocketMessage.Pong(EMPTY_BUFFER))
 
-            waitForWrite(mockSocket, count = 2)
-            val frameBuffer = mockSocket.writtenBuffers[1]
+            waitForWrite(mockTransport, count = 2)
+            val frameBuffer = mockTransport.writtenBuffers[1]
             frameBuffer.position(0)
             val byte1 = frameBuffer.readByte().toInt() and 0xFF
             // FIN=1, opcode=Pong(0xA) => 0x8A
@@ -886,14 +822,14 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendCloseWritesCloseFrame() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             client.send(WebSocketMessage.Close(1000.toUShort(), "bye"))
 
-            waitForWrite(mockSocket, count = 2)
-            val frameBuffer = mockSocket.writtenBuffers[1]
+            waitForWrite(mockTransport, count = 2)
+            val frameBuffer = mockTransport.writtenBuffers[1]
             frameBuffer.position(0)
             val byte1 = frameBuffer.readByte().toInt() and 0xFF
             // FIN=1, opcode=Close(0x8) => 0x88
@@ -908,9 +844,9 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendBeforeConnectThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            // Never called connect() — state is Initialized
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            // Never called connect() — state is not connected
             assertFailsWith<WebSocketException.ConnectionClosed> {
                 client.send(WebSocketMessage.Text("should fail"))
             }
@@ -919,22 +855,25 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun sendDuringConnectingThrowsConnectionClosed() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
 
-            // Start connect but don't complete handshake — state stays Connecting
-            val connectJob = client.scope.async { client.connect() }
+            // Start connect but don't complete handshake — state stays connecting
+            val connectJob =
+                CoroutineScope(Dispatchers.Default).async {
+                    client.connect()
+                }
 
             // Wait for handshake to be sent (state is now Connecting)
-            waitForWrite(mockSocket)
+            waitForWrite(mockTransport)
 
             assertFailsWith<WebSocketException.ConnectionClosed> {
                 client.send(WebSocketMessage.Text("should fail during connecting"))
             }
 
             // Complete handshake so the coroutine finishes cleanly
-            val clientKey = MockHandshakeHelper.extractClientKey(mockSocket.writtenBuffers[0])
-            mockSocket.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
+            val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
+            mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
             withTimeout(5.seconds) { connectJob.await() }
             client.close()
         }
@@ -946,25 +885,25 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun invalidUtf8TextMessageSendsClose1007() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // Send a text frame with invalid UTF-8: 0xC0 0x01 is overlong
             val invalidUtf8 = byteArrayOf(0xC0.toByte(), 0x01)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Text, invalidUtf8))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Text, invalidUtf8))
             // Keep the read loop alive long enough to process
-            mockSocket.enqueueReadError(SocketClosedException.General("done"))
+            mockTransport.enqueueReadError(Exception("done"))
 
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
+            // receive flow should complete
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
 
             // Client should have sent a close frame with code 1007 (invalid payload)
             // Frame writes: index 0 = handshake, index 1+ = close frame
-            val closeSent = mockSocket.writtenBuffers.drop(1).any { buf ->
+            val closeSent = mockTransport.writtenBuffers.drop(1).any { buf ->
                 buf.position(0)
                 val b1 = buf.readByte().toInt() and 0xFF
                 (b1 and 0x0F) == 0x08 // opcode = Close
@@ -976,27 +915,23 @@ class DefaultWebSocketClientMockTest {
     @Test
     fun serverCloseWithOneBytePayloadIsProtocolError() =
         runStrictTest {
-            val mockSocket = MockClientToServerSocket()
-            val client = createClient(mockSocket)
-            connectWithHandshake(client, mockSocket)
+            val mockTransport = MockWebSocketTransport()
+            val client = createClient(mockTransport)
+            connectWithHandshake(client, mockTransport)
 
             // RFC 6455 Section 5.5.1: Close frame with 1-byte payload is a protocol error.
             // The status code requires 2 bytes, so 1 byte is invalid.
             val oneBytePayload = byteArrayOf(0x42)
-            mockSocket.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Close, oneBytePayload))
+            mockTransport.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Close, oneBytePayload))
 
-            val msg = withTimeout(5.seconds) {
-                client.receive().first()
-            }
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
+                }
 
             // FrameReader parses this as a Close with PROTOCOL_ERROR code
-            assertIs<WebSocketMessage.Close>(msg)
-
-            withTimeout(5.seconds) {
-                while (client.connectionState.value !is ConnectionState.Disconnected) {
-                    delay(10)
-                }
-            }
+            assertTrue(messages.isNotEmpty())
+            assertIs<WebSocketMessage.Close>(messages[0])
 
             client.close()
         }
@@ -1011,30 +946,29 @@ class DefaultWebSocketClientMockTest {
             val parentJob = kotlinx.coroutines.Job()
             val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
 
-            val mockSocket = MockClientToServerSocket()
+            val mockTransport = MockWebSocketTransport()
             val client =
                 DefaultWebSocketClient(
+                    transport = mockTransport,
                     connectionOptions = defaultOptions,
                     parentScope = parentScope,
                     bufferFactory = BufferFactory.managed(),
-                    socketOverride = mockSocket,
                 )
-            connectWithHandshake(client, mockSocket)
+            connectWithHandshake(client, mockTransport)
 
-            assertIs<ConnectionState.Connected>(client.connectionState.value)
+            assertTrue(client.isOpen())
 
             // Cancel the PARENT scope — structured concurrency should propagate
             parentJob.cancel()
 
-            // The client's read loop should terminate because its Job is a child of parentJob
-            withTimeout(5.seconds) {
-                while (client.connectionState.value is ConnectionState.Connected) {
-                    delay(10)
+            // The client's read loop should terminate because its Job is a child of parentJob.
+            // The receive flow should complete.
+            val messages =
+                withTimeout(5.seconds) {
+                    client.receive().toList()
                 }
-            }
-
-            // Client should be disconnected (not stuck in Connected forever)
-            assertIs<ConnectionState.Disconnected>(client.connectionState.value)
+            // Flow completes (may be empty or have some messages depending on timing)
+            // The key assertion is that it doesn't hang
         }
 
     @Test
@@ -1043,15 +977,15 @@ class DefaultWebSocketClientMockTest {
             val parentJob = kotlinx.coroutines.Job()
             val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
 
-            val mockSocket = MockClientToServerSocket()
+            val mockTransport = MockWebSocketTransport()
             val client =
                 DefaultWebSocketClient(
+                    transport = mockTransport,
                     connectionOptions = defaultOptions,
                     parentScope = parentScope,
                     bufferFactory = BufferFactory.managed(),
-                    socketOverride = mockSocket,
                 )
-            connectWithHandshake(client, mockSocket)
+            connectWithHandshake(client, mockTransport)
 
             // Close the CLIENT — should NOT cancel the parent
             client.close()

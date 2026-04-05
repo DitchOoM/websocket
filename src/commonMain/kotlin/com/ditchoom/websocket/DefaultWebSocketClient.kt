@@ -21,13 +21,6 @@ import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
-import com.ditchoom.socket.ClientSocket
-import com.ditchoom.socket.ClientToServerSocket
-import com.ditchoom.socket.ConnectionState
-import com.ditchoom.socket.SocketClosedException
-import com.ditchoom.socket.SocketException
-import com.ditchoom.socket.SocketOptions
-import com.ditchoom.socket.allocate
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.frame.AssemblyResult
 import com.ditchoom.websocket.frame.CloseCode
@@ -46,11 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -65,14 +54,15 @@ import kotlin.coroutines.coroutineContext
  * - [MessageAssembler] for fragmented message reassembly
  * - [HandshakeRequest]/[HandshakeResponseParser]/[HandshakeValidator] for connection setup
  *
- * Designed for high performance and testability with RFC 6455 compliance.
+ * The consumer provides a pre-connected [WebSocketTransport] (e.g. TCP socket).
+ * This client handles the HTTP upgrade handshake and WebSocket framing on top.
  */
 class DefaultWebSocketClient(
+    private val transport: WebSocketTransport,
     private val connectionOptions: WebSocketConnectionOptions,
-    parentScope: CoroutineScope?,
+    parentScope: CoroutineScope? = null,
     private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
-    internal val socketOverride: ClientToServerSocket? = null,
     externalPool: BufferPool? = null,
 ) : WebSocketClient {
     // Lock-free pool for thread-safe buffer reuse across read loop and caller coroutines.
@@ -89,7 +79,7 @@ class DefaultWebSocketClient(
     // Can still be cancelled independently via close().
     private val clientJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
 
-    override val scope: CoroutineScope =
+    internal val scope: CoroutineScope =
         CoroutineScope(
             (parentScope?.coroutineContext ?: Dispatchers.Default) +
                 clientJob +
@@ -99,9 +89,8 @@ class DefaultWebSocketClient(
         )
 
     override val id: Long = 0L
-    private val socket = socketOverride ?: ClientSocket.allocate()
-    private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
-    override val connectionState = connectionStateFlow.asStateFlow()
+    private var closed = false
+    private var connected = false
 
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
 
@@ -121,23 +110,13 @@ class DefaultWebSocketClient(
     // Reusable decoder for streaming UTF-8 decoding of decompressed text messages
     private val stringDecoder = StreamingStringDecoder()
 
-    // Use StateFlow for thread-safe access between read loop and close()
-    private val serverInitiatedClose = MutableStateFlow(false)
+    private var serverInitiatedClose = false
     private var clientKey: String = ""
 
-    fun isOpen() = socket.isOpen() && connectionState.value is ConnectionState.Connected
-
-    override suspend fun localPort(): Int = socket.localPort()
-
-    override suspend fun remotePort(): Int = socket.remotePort()
+    fun isOpen() = !closed && transport.isOpen()
 
     override suspend fun connect(): WebSocketClient {
-        if (connectionState.value == ConnectionState.Connecting ||
-            connectionState.value is ConnectionState.Connected
-        ) {
-            return this
-        }
-        connectionStateFlow.value = ConnectionState.Connecting
+        if (connected || closed) return this
 
         try {
             // Build handshake request using modular component
@@ -148,7 +127,7 @@ class DefaultWebSocketClient(
                         port = connectionOptions.port,
                         path = connectionOptions.websocketEndpoint,
                     ).apply {
-                        useTls(connectionOptions.isTls)
+                        useTls(connectionOptions.tls)
                         if (connectionOptions.protocols.isNotEmpty()) {
                             protocols(*connectionOptions.protocols.toTypedArray())
                         }
@@ -169,18 +148,9 @@ class DefaultWebSocketClient(
 
             clientKey = handshakeRequest.key
 
-            // Open socket connection
-            val socketOptions =
-                connectionOptions.tls?.let {
-                    SocketOptions(tcpNoDelay = true, tls = it)
-                } ?: SocketOptions.LOW_LATENCY
-            withTimeout(connectionOptions.connectionTimeout) {
-                socket.open(connectionOptions.port, connectionOptions.connectionTimeout, connectionOptions.name, socketOptions)
-            }
-
-            // Send handshake request
+            // Send handshake request (transport is already connected)
             val requestBuffer = handshakeRequest.toBuffer()
-            socket.write(requestBuffer, connectionOptions.writeTimeout)
+            transport.write(requestBuffer, connectionOptions.writeTimeout)
 
             // Build auto-filling stream processor.
             // This replaces the manual readIntoProcessor + ensureAvailable pattern.
@@ -191,7 +161,7 @@ class DefaultWebSocketClient(
                     .buildSuspendingWithAutoFill { stream ->
                         val buffer = pool.acquire(readBufferSize)
                         try {
-                            val bytesRead = socket.read(buffer, connectionOptions.readTimeout)
+                            val bytesRead = transport.read(buffer, connectionOptions.readTimeout)
                             if (bytesRead <= 0) {
                                 buffer.freeIfNeeded()
                                 throw EndOfStreamException()
@@ -201,9 +171,6 @@ class DefaultWebSocketClient(
                             stream.append(buffer)
                         } catch (e: EndOfStreamException) {
                             throw e
-                        } catch (e: SocketClosedException) {
-                            buffer.freeIfNeeded()
-                            throw EndOfStreamException("Socket closed by peer", e)
                         } catch (e: Exception) {
                             buffer.freeIfNeeded()
                             throw e
@@ -257,7 +224,7 @@ class DefaultWebSocketClient(
                             resetCompressorPerMessage = clientNoContextTakeover,
                         )
 
-                    connectionStateFlow.value = ConnectionState.Connected
+                    connected = true
 
                     // Start read loop with auto-filling processor
                     startReadLoop(autoFillingStream)
@@ -268,7 +235,8 @@ class DefaultWebSocketClient(
                 }
             }
         } catch (e: Exception) {
-            connectionStateFlow.value = ConnectionState.Disconnected(wrapException(e))
+            closed = true
+            throw wrapException(e)
         }
 
         return this
@@ -343,39 +311,16 @@ class DefaultWebSocketClient(
         }
     }
 
-    /**
-     * Atomically transitions to Disconnected if not already disconnected.
-     * Wraps the exception through the WebSocket exception hierarchy.
-     */
-    private fun ensureDisconnected(e: Exception? = null) {
-        connectionStateFlow.update { current ->
-            if (current is ConnectionState.Disconnected) {
-                current
-            } else {
-                val wrapped =
-                    when {
-                        e == null -> null
-                        e is kotlinx.coroutines.CancellationException -> null
-                        e is SocketException && serverInitiatedClose.value -> null
-                        e is SocketException && current !is ConnectionState.Connected -> null
-                        else -> wrapException(e)
-                    }
-                ConnectionState.Disconnected(wrapped)
-            }
-        }
-    }
-
     companion object {
         /** Default read buffer size (64KB) - matches typical socket receive buffer */
         const val DEFAULT_READ_BUFFER_SIZE = 65536
 
-        /** Wraps platform/socket exceptions in domain-specific [WebSocketException] subtypes. */
+        /** Wraps platform/transport exceptions in domain-specific [WebSocketException] subtypes. */
         internal fun wrapException(e: Exception): Exception =
             when (e) {
                 is WebSocketException -> e
                 is HandshakeException -> WebSocketException.HandshakeRejected(e.message ?: "Handshake failed", cause = e)
-                is SocketException -> WebSocketException.TransportFailed(e.message ?: "Transport error", e)
-                else -> e
+                else -> WebSocketException.TransportFailed(e.message ?: "Transport error", e)
             }
     }
 
@@ -431,26 +376,19 @@ class DefaultWebSocketClient(
                         }
                         is AssemblyResult.Error -> {
                             sendCloseFrame(result.code.code, result.reason)
-                            connectionStateFlow.value =
-                                WebSocketDisconnected(
-                                    t = WebSocketException.ProtocolViolation(result.reason),
-                                    code = result.code.code,
-                                    reason = result.reason,
-                                )
+                            closed = true
                             return@launch
                         }
                     }
                 }
-                // Read loop exited normally — ensure state transitions to
-                // Disconnected so waiters don't hang.
-                ensureDisconnected()
             } catch (_: EndOfStreamException) {
-                // Clean disconnection — socket closed or read returned 0 bytes
-                ensureDisconnected()
+                // Clean EOF
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
-                ensureDisconnected(e)
+                // Transport or protocol error — close frame already sent if possible
             } finally {
                 messageAssembler.reset()
                 autoFillingStream.release()
@@ -484,14 +422,14 @@ class DefaultWebSocketClient(
                 incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payload))
             }
             Opcode.Close -> {
-                serverInitiatedClose.value = true
+                serverInitiatedClose = true
                 // Use pre-parsed close code and reason from FrameReader
                 val closeFrame = frame as ParsedFrame.ControlFrame.Close
                 val code = closeFrame.closeCode.code
                 val reason = closeFrame.closeReason
 
                 // Send close response if we haven't already
-                if (connectionState.value is ConnectionState.Connected) {
+                if (connected && !closed) {
                     // If our parser detected a protocol error (e.g., 1-byte close payload),
                     // respond with the error code. Otherwise, respond with 1000 Normal Closure.
                     val responseCode =
@@ -504,17 +442,7 @@ class DefaultWebSocketClient(
                 }
 
                 incomingMessageChannel.trySend(WebSocketMessage.Close(code, reason))
-                val closeException =
-                    if (code != CloseCode.NORMAL.code) {
-                        WebSocketException.ConnectionClosed(
-                            "Server closed: $reason",
-                            code = code,
-                            reason = reason,
-                        )
-                    } else {
-                        null
-                    }
-                connectionStateFlow.value = WebSocketDisconnected(t = closeException, code = code, reason = reason)
+                closed = true
             }
             else -> {
                 // Unexpected control opcode
@@ -613,10 +541,10 @@ class DefaultWebSocketClient(
     }
 
     override suspend fun send(message: WebSocketMessage) {
-        if (connectionState.value !is ConnectionState.Connected) {
+        if (closed || !connected) {
             throw WebSocketException.ConnectionClosed("Cannot send: not connected")
         }
-        // frameWriter is guaranteed non-null while Connected; the null-check
+        // frameWriter is guaranteed non-null while connected; the null-check
         // is a safety net for the TOCTOU race with close().
         val writer = frameWriter ?: throw WebSocketException.ConnectionClosed("WebSocket is closing")
         val frameBuffer =
@@ -627,14 +555,14 @@ class DefaultWebSocketClient(
                 is WebSocketMessage.Pong -> writer.writePongFrame(message.value)
                 is WebSocketMessage.Close -> writer.writeCloseFrame(message.code, message.reason)
             }
-        writeToSocket(frameBuffer)
+        writeToTransport(frameBuffer)
         frameBuffer.freeIfNeeded()
     }
 
     private suspend fun writePongFrame(payloadData: ReadBuffer) {
         val writer = frameWriter ?: return
         val frameBuffer = writer.writePongFrame(payloadData)
-        writeToSocket(frameBuffer)
+        writeToTransport(frameBuffer)
         frameBuffer.freeIfNeeded()
     }
 
@@ -645,39 +573,38 @@ class DefaultWebSocketClient(
         val writer = frameWriter ?: return
         try {
             val frameBuffer = writer.writeCloseFrame(code, reason)
-            writeToSocket(frameBuffer)
+            writeToTransport(frameBuffer)
             frameBuffer.freeIfNeeded()
         } catch (e: Exception) {
             // Ignore errors when sending close
         }
     }
 
-    private suspend fun writeToSocket(buffer: ReadBuffer) {
+    private suspend fun writeToTransport(buffer: ReadBuffer) {
         try {
             // Note: buffer is already in read mode from FrameWriter, don't call resetForRead()
             while (buffer.hasRemaining()) {
-                socket.write(buffer, connectionOptions.writeTimeout)
+                transport.write(buffer, connectionOptions.writeTimeout)
             }
         } catch (e: Exception) {
-            // Write failed — socket likely closed
-            connectionStateFlow.value = ConnectionState.Disconnected(e)
+            // Write failed — transport likely closed
+            closed = true
         }
     }
 
     override suspend fun close() {
-        // Guard against double close — if already disconnected or closing, skip everything.
-        // This also prevents the TOCTOU race where close() and the read loop's close handler
-        // both try to send a close frame concurrently.
-        val currentState = connectionStateFlow.value
-        if (currentState is ConnectionState.Disconnected) return
-        // Atomically transition to Disconnected to prevent concurrent close() calls
-        if (!connectionStateFlow.compareAndSet(currentState, ConnectionState.Disconnected())) return
+        if (closed) return
+        closed = true
 
-        if (currentState is ConnectionState.Connected && !serverInitiatedClose.value) {
-            sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
+        if (connected && !serverInitiatedClose) {
+            try {
+                sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
+            } catch (_: Exception) {
+                // Ignore errors when sending close frame
+            }
         }
         // Clear frameWriter to prevent writes after close (avoids infinite loop
-        // when socket.write returns -1 on a closed socket)
+        // when transport.write returns -1 on a closed transport)
         frameWriter = null
         // Close the incoming message channel so collectors complete
         incomingMessageChannel.close()
@@ -686,14 +613,14 @@ class DefaultWebSocketClient(
         outgoingCompressor = null
         incomingDecompressor?.close()
         incomingDecompressor = null
-        // Close socket first to break any pending I/O, then cancelAndJoin.
+        // Close transport first to break any pending I/O, then cancelAndJoin.
         // Order matters for K/N Darwin: cancel() on a coroutine suspended in a
         // GCD-dispatched I/O operation crashes because GCD still holds a reference
-        // to the continuation. Closing the socket first completes the I/O (with an
+        // to the continuation. Closing the transport first completes the I/O (with an
         // error), the coroutine exits its suspension point, and cancelAndJoin() is
         // safe — no in-flight GCD blocks remain.
         try {
-            socket.close()
+            transport.close()
         } catch (_: Exception) {
             // Ignore close errors
         }

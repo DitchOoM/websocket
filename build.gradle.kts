@@ -110,12 +110,12 @@ kotlin {
             implementation(libs.buffer.compression)
             implementation(libs.buffer.codec)
             implementation(libs.buffer.flow)
-            implementation(libs.socket)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.socket) // For integration tests (real TCP transport)
         }
         jvmTest.dependencies {
             implementation(libs.kotlinx.coroutines.debug)

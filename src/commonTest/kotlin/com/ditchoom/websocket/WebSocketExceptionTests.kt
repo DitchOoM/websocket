@@ -1,7 +1,5 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.socket.SocketConnectionException
-import com.ditchoom.socket.SocketIOException
 import com.ditchoom.websocket.handshake.HandshakeException
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,12 +10,11 @@ import kotlin.test.assertNull
 class WebSocketExceptionTests {
     @Test
     fun transportFailed_preservesCause() {
-        val socketError = SocketConnectionException.Refused("localhost", 9001)
-        val wsError = WebSocketException.TransportFailed("Transport failed", socketError)
+        val cause = Exception("Connection refused")
+        val wsError = WebSocketException.TransportFailed("Transport failed", cause)
 
         assertIs<WebSocketException.TransportFailed>(wsError)
         assertNotNull(wsError.cause)
-        assertIs<SocketConnectionException.Refused>(wsError.cause)
         assertEquals("Transport failed", wsError.message)
     }
 
@@ -76,15 +73,6 @@ class WebSocketExceptionTests {
     }
 
     @Test
-    fun wrapException_socketException_becomesTransportFailed() {
-        val socketError = SocketIOException("I/O error")
-        val wrapped = DefaultWebSocketClient.wrapException(socketError)
-
-        assertIs<WebSocketException.TransportFailed>(wrapped)
-        assertEquals(socketError, wrapped.cause)
-    }
-
-    @Test
     fun wrapException_handshakeException_becomesHandshakeRejected() {
         val hsError = HandshakeException("Bad response")
         val wrapped = DefaultWebSocketClient.wrapException(hsError)
@@ -102,10 +90,11 @@ class WebSocketExceptionTests {
     }
 
     @Test
-    fun wrapException_unknownException_passedThrough() {
+    fun wrapException_genericException_becomesTransportFailed() {
         val original = IllegalStateException("unexpected")
         val wrapped = DefaultWebSocketClient.wrapException(original)
 
-        assertEquals(original, wrapped)
+        assertIs<WebSocketException.TransportFailed>(wrapped)
+        assertEquals(original, wrapped.cause)
     }
 }

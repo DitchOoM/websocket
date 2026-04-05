@@ -20,7 +20,7 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                WebSocketClient.Companion.allocate(
+                connectWebSocket(
                     connectionOptions,
                     parentScope = this,
                     bufferFactory = BufferFactory.shared(),
@@ -43,7 +43,7 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                WebSocketClient.Companion.allocate(
+                connectWebSocket(
                     connectionOptions,
                     parentScope = this,
                     bufferFactory = BufferFactory.shared(),
@@ -63,7 +63,7 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                WebSocketClient.Companion.allocate(
+                connectWebSocket(
                     connectionOptions,
                     parentScope = this,
                     bufferFactory = BufferFactory.shared(),
@@ -87,7 +87,7 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                WebSocketClient.Companion.allocate(
+                connectWebSocket(
                     connectionOptions,
                     parentScope = this,
                     bufferFactory = BufferFactory.shared(),

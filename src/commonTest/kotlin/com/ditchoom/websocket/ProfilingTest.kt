@@ -5,10 +5,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.socket.ConnectionState
 import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -42,7 +40,7 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, bufferFactory = BufferFactory.managed())
+            val ws = connectWebSocket(connectionOptions, bufferFactory = BufferFactory.managed())
             ws.connect()
             ws.awaitConnected()
 
@@ -68,9 +66,6 @@ class ProfilingTest {
             val memAfter = getUsedMemoryMB()
 
             ws.close()
-            withTimeoutOrNull(10.seconds) {
-                ws.connectionState.first { it is ConnectionState.Disconnected }
-            }
 
             println(
                 "PROFILE [${agentName()}] memory_large_payload: " +
@@ -93,14 +88,11 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = WebSocketClient.allocate(connectionOptions)
+                val ws = connectWebSocket(connectionOptions)
                 ws.connect()
                 ws.awaitConnected()
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
-                withTimeoutOrNull(10.seconds) {
-                    ws.connectionState.first { it is ConnectionState.Disconnected }
-                }
             }
             println(
                 "PROFILE [${agentName()}] connect: avg=${times.average().toLong()}ms min=${times.min()}ms max=${times.max()}ms (n=$iterations)",
@@ -211,7 +203,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = WebSocketClient.allocate(connectionOptions, bufferFactory = factory)
+        val ws = connectWebSocket(connectionOptions, bufferFactory = factory)
         ws.connect()
         ws.awaitConnected()
         val connectTime = connectMark.elapsedNow()
@@ -247,9 +239,6 @@ class ProfilingTest {
         }
 
         ws.close()
-        withTimeoutOrNull(10.seconds) {
-            ws.connectionState.first { it is ConnectionState.Disconnected }
-        }
 
         val totalRtMs = roundTripTimes.sum() / 1000
         val avgWriteUs = writeTimes.average().toLong()

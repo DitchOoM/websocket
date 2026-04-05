@@ -1,9 +1,6 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.socket.ConnectionState
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.StateFlow
 
 /**
  * WebSocket client as a typed [Connection].
@@ -12,17 +9,9 @@ import kotlinx.coroutines.flow.StateFlow
  * The sealed [WebSocketMessage] hierarchy carries the opcode.
  */
 interface WebSocketClient : Connection<WebSocketMessage> {
-    val scope: CoroutineScope
-
     suspend fun connect(): WebSocketClient
 
-    suspend fun localPort(): Int
-
-    suspend fun remotePort(): Int
-
     suspend fun isPingSupported(): Boolean = true
-
-    val connectionState: StateFlow<ConnectionState>
 
     companion object
 }
@@ -31,10 +20,10 @@ interface WebSocketClient : Connection<WebSocketMessage> {
  * Executes [block] with this client, then closes it regardless of outcome.
  *
  * ```kotlin
- * WebSocketClient.allocate(options).use { client ->
- *     client.connect()
- *     client.send(WebSocketMessage.Text("hello"))
- *     val echo = client.receive().first()
+ * client.use { ws ->
+ *     ws.connect()
+ *     ws.send(WebSocketMessage.Text("hello"))
+ *     val echo = ws.receive().first()
  * }
  * ```
  */

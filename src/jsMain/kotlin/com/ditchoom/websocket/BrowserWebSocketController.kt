@@ -2,16 +2,13 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.socket.ConnectionState
 import js.buffer.SharedArrayBuffer
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
@@ -29,7 +26,7 @@ class BrowserWebSocketController(
     parentScope: CoroutineScope?,
     private val useSharedMemory: Boolean = false,
 ) : WebSocketClient {
-    override val scope =
+    private val scope =
         if (parentScope == null) {
             CoroutineScope(
                 Dispatchers.Default +
@@ -55,8 +52,8 @@ class BrowserWebSocketController(
         }
 
     override val id: Long = 0L
-    private val connectionStateFlow = MutableStateFlow<ConnectionState>(ConnectionState.Initialized)
-    override val connectionState = connectionStateFlow.asStateFlow()
+    private var closed = false
+    private val connectDeferred = CompletableDeferred<Unit>()
     private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
 
     override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
@@ -67,28 +64,30 @@ class BrowserWebSocketController(
         webSocket.binaryType = BinaryType.ARRAYBUFFER
     }
 
-    override suspend fun localPort(): Int = throw UnsupportedOperationException("Unavailable on browser")
-
-    override suspend fun remotePort(): Int = throw UnsupportedOperationException("Unavailable on browser")
-
     override suspend fun connect(): WebSocketClient {
         webSocket.onclose = {
             val closeEvent = it as CloseEvent
             val code = closeEvent.code.toUShort()
             val reason = closeEvent.reason
-            val closeException =
-                if (code != 1000.toUShort()) {
-                    WebSocketException.ConnectionClosed("WebSocket closed", code = code, reason = reason)
-                } else {
-                    null
-                }
-            connectionStateFlow.value = WebSocketDisconnected(t = closeException, code = code, reason = reason)
+            closed = true
             closeInternal()
+            if (!connectDeferred.isCompleted) {
+                connectDeferred.completeExceptionally(
+                    WebSocketException.TransportFailed(
+                        "WebSocket closed during connect: code=$code, reason=$reason",
+                        Exception("Connection failed"),
+                    ),
+                )
+            }
         }
         webSocket.onerror = {
-            connectionStateFlow.value =
-                ConnectionState.Disconnected(WebSocketException.TransportFailed("WebSocket error", Exception("$it")))
+            closed = true
             closeInternal()
+            if (!connectDeferred.isCompleted) {
+                connectDeferred.completeExceptionally(
+                    WebSocketException.TransportFailed("WebSocket error", Exception("$it")),
+                )
+            }
         }
         webSocket.onmessage = {
             when (val data = it.data) {
@@ -131,25 +130,11 @@ class BrowserWebSocketController(
         }
 
         webSocket.onopen = { _ ->
-            connectionStateFlow.value = ConnectionState.Connected
+            connectDeferred.complete(Unit)
             Unit
         }
         withTimeout(connectionOptions.connectionTimeout) {
-            val connectionStateValue = connectionState.value
-            when (connectionStateValue) {
-                ConnectionState.Initialized, ConnectionState.Connecting -> {
-                    connectionState.first { it is ConnectionState.Connected }
-                }
-                is ConnectionState.Disconnected -> {
-                    val wsDisconnected = connectionStateValue as? WebSocketDisconnected
-                    throw WebSocketException.TransportFailed(
-                        "Failed to connect. Reason: ${wsDisconnected?.reason}," +
-                            " Code: ${wsDisconnected?.code}",
-                        connectionStateValue.t ?: Exception("Connection failed"),
-                    )
-                }
-                ConnectionState.Connected -> {} // nothing to wait for
-            }
+            connectDeferred.await()
         }
         return this
     }
@@ -183,6 +168,7 @@ class BrowserWebSocketController(
     }
 
     private fun closeInternal() {
+        closed = true
         incomingMessageChannel.close()
         webSocket.close()
     }

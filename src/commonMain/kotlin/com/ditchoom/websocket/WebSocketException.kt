@@ -3,8 +3,7 @@ package com.ditchoom.websocket
 /**
  * Sealed hierarchy for WebSocket-specific errors.
  *
- * Callers catch `WebSocketException` subtypes without importing `com.ditchoom.socket`.
- * The original socket-level exception is available in [cause] for `TransportFailed`.
+ * The original transport-level exception is available in [cause] for `TransportFailed`.
  */
 sealed class WebSocketException(
     message: String,

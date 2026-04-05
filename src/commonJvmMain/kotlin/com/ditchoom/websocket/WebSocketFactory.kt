@@ -12,5 +12,7 @@ actual fun WebSocketClient.Companion.allocate(
     parentScope: CoroutineScope?,
     bufferFactory: BufferFactory,
     bufferPool: BufferPool?,
-    preferNative: Boolean,
-): WebSocketClient = DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)
+): WebSocketClient =
+    throw UnsupportedOperationException(
+        "JVM/Android: Use allocate(transport, connectionOptions, ...) with a pre-connected WebSocketTransport",
+    )

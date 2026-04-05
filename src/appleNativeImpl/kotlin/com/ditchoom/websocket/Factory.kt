@@ -12,10 +12,7 @@ actual fun WebSocketClient.Companion.allocate(
     parentScope: CoroutineScope?,
     bufferFactory: BufferFactory,
     bufferPool: BufferPool?,
-    preferNative: Boolean,
 ): WebSocketClient =
-    if (preferNative) {
-        NativeWebSocketClientAdapter(connectionOptions, parentScope)
-    } else {
-        DefaultWebSocketClient(connectionOptions, parentScope, bufferFactory, externalPool = bufferPool)
-    }
+    throw UnsupportedOperationException(
+        "Apple: Use allocate(transport, connectionOptions, ...) with a pre-connected WebSocketTransport",
+    )

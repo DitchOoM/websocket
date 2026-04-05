@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.socket.ConnectionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
@@ -39,7 +38,7 @@ class PublicWssValidationTest {
     fun hivemqWssConnect() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "broker.hivemq.com",
                         port = 8884,
@@ -52,10 +51,7 @@ class PublicWssValidationTest {
             try {
                 ws.connect()
                 ws.awaitConnected()
-                assertTrue(
-                    ws.connectionState.value == ConnectionState.Connected,
-                    "Should be connected via WSS to HiveMQ",
-                )
+                // connect() succeeded without throwing — WSS connection is established
             } finally {
                 ws.close()
             }
@@ -67,7 +63,7 @@ class PublicWssValidationTest {
     fun mosquittoWssConnect() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "test.mosquitto.org",
                         port = 8081,
@@ -80,10 +76,7 @@ class PublicWssValidationTest {
             try {
                 ws.connect()
                 ws.awaitConnected()
-                assertTrue(
-                    ws.connectionState.value == ConnectionState.Connected,
-                    "Should be connected via WSS to Mosquitto",
-                )
+                // connect() succeeded without throwing — WSS connection is established
             } finally {
                 ws.close()
             }
@@ -95,7 +88,7 @@ class PublicWssValidationTest {
     fun echoWebsocketOrgText() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "echo.websocket.org",
                         port = 443,
@@ -124,7 +117,7 @@ class PublicWssValidationTest {
     fun echoWebsocketOrgBinary() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "echo.websocket.org",
                         port = 443,
@@ -155,7 +148,7 @@ class PublicWssValidationTest {
     fun websocketEchoDotComText() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "websocket-echo.com",
                         port = 443,
@@ -188,7 +181,7 @@ class PublicWssValidationTest {
     fun wssMultipleMessagesEcho() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "echo.websocket.org",
                         port = 443,
@@ -230,7 +223,7 @@ class PublicWssValidationTest {
     fun wssInterleavedTextAndBinary() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectWebSocket(
                     WebSocketConnectionOptions(
                         name = "echo.websocket.org",
                         port = 443,

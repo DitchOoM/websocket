@@ -10,7 +10,7 @@ import com.ditchoom.websocket.handshake.computeAcceptKey
  * Test helper for building mock WebSocket handshake responses.
  *
  * All buffer-building methods leave the buffer in WRITE mode (position at end of data)
- * because [MockClientToServerSocket.read] calls `resetForRead()` before copying to
+ * because [MockWebSocketTransport.read] calls `resetForRead()` before copying to
  * the caller's buffer. Calling `resetForRead()` twice would set limit=0.
  */
 object MockHandshakeHelper {

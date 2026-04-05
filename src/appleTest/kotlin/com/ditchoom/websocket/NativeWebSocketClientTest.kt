@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.socket.ConnectionState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -40,15 +39,11 @@ class NativeWebSocketClientTest {
                         websocketEndpoint = "/.ws",
                         connectionTimeout = 15.seconds,
                     ),
-                    preferNative = true,
                 )
             try {
                 ws.connect()
                 ws.awaitConnected()
-                assertTrue(
-                    ws.connectionState.value == ConnectionState.Connected,
-                    "Should be connected via native WSS",
-                )
+                // connect() succeeded without throwing — native WSS connection is established
 
                 // 1. Text echo
                 val textMsg = "ditchoom-native-text"
@@ -142,7 +137,6 @@ class NativeWebSocketClientTest {
                         tls = true,
                         connectionTimeout = 15.seconds,
                     ),
-                    preferNative = true,
                 )
             try {
                 ws.connect()
