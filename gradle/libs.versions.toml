@@ -25,7 +25,7 @@ buffer = { module = "com.ditchoom:buffer", version.ref = "buffer" }
 buffer-compression = { module = "com.ditchoom:buffer-compression", version.ref = "bufferCompression" }
 buffer-codec = { module = "com.ditchoom:buffer-codec", version.ref = "bufferCodec" }
 buffer-codec-processor = { module = "com.ditchoom:buffer-codec-processor", version.ref = "bufferCodec" }
-buffer-flow = { module = "com.ditchoom:buffer-flow", version.ref = "buffer" }
+buffer-flow = { module = "com.ditchoom:buffer-flow", version = "4.2.2-SNAPSHOT" }
 socket = { module = "com.ditchoom:socket", version.ref = "socket" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }

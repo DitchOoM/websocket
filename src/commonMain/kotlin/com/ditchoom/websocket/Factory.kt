@@ -2,13 +2,14 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.deterministic
+import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.pool.BufferPool
 import kotlinx.coroutines.CoroutineScope
 
 /**
  * Create a [DefaultWebSocketClient] for the given transport and connection options.
  *
- * The consumer must provide a pre-connected [WebSocketTransport]. The returned
+ * The consumer must provide a pre-connected [ByteStream]. The returned
  * client handles the HTTP upgrade handshake and WebSocket framing on top.
  *
  * @param transport A pre-connected byte transport (e.g. TCP socket).
@@ -18,7 +19,7 @@ import kotlinx.coroutines.CoroutineScope
  * @param bufferPool Optional buffer pool for memory reuse.
  */
 fun WebSocketClient.Companion.allocate(
-    transport: WebSocketTransport,
+    transport: ByteStream,
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
     bufferFactory: BufferFactory = BufferFactory.deterministic(),
@@ -37,7 +38,7 @@ fun WebSocketClient.Companion.allocate(
  *
  * On platforms with native WebSocket support (browser, Apple), this creates a
  * native client that handles transport internally. On other platforms (JVM, Linux),
- * this throws [UnsupportedOperationException] — use [allocate] with a [WebSocketTransport] instead.
+ * this throws [UnsupportedOperationException] — use [allocate] with a [ByteStream] instead.
  *
  * @param connectionOptions Connection configuration (host, port, TLS, compression, etc.)
  * @param parentScope Optional parent coroutine scope.

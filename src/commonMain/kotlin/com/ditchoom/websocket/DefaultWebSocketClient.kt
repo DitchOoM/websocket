@@ -12,6 +12,8 @@ import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.deterministic
+import com.ditchoom.buffer.flow.ByteStream
+import com.ditchoom.buffer.flow.ReadResult
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.pool.BufferPool
@@ -54,11 +56,11 @@ import kotlin.coroutines.coroutineContext
  * - [MessageAssembler] for fragmented message reassembly
  * - [HandshakeRequest]/[HandshakeResponseParser]/[HandshakeValidator] for connection setup
  *
- * The consumer provides a pre-connected [WebSocketTransport] (e.g. TCP socket).
+ * The consumer provides a pre-connected [ByteStream] (e.g. TCP socket).
  * This client handles the HTTP upgrade handshake and WebSocket framing on top.
  */
 class DefaultWebSocketClient(
-    private val transport: WebSocketTransport,
+    private val transport: ByteStream,
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
     private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
@@ -113,7 +115,7 @@ class DefaultWebSocketClient(
     private var serverInitiatedClose = false
     private var clientKey: String = ""
 
-    fun isOpen() = !closed && transport.isOpen()
+    fun isOpen() = !closed && transport.isOpen
 
     override suspend fun connect(): WebSocketClient {
         if (connected || closed) return this
@@ -153,27 +155,15 @@ class DefaultWebSocketClient(
             transport.write(requestBuffer, connectionOptions.writeTimeout)
 
             // Build auto-filling stream processor.
-            // This replaces the manual readIntoProcessor + ensureAvailable pattern.
-            // Peek/read operations automatically read from the socket when more data is needed.
+            // Peek/read operations automatically read from the transport when more data is needed.
             val autoFillingStream =
                 StreamProcessor
                     .builder(pool)
                     .buildSuspendingWithAutoFill { stream ->
-                        val buffer = pool.acquire(readBufferSize)
-                        try {
-                            val bytesRead = transport.read(buffer, connectionOptions.readTimeout)
-                            if (bytesRead <= 0) {
-                                buffer.freeIfNeeded()
-                                throw EndOfStreamException()
-                            }
-                            buffer.setLimit(buffer.position())
-                            buffer.position(0)
-                            stream.append(buffer)
-                        } catch (e: EndOfStreamException) {
-                            throw e
-                        } catch (e: Exception) {
-                            buffer.freeIfNeeded()
-                            throw e
+                        when (val result = transport.read(connectionOptions.readTimeout)) {
+                            is ReadResult.Data -> stream.append(result.buffer)
+                            is ReadResult.End -> throw EndOfStreamException()
+                            is ReadResult.Reset -> throw EndOfStreamException("Connection reset")
                         }
                     }
 
