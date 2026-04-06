@@ -81,6 +81,12 @@ class DefaultWebSocketClient(
     // Can still be cancelled independently via close().
     private val clientJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
 
+    init {
+        // Sync closed flag when the job completes for any reason
+        // (parent cancellation, explicit close, failure).
+        clientJob.invokeOnCompletion { closed = true }
+    }
+
     internal val scope: CoroutineScope =
         CoroutineScope(
             (parentScope?.coroutineContext ?: Dispatchers.Default) +
@@ -91,6 +97,8 @@ class DefaultWebSocketClient(
         )
 
     override val id: Long = 0L
+
+    @Volatile
     private var closed = false
     private var connected = false
 

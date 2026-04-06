@@ -135,12 +135,8 @@ class TimingProfilingTest {
                     websocketEndpoint = "/runCase?case=302&agent=${agentName()}",
                     requestCompression = true,
                 )
-            val ws = connectWebSocket(connectionOptions, parentScope = this, bufferFactory = BufferFactory.managed())
-
-            // Connect
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions, bufferFactory = BufferFactory.managed())
 
             var writeTotal = Duration.ZERO
             var readTotal = Duration.ZERO
@@ -193,11 +189,8 @@ class TimingProfilingTest {
                     websocketEndpoint = "/runCase?case=302&agent=${agentName()}",
                     requestCompression = false, // NO compression
                 )
-            val ws = connectWebSocket(connectionOptions, parentScope = this, bufferFactory = BufferFactory.managed())
-
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions, bufferFactory = BufferFactory.managed())
 
             var writeTotal = Duration.ZERO
 

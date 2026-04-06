@@ -22,7 +22,7 @@ actual fun WebSocketClient.Companion.allocate(
 ): WebSocketClient =
     if (isNodeJs) {
         throw UnsupportedOperationException(
-            "Node.js: Use allocate(transport, connectionOptions, ...) with a pre-connected WebSocketTransport",
+            "Node.js: Use connectWebSocket(transport, options) with a pre-connected ByteStream",
         )
     } else {
         val useSharedMemory = bufferFactory == BufferFactory.shared()

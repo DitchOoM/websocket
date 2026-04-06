@@ -40,9 +40,7 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = connectWebSocket(connectionOptions, bufferFactory = BufferFactory.managed())
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions, bufferFactory = BufferFactory.managed())
 
             // Force GC before measurement
             forceGc()
@@ -88,9 +86,7 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = connectWebSocket(connectionOptions)
-                ws.connect()
-                ws.awaitConnected()
+                val ws = connectForTest(connectionOptions)
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
             }
@@ -203,9 +199,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = connectWebSocket(connectionOptions, bufferFactory = factory)
-        ws.connect()
-        ws.awaitConnected()
+        val ws = connectForTest(connectionOptions, bufferFactory = factory)
         val connectTime = connectMark.elapsedNow()
 
         // Echo loop - measure write and read separately

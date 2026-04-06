@@ -961,14 +961,11 @@ class DefaultWebSocketClientMockTest {
             // Cancel the PARENT scope — structured concurrency should propagate
             parentJob.cancel()
 
-            // The client's read loop should terminate because its Job is a child of parentJob.
-            // The receive flow should complete.
-            val messages =
-                withTimeout(5.seconds) {
-                    client.receive().toList()
-                }
-            // Flow completes (may be empty or have some messages depending on timing)
-            // The key assertion is that it doesn't hang
+            // Give the read loop's finally block time to close the channel
+            delay(100)
+
+            // The client should no longer be open
+            assertTrue(!client.isOpen(), "Client should be closed after parent cancellation")
         }
 
     @Test

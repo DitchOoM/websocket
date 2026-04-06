@@ -20,13 +20,10 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                connectWebSocket(
+                connectForTest(
                     connectionOptions,
-                    parentScope = this,
                     bufferFactory = BufferFactory.shared(),
                 )
-            websocket.connect()
-            websocket.awaitConnected()
             val string1 = "test"
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string1)) }
             val dataRead = websocket.receive().first() as WebSocketMessage.Text
@@ -43,12 +40,10 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                connectWebSocket(
+                connectForTest(
                     connectionOptions,
-                    parentScope = this,
                     bufferFactory = BufferFactory.shared(),
                 )
-            websocket.connect()
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }
             val firstBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayload(firstBuffer.value)
@@ -63,22 +58,18 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                connectWebSocket(
+                connectForTest(
                     connectionOptions,
-                    parentScope = this,
                     bufferFactory = BufferFactory.shared(),
                 )
-            websocket.connect()
-            if (websocket.isPingSupported()) {
-                val payload = createPayload()
-                launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
-                val pong =
-                    withTimeout(10.seconds) {
-                        val p = websocket.receive().first() as? WebSocketMessage.Pong
-                        assertNotNull(p)
-                    }
-                validatePayload(pong.value)
-            }
+            val payload = createPayload()
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
+            val pong =
+                withTimeout(10.seconds) {
+                    val p = websocket.receive().first() as? WebSocketMessage.Pong
+                    assertNotNull(p)
+                }
+            validatePayload(pong.value)
             websocket.close()
         }
 
@@ -87,12 +78,10 @@ class WebSocketTests {
         runTestNoTimeSkipping {
             val connectionOptions = WebSocketConnectionOptions(name = "127.0.0.1", port = 8081, websocketEndpoint = "/echo")
             val websocket =
-                connectWebSocket(
+                connectForTest(
                     connectionOptions,
-                    parentScope = this,
                     bufferFactory = BufferFactory.shared(),
                 )
-            websocket.connect()
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }
             val firstBuffer = websocket.receive().first() as WebSocketMessage.Binary
             validatePayload(firstBuffer.value)
@@ -101,16 +90,14 @@ class WebSocketTests {
             val dataRead = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string1, dataRead.value)
 
-            if (websocket.isPingSupported()) {
-                val payload = createPayload()
-                launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
-                val pong =
-                    withTimeout(10.seconds) {
-                        val p = websocket.receive().first() as? WebSocketMessage.Pong
-                        assertNotNull(p)
-                    }
-                validatePayload(pong.value)
-            }
+            val payload = createPayload()
+            launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping(payload)) }
+            val pong =
+                withTimeout(10.seconds) {
+                    val p = websocket.receive().first() as? WebSocketMessage.Pong
+                    assertNotNull(p)
+                }
+            validatePayload(pong.value)
 
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayloadReverse())) }
             val secondBuffer = websocket.receive().first() as WebSocketMessage.Binary

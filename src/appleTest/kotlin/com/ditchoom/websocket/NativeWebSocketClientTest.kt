@@ -42,7 +42,6 @@ class NativeWebSocketClientTest {
                 )
             try {
                 ws.connect()
-                ws.awaitConnected()
                 // connect() succeeded without throwing — native WSS connection is established
 
                 // 1. Text echo
@@ -140,7 +139,6 @@ class NativeWebSocketClientTest {
                 )
             try {
                 ws.connect()
-                ws.awaitConnected()
                 val message = "ditchoom-native-echo-test"
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =

@@ -5,10 +5,10 @@ import autobahnHost
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
 import com.ditchoom.socket.SocketOptions
-import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -20,43 +20,32 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 /**
- * Await connection by verifying that connect() completes without error.
- * If connect() throws, the error propagates to the caller.
- */
-internal suspend fun WebSocketClient.awaitConnected() {
-    // connect() is now a suspend function that throws on failure.
-    // This function exists as a no-op compatibility bridge.
-}
-
-/**
- * Creates and connects a [WebSocketClient] backed by a real TCP socket.
+ * Creates and connects a WebSocket backed by a real TCP socket.
  *
- * Opens a TCP connection via [SocketTransportAdapter], then creates a
- * [DefaultWebSocketClient] on top.  This is the integration-test equivalent
- * of the old `WebSocketClient.allocate(connectionOptions)` factory.
+ * Opens a TCP connection via [SocketTransportAdapter], performs the HTTP
+ * upgrade handshake via the production [connectWebSocket] factory, and
+ * returns a ready-to-use [Connection].
  */
-internal suspend fun connectWebSocket(
+internal suspend fun connectForTest(
     connectionOptions: WebSocketConnectionOptions,
-    parentScope: CoroutineScope? = null,
     bufferFactory: BufferFactory = BufferFactory.Default,
-): WebSocketClient {
+): Connection<WebSocketMessage> {
     val socketOptions =
         if (connectionOptions.tls) {
             SocketOptions.tlsDefault()
         } else {
             SocketOptions.LOW_LATENCY
         }
-    val adapter =
+    val transport =
         SocketTransportAdapter.connect(
             port = connectionOptions.port,
             timeout = connectionOptions.connectionTimeout,
             hostname = connectionOptions.name,
             socketOptions = socketOptions,
         )
-    return DefaultWebSocketClient(
-        transport = adapter,
+    return connectWebSocket(
+        transport = transport,
         connectionOptions = connectionOptions,
-        parentScope = parentScope,
         bufferFactory = bufferFactory,
     )
 }
@@ -65,7 +54,7 @@ internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
     awaitClose: Boolean = true,
-): WebSocketClient {
+): Connection<WebSocketMessage> {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
@@ -74,12 +63,9 @@ internal suspend fun CoroutineScope.prepareConnection(
             requestCompression = requestCompression,
         )
     val websocket =
-        connectWebSocket(
+        connectForTest(
             connectionOptions,
-            parentScope = this + CoroutineName(case.toString()),
         )
-    websocket.connect()
-    websocket.awaitConnected()
 
     if (awaitClose) {
         // Wait for the receive flow to complete (server closes the connection)
@@ -117,13 +103,10 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
-        connectWebSocket(
+        connectForTest(
             connectionOptions,
-            parentScope = this,
             bufferFactory = factory,
         )
-    ws.connect()
-    ws.awaitConnected()
     val connectTime = mark.elapsedNow()
     try {
         var msgIdx = 0
@@ -178,13 +161,10 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
-        connectWebSocket(
+        connectForTest(
             connectionOptions,
-            parentScope = this + CoroutineName(case.toString()),
             bufferFactory = factory,
         )
-    ws.connect()
-    ws.awaitConnected()
     val connectTime = mark.elapsedNow()
     try {
         ws.receive().filter { it is WebSocketMessage.Binary }.take(count).collect {
@@ -227,12 +207,9 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
             requestCompression = requestCompression,
         )
     val ws =
-        connectWebSocket(
+        connectForTest(
             connectionOptions,
-            parentScope = this + CoroutineName(case.toString()),
         )
-    ws.connect()
-    ws.awaitConnected()
     try {
         val msg = ws.receive().first { it is WebSocketMessage.Text } as WebSocketMessage.Text
         ws.send(WebSocketMessage.Text(msg.value))
@@ -249,7 +226,7 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     }
 }
 
-internal suspend fun closeConnection(websocket: WebSocketClient) {
+internal suspend fun closeConnection(websocket: Connection<WebSocketMessage>) {
     // Give the read loop a chance to detect any protocol errors
     // before explicitly closing. This allows proper close codes to be sent.
     kotlinx.coroutines.delay(100)
@@ -261,7 +238,7 @@ internal suspend fun closeConnection(websocket: WebSocketClient) {
 }
 
 internal suspend fun sendMessageWithPayloadLengthOf(
-    websocket: WebSocketClient,
+    websocket: Connection<WebSocketMessage>,
     length: Int,
 ) {
     val string =
@@ -278,7 +255,7 @@ internal suspend fun sendMessageWithPayloadLengthOf(
 }
 
 internal suspend fun sendBinaryWithPayloadLengthOf(
-    websocket: WebSocketClient,
+    websocket: Connection<WebSocketMessage>,
     length: Int,
 ) {
     val binary =
