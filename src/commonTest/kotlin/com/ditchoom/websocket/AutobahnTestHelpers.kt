@@ -8,6 +8,8 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
+import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.withPooling
 import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.transport.TcpTransport
@@ -38,6 +40,7 @@ internal suspend fun connectForTest(
         } else {
             SocketOptions.LOW_LATENCY
         }
+    val pool = BufferPool()
     val transport =
         TcpTransport().connect(
             hostname = connectionOptions.name,
@@ -45,6 +48,7 @@ internal suspend fun connectForTest(
             options = ConnectionOptions(
                 socketOptions = socketOptions,
                 connectionTimeout = connectionOptions.connectionTimeout,
+                bufferFactory = bufferFactory.withPooling(pool),
             ),
         )
     return connectWebSocket(
