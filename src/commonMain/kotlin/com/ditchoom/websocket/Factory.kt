@@ -45,21 +45,16 @@ suspend fun connectWebSocket(
 }
 
 /**
- * Create a platform-specific [WebSocketClient] for the given connection options.
+ * Create a platform-native WebSocket connection.
  *
- * On platforms with native WebSocket support (browser, Apple), this creates a
- * native client that handles transport internally. On other platforms (JVM, Linux),
- * this throws [UnsupportedOperationException] — use [connectWebSocket] with a
- * [ByteStream] instead.
- *
- * @param connectionOptions Connection configuration (host, port, TLS, compression, etc.)
- * @param parentScope Optional parent coroutine scope.
- * @param bufferFactory Buffer factory for frame I/O allocations.
- * @param bufferPool Optional buffer pool for memory reuse.
+ * On platforms with native WebSocket support (browser), this creates a
+ * native client that handles transport internally. On other platforms
+ * (JVM, Linux, Apple native), this throws [UnsupportedOperationException] —
+ * use [connectWebSocket] with a [ByteStream] instead.
  */
-expect fun WebSocketClient.Companion.allocate(
+expect suspend fun connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
     bufferFactory: BufferFactory = BufferFactory.deterministic(),
     bufferPool: BufferPool? = null,
-): WebSocketClient
+): Connection<WebSocketMessage>

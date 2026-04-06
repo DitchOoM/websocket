@@ -31,7 +31,7 @@ class NativeWebSocketClientTest {
     fun nativeWssComprehensiveEcho() =
         runTestNoTimeSkipping(timeout = 60.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectNativeWebSocket(
                     WebSocketConnectionOptions(
                         name = "echo.websocket.org",
                         port = 443,
@@ -41,7 +41,6 @@ class NativeWebSocketClientTest {
                     ),
                 )
             try {
-                ws.connect()
                 // connect() succeeded without throwing — native WSS connection is established
 
                 // 1. Text echo
@@ -109,7 +108,6 @@ class NativeWebSocketClientTest {
                 assertTrue(gotBinary, "Should receive interleaved binary echo")
 
                 // 5. Ping/pong
-                assertTrue(ws.isPingSupported(), "Native client should support ping")
                 val pingPayload = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4))
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Ping(pingPayload)) }
                 val pong =
@@ -129,7 +127,7 @@ class NativeWebSocketClientTest {
     fun nativeWebsocketEchoDotComText() =
         runTestNoTimeSkipping(timeout = 30.seconds) {
             val ws =
-                WebSocketClient.allocate(
+                connectNativeWebSocket(
                     WebSocketConnectionOptions(
                         name = "websocket-echo.com",
                         port = 443,
@@ -138,7 +136,6 @@ class NativeWebSocketClientTest {
                     ),
                 )
             try {
-                ws.connect()
                 val message = "ditchoom-native-echo-test"
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =

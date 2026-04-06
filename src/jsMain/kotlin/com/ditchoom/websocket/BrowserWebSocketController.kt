@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.JsBuffer
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.pool.BufferPool
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CompletableDeferred
@@ -25,7 +26,7 @@ class BrowserWebSocketController(
     private val pool: BufferPool,
     parentScope: CoroutineScope?,
     private val useSharedMemory: Boolean = false,
-) : WebSocketClient {
+) : Connection<WebSocketMessage> {
     private val scope =
         if (parentScope == null) {
             CoroutineScope(
@@ -64,7 +65,7 @@ class BrowserWebSocketController(
         webSocket.binaryType = BinaryType.ARRAYBUFFER
     }
 
-    override suspend fun connect(): WebSocketClient {
+    internal suspend fun connect() {
         webSocket.onclose = {
             val closeEvent = it as CloseEvent
             val code = closeEvent.code.toUShort()
@@ -136,7 +137,6 @@ class BrowserWebSocketController(
         withTimeout(connectionOptions.connectionTimeout) {
             connectDeferred.await()
         }
-        return this
     }
 
     override suspend fun send(message: WebSocketMessage) {
@@ -160,8 +160,6 @@ class BrowserWebSocketController(
             is WebSocketMessage.Close -> webSocket.close()
         }
     }
-
-    override suspend fun isPingSupported(): Boolean = false
 
     override suspend fun close() {
         closeInternal()

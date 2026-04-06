@@ -1,5 +1,6 @@
 package com.ditchoom.websocket
 
+import kotlin.concurrent.Volatile
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.ReadBuffer
@@ -13,6 +14,7 @@ import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.flow.ByteStream
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadResult
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
@@ -59,14 +61,14 @@ import kotlin.coroutines.coroutineContext
  * The consumer provides a pre-connected [ByteStream] (e.g. TCP socket).
  * This client handles the HTTP upgrade handshake and WebSocket framing on top.
  */
-class DefaultWebSocketClient(
+internal class DefaultWebSocketClient(
     private val transport: ByteStream,
     private val connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
     private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
     private val readBufferSize: Int = DEFAULT_READ_BUFFER_SIZE,
     externalPool: BufferPool? = null,
-) : WebSocketClient {
+) : Connection<WebSocketMessage> {
     // Lock-free pool for thread-safe buffer reuse across read loop and caller coroutines.
     // Must be multi-threaded: the read loop runs on Dispatchers.Default while
     // write()/close() are called from the caller's coroutine context.
@@ -125,7 +127,7 @@ class DefaultWebSocketClient(
 
     fun isOpen() = !closed && transport.isOpen
 
-    override suspend fun connect(): WebSocketClient {
+    suspend fun connect(): Connection<WebSocketMessage> {
         if (connected || closed) return this
 
         try {

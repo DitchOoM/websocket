@@ -2,6 +2,7 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.managed
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,7 +58,7 @@ class DefaultWebSocketClientMockTest {
     private suspend fun connectWithHandshake(
         client: DefaultWebSocketClient,
         mockTransport: MockWebSocketTransport,
-    ): DefaultWebSocketClient {
+    ): Connection<WebSocketMessage> {
         val connectJob =
             CoroutineScope(Dispatchers.Default).async {
                 client.connect()
