@@ -202,10 +202,8 @@ tasks.withType<Test>().configureEach {
         profilingTestPatterns.forEach { excludeTestsMatching(it) }
     }
     if (runIntegrationTests) {
-        // Stress tests with 1MB+ compressed payloads need adequate heap.
-        // Direct memory for pooled NIO buffers across 517 Autobahn cases.
+        // Stress tests with 1MB+ compressed payloads need adequate heap
         maxHeapSize = "1g"
-        jvmArgs("-XX:MaxDirectMemorySize=2g")
     } else {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
