@@ -277,7 +277,9 @@ class DefaultWebSocketClient(
                 continue
             }
 
-            // Read available data for parsing
+            // Copy available data for header-end detection without consuming.
+            // This is O(n²) from peekByte per byte, but the handshake response
+            // is typically ~200 bytes — negligible one-time cost at connect.
             val buffer = pool.acquire(available)
             for (i in 0 until available) {
                 buffer.writeByte(processor.peekByte(i))
