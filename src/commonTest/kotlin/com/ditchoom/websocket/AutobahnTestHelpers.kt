@@ -8,7 +8,9 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
+import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.SocketOptions
+import com.ditchoom.socket.transport.TcpTransport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -22,9 +24,9 @@ import kotlin.time.TimeSource
 /**
  * Creates and connects a WebSocket backed by a real TCP socket.
  *
- * Opens a TCP connection via [SocketTransportAdapter], performs the HTTP
- * upgrade handshake via the production [connectWebSocket] factory, and
- * returns a ready-to-use [Connection].
+ * Uses [TcpTransport] from the socket library (test dependency) to open
+ * a TCP connection, then performs the HTTP upgrade handshake via the
+ * production [connectWebSocket] factory.
  */
 internal suspend fun connectForTest(
     connectionOptions: WebSocketConnectionOptions,
@@ -37,11 +39,13 @@ internal suspend fun connectForTest(
             SocketOptions.LOW_LATENCY
         }
     val transport =
-        SocketTransportAdapter.connect(
-            port = connectionOptions.port,
-            timeout = connectionOptions.connectionTimeout,
+        TcpTransport().connect(
             hostname = connectionOptions.name,
-            socketOptions = socketOptions,
+            port = connectionOptions.port,
+            options = ConnectionOptions(
+                socketOptions = socketOptions,
+                connectionTimeout = connectionOptions.connectionTimeout,
+            ),
         )
     return connectWebSocket(
         transport = transport,
