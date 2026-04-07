@@ -48,8 +48,6 @@ internal suspend fun connectForTest(
                 ConnectionOptions(
                     socketOptions = socketOptions,
                     connectionTimeout = connectionOptions.connectionTimeout,
-                    bufferFactory = BufferFactory.managed(),
-                    threadingMode = ThreadingMode.MultiThreaded,
                 ),
             ),
         )
