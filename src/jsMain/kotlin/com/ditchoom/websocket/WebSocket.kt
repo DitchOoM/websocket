@@ -7,7 +7,7 @@ import com.ditchoom.buffer.shared
 import kotlinx.coroutines.CoroutineScope
 
 internal actual val supportsCustomDeflateWindowBits: Boolean = false
-internal actual val supportsDeflateContextTakeover: Boolean = false
+internal actual val supportsDeflateContextTakeover: Boolean = true
 
 /**
  * Detect whether we're running in Node.js (vs. browser).
