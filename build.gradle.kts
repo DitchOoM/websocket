@@ -237,6 +237,16 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
         this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
         // Browser WebSocket API controls close frame behavior; can't handle invalid close codes correctly (7.9.x)
         this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase7CloseTests")
+        // SharedArrayBuffer-backed views rejected by multiple Chrome APIs (TextDecoder, structured clone, etc.)
+        // Needs buffer library fix: copy to regular ArrayBuffer at API boundaries
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat1SharedTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat2SharedTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat4SharedTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat5SharedTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat6SharedTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat7SharedTest")
+        // Browser has no sync streaming compression — buffer library throws on StreamingCompressor.create()
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat9*")
     }
 }
 
