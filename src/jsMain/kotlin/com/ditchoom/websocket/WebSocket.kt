@@ -6,7 +6,7 @@ import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.shared
 import kotlinx.coroutines.CoroutineScope
 
-internal actual val supportsCustomDeflateWindowBits: Boolean = false
+internal actual val supportsCustomDeflateWindowBits: Boolean = true
 internal actual val supportsDeflateContextTakeover: Boolean = true
 
 /**
