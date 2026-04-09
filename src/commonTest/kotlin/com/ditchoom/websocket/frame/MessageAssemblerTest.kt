@@ -147,7 +147,7 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(pingFrame("ping"))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Ping, result.frame.opcode)
+        assertEquals(Opcode.Ping, result.frame.header.byte1.opcode)
     }
 
     @Test
@@ -170,7 +170,7 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(pongFrame("pong"))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Pong, result.frame.opcode)
+        assertEquals(Opcode.Pong, result.frame.header.byte1.opcode)
     }
 
     @Test
@@ -179,7 +179,7 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(closeFrame(CloseCode.NORMAL))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Close, result.frame.opcode)
+        assertEquals(Opcode.Close, result.frame.header.byte1.opcode)
     }
 
     @Test
@@ -279,8 +279,8 @@ class MessageAssemblerTest {
         assertIs<AssemblyResult.CompleteMessage>(result)
         // Multi-fragment: combineBuffers() copies data, originals need cleanup
         assertEquals(2, result.fragmentsToClose.size)
-        assertTrue(result.fragmentsToClose[0] === frag1.payload, "Should be same buffer object")
-        assertTrue(result.fragmentsToClose[1] === frag2.payload, "Should be same buffer object")
+        assertTrue(result.fragmentsToClose[0] === (frag1 as WsFrame.Text<*>).payload, "Should be same buffer object")
+        assertTrue(result.fragmentsToClose[1] === (frag2 as WsFrame.Continuation<*>).payload, "Should be same buffer object")
     }
 
     @Test
@@ -414,15 +414,21 @@ class MessageAssemblerTest {
         buf2.setLimit(buf2.position() + 5)
 
         val frag1 =
-            ParsedFrame.DataFrame.Text(
-                header1 = FrameHeaderByte1.pack(fin = false, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Text),
-                payloadLength = buf1.remaining(),
+            WsFrame.Text(
+                header = WsFrameHeader.build(
+                    byte1 = FrameHeaderByte1.pack(fin = false, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Text),
+                    payloadSize = buf1.remaining().toLong(),
+                    masked = false,
+                ),
                 payload = buf1,
             )
         val frag2 =
-            ParsedFrame.DataFrame.Continuation(
-                header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
-                payloadLength = buf2.remaining(),
+            WsFrame.Continuation(
+                header = WsFrameHeader.build(
+                    byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
+                    payloadSize = buf2.remaining().toLong(),
+                    masked = false,
+                ),
                 payload = buf2,
             )
 
@@ -447,11 +453,14 @@ class MessageAssemblerTest {
         rsv1: Boolean = false,
         rsv2: Boolean = false,
         rsv3: Boolean = false,
-    ): ParsedFrame.DataFrame.Text {
+    ): WsFrame.Text<ReadBuffer> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.DataFrame.Text(
-            header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2, rsv3, Opcode.Text),
-            payloadLength = buffer.remaining(),
+        return WsFrame.Text(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2, rsv3, Opcode.Text),
+                payloadSize = buffer.remaining().toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }
@@ -463,7 +472,7 @@ class MessageAssemblerTest {
         byteCount: Int,
         fin: Boolean = true,
         rsv1: Boolean = false,
-    ): ParsedFrame.DataFrame.Binary {
+    ): WsFrame.Binary<ReadBuffer> {
         val buffer =
             if (byteCount == 0) {
                 ReadBuffer.EMPTY_BUFFER
@@ -473,9 +482,12 @@ class MessageAssemblerTest {
                     resetForRead()
                 }
             }
-        return ParsedFrame.DataFrame.Binary(
-            header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, Opcode.Binary),
-            payloadLength = byteCount,
+        return WsFrame.Binary(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, Opcode.Binary),
+                payloadSize = byteCount.toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }
@@ -486,11 +498,14 @@ class MessageAssemblerTest {
     private fun continuationFrame(
         text: String,
         fin: Boolean = true,
-    ): ParsedFrame.DataFrame.Continuation {
+    ): WsFrame.Continuation<ReadBuffer> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.DataFrame.Continuation(
-            header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
-            payloadLength = buffer.remaining(),
+        return WsFrame.Continuation(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
+                payloadSize = buffer.remaining().toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }
@@ -501,11 +516,14 @@ class MessageAssemblerTest {
     private fun pingFrame(
         text: String = "",
         fin: Boolean = true,
-    ): ParsedFrame.ControlFrame.Ping {
+    ): WsFrame.Ping<ReadBuffer> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.ControlFrame.Ping(
-            header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            payloadLength = buffer.remaining(),
+        return WsFrame.Ping(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
+                payloadSize = buffer.remaining().toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }
@@ -513,11 +531,14 @@ class MessageAssemblerTest {
     /**
      * Creates a pong frame.
      */
-    private fun pongFrame(text: String = ""): ParsedFrame.ControlFrame.Pong {
+    private fun pongFrame(text: String = ""): WsFrame.Pong<ReadBuffer> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.ControlFrame.Pong(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Pong),
-            payloadLength = buffer.remaining(),
+        return WsFrame.Pong(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Pong),
+                payloadSize = buffer.remaining().toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }
@@ -525,33 +546,32 @@ class MessageAssemblerTest {
     /**
      * Creates a close frame using CloseCode value class.
      */
-    private fun closeFrame(code: CloseCode = CloseCode.NORMAL): ParsedFrame.ControlFrame.Close {
-        val buffer =
-            BufferFactory.Default.allocate(2).apply {
-                writeUShort(code.code)
-                resetForRead()
-            }
-        return ParsedFrame.ControlFrame.Close(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Close),
-            payloadLength = 2,
-            payload = buffer,
-            closeCode = code,
-            closeReason = "",
+    private fun closeFrame(code: CloseCode = CloseCode.NORMAL): WsFrame.Close {
+        return WsFrame.Close(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Close),
+                payloadSize = 2,
+                masked = false,
+            ),
+            body = WsCloseBody(code, ""),
         )
     }
 
     /**
      * Creates an oversized control frame for error testing.
      */
-    private fun oversizedPingFrame(byteCount: Int): ParsedFrame.ControlFrame.Ping {
+    private fun oversizedPingFrame(byteCount: Int): WsFrame.Ping<ReadBuffer> {
         val buffer =
             BufferFactory.Default.allocate(byteCount).apply {
                 repeat(byteCount) { writeByte(0x00) }
                 resetForRead()
             }
-        return ParsedFrame.ControlFrame.Ping(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            payloadLength = byteCount,
+        return WsFrame.Ping(
+            header = WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
+                payloadSize = byteCount.toLong(),
+                masked = false,
+            ),
             payload = buffer,
         )
     }

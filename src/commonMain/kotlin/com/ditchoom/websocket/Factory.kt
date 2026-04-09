@@ -14,7 +14,6 @@ import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
-import com.ditchoom.websocket.frame.FrameWriter
 import com.ditchoom.websocket.handshake.HandshakeException
 import com.ditchoom.websocket.handshake.HandshakeRequest
 import com.ditchoom.websocket.handshake.HandshakeResponseParser
@@ -29,19 +28,6 @@ import kotlinx.coroutines.CoroutineScope
  *
  * Performs the HTTP upgrade handshake, negotiates permessage-deflate compression,
  * and assembles a [WebSocketCodec] from composable components.
- *
- * ```kotlin
- * val ws: Connection<WebSocketMessage> = connectWebSocket(transport, options)
- * ws.send(WebSocketMessage.Text("hello")) // guaranteed connected
- * ```
- *
- * @param transport A pre-connected byte transport (e.g. TCP socket).
- * @param connectionOptions Connection configuration (host, compression, etc.)
- * @param parentScope Optional parent coroutine scope for structured concurrency.
- * @param bufferFactory Buffer factory for frame I/O allocations.
- * @param bufferPool Optional buffer pool for memory reuse.
- * @throws WebSocketException.HandshakeRejected if the server rejects the upgrade.
- * @throws WebSocketException.TransportFailed if the transport fails during handshake.
  */
 suspend fun connectWebSocket(
     transport: ByteStream,
@@ -79,7 +65,6 @@ suspend fun connectWebSocket(
         transport.write(requestBuffer, connectionOptions.writeTimeout)
 
         // Build auto-filling stream processor
-        // StreamProcessor.builder requires a BufferPool; if the factory is already a pool, use it directly
         val pool =
             bufferFactory as? com.ditchoom.buffer.pool.BufferPool
                 ?: com.ditchoom.buffer.pool.BufferPool(factory = bufferFactory)
@@ -110,33 +95,24 @@ suspend fun connectWebSocket(
 
         when (validationResult) {
             is ValidationResult.Success -> {
-                // Build compression config from negotiation result
                 val compression = buildCompressionConfig(response, connectionOptions, bufferFactory)
 
-                // Initialize frame writer
                 val outgoingEnabled = compression is CompressionConfig.Enabled && compression.compressor != null
                 val clientNoCtx =
                     if (compression is CompressionConfig.Enabled) compression.clientNoContextTakeover else false
-                val frameWriter =
-                    FrameWriter(
-                        compressor = (compression as? CompressionConfig.Enabled)?.compressor,
-                        compressionEnabled = outgoingEnabled,
-                        clientMode = true,
-                        bufferFactory = bufferFactory,
-                        resetCompressorPerMessage = clientNoCtx,
-                    )
 
-                // Assemble and start the codec connection
                 val codec =
                     WebSocketCodec(
                         transport = transport,
-                        frameWriter = frameWriter,
                         stream = autoFillingStream,
                         compression = compression,
                         bufferFactory = bufferFactory,
                         readTimeout = connectionOptions.readTimeout,
                         writeTimeout = connectionOptions.writeTimeout,
                         parentScope = parentScope,
+                        compressor = (compression as? CompressionConfig.Enabled)?.compressor,
+                        compressionEnabled = outgoingEnabled,
+                        resetCompressorPerMessage = clientNoCtx,
                     )
                 codec.startReadLoop()
                 return codec
@@ -182,8 +158,6 @@ private fun buildCompressionConfig(
         StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory = bufferFactory)
 
     val serverNoContextTakeover = response.compressionParams?.serverNoContextTakeover ?: false
-    // client_no_context_takeover is a unilateral client promise (RFC 7692 Section 7.1.1.2):
-    // honor it regardless of whether the server echoes it.
     val clientNoContextTakeover =
         connectionOptions.compressionOptions.clientNoContextTakeover ||
             (response.compressionParams?.clientNoContextTakeover ?: false)
@@ -248,11 +222,6 @@ internal fun wrapException(e: Exception): Exception =
 
 /**
  * Create a platform-native WebSocket connection.
- *
- * On platforms with native WebSocket support (browser), this creates a
- * native client that handles transport internally. On other platforms
- * (JVM, Linux, Apple native), this throws [UnsupportedOperationException] —
- * use [connectWebSocket] with a [ByteStream] instead.
  */
 expect suspend fun connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,

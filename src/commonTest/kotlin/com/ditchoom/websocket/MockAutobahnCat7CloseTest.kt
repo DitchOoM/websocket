@@ -144,7 +144,7 @@ abstract class AbstractMockAutobahnCat7Test {
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrameRaw(payload))
 
             val messages = withTimeout(5.seconds) { connection.receive().toList() }
-            // FrameReader catches this and returns a Close with PROTOCOL_ERROR code
+            // WsFrameCodec catches this and returns a Close with PROTOCOL_ERROR code
             assertIs<WebSocketMessage.Close>(messages.first())
             connection.close()
         }
