@@ -22,7 +22,6 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat7Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     // ========================================================================
     // Valid close codes
@@ -31,18 +30,17 @@ abstract class AbstractMockAutobahnCat7Test {
     private fun testValidClose(code: UShort) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(code))
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Close>(msg)
             assertEquals(code, msg.code)
-            client.close()
+            connection.close()
         }
 
     @Test fun closeNormal1000() = testValidClose(1000u)
@@ -79,8 +77,7 @@ abstract class AbstractMockAutobahnCat7Test {
     fun closeEmptyPayload() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Close frame with no payload (no status code)
             val empty = BufferFactory.Default.allocate(0); empty.resetForRead()
@@ -88,36 +85,34 @@ abstract class AbstractMockAutobahnCat7Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Close>(msg)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun closeWithReasonString() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u, "normal closure"))
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Close>(msg)
             assertEquals(1000.toUShort(), msg.code)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun close125BytePayload() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // 2 bytes code + 123 bytes reason = 125 bytes total (max for control frame)
             val reason = "A".repeat(123)
@@ -125,11 +120,11 @@ abstract class AbstractMockAutobahnCat7Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Close>(msg)
             assertEquals(1000.toUShort(), msg.code)
-            client.close()
+            connection.close()
         }
 
     // ========================================================================
@@ -140,8 +135,7 @@ abstract class AbstractMockAutobahnCat7Test {
     fun close1BytePayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // 1-byte close payload is invalid (code requires 2 bytes)
             val payload = BufferFactory.Default.allocate(1)
@@ -149,18 +143,17 @@ abstract class AbstractMockAutobahnCat7Test {
             payload.resetForRead()
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrameRaw(payload))
 
-            val messages = withTimeout(5.seconds) { client.receive().toList() }
+            val messages = withTimeout(5.seconds) { connection.receive().toList() }
             // FrameReader catches this and returns a Close with PROTOCOL_ERROR code
             assertIs<WebSocketMessage.Close>(messages.first())
-            client.close()
+            connection.close()
         }
 
     @Test
     fun close126BytePayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Close with 126 bytes payload (exceeds 125 max for control frames)
             val payload = BufferFactory.Default.allocate(126)
@@ -169,18 +162,17 @@ abstract class AbstractMockAutobahnCat7Test {
             payload.resetForRead()
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrameRaw(payload))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun closeInvalidUtf8ReasonIsError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Close frame with code 1000 + invalid UTF-8 in reason
             val payload = BufferFactory.Default.allocate(4)
@@ -190,11 +182,11 @@ abstract class AbstractMockAutobahnCat7Test {
             payload.resetForRead()
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrameRaw(payload))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             // Invalid UTF-8 in close reason → 1007 (INVALID_PAYLOAD)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1007u)
-            client.close()
+            connection.close()
         }
 
     // ========================================================================
@@ -204,15 +196,14 @@ abstract class AbstractMockAutobahnCat7Test {
     private fun testInvalidCloseCode(code: UShort) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(code))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test fun closeCode0IsProtocolError() = testInvalidCloseCode(0u)
@@ -253,6 +244,5 @@ class MockAutobahnCat7SharedTest : AbstractMockAutobahnCat7Test() {
 }
 
 class MockAutobahnCat7PooledTest : AbstractMockAutobahnCat7Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

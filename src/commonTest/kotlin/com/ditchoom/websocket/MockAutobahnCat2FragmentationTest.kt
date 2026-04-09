@@ -20,15 +20,13 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat2Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     private fun testFragmentedText(
         text: String,
         chunkSize: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-        MockAutobahnHelpers.connectWithHandshake(client, transport)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
         val frames = MockAutobahnHelpers.buildFragmentedTextFrames(text, chunkSize)
         for (frame in frames) transport.enqueueRead(frame)
@@ -36,11 +34,11 @@ abstract class AbstractMockAutobahnCat2Test {
 
         val msg =
             withTimeout(5.seconds) {
-                client.receive().first()
+                connection.receive().first()
             }
         assertIs<WebSocketMessage.Text>(msg)
         assertEquals(text, msg.value)
-        client.close()
+        connection.close()
     }
 
     @Test
@@ -62,8 +60,7 @@ abstract class AbstractMockAutobahnCat2Test {
     fun binaryTwoFragments() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val data = BufferFactory.Default.allocate(100)
             for (i in 0 until 100) data.writeByte(i.toByte())
@@ -74,19 +71,18 @@ abstract class AbstractMockAutobahnCat2Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Binary>(msg)
             assertEquals(100, msg.value.remaining())
-            client.close()
+            connection.close()
         }
 
     @Test
     fun emptyIntermediateFragments() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Text(FIN=0, "He") + Cont(FIN=0, "") + Cont(FIN=0, "ll") + Cont(FIN=1, "o")
             val he = BufferFactory.Default.allocate(2)
@@ -105,19 +101,18 @@ abstract class AbstractMockAutobahnCat2Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello", msg.value)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun pingBetweenFragments() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Text(FIN=0, "Hel") + Ping + Cont(FIN=1, "lo")
             val hel = BufferFactory.Default.allocate(3)
@@ -132,11 +127,11 @@ abstract class AbstractMockAutobahnCat2Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first { it is WebSocketMessage.Text }
+                    connection.receive().first { it is WebSocketMessage.Text }
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello", msg.value)
-            client.close()
+            connection.close()
         }
 }
 
@@ -157,6 +152,5 @@ class MockAutobahnCat2SharedTest : AbstractMockAutobahnCat2Test() {
 }
 
 class MockAutobahnCat2PooledTest : AbstractMockAutobahnCat2Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

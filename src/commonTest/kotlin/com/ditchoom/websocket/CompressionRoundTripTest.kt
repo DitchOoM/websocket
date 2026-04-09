@@ -2,9 +2,9 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -25,7 +25,7 @@ import kotlin.test.assertEquals
  */
 class CompressionRoundTripTest {
     private val factory = BufferFactory.managed()
-    private val allocator = BufferAllocator.Default
+    private val bufferFactory = BufferFactory.Default
 
     private fun stringToBuffer(s: String): ReadBuffer {
         val buf = factory.allocate(s.length * 3)
@@ -41,30 +41,30 @@ class CompressionRoundTripTest {
     @Test
     fun rawCompressDecompress_defaultWindowBits() {
         val input = "Hello, WebSocket compression!"
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
 
         // Compress
         val compressed = mutableListOf<ReadBuffer>()
-        compressor.compress(stringToBuffer(input)) { compressed.add(it) }
-        compressor.flush { compressed.add(it) }
+        compressor.compressUnsafe(stringToBuffer(input)) { compressed.add(it) }
+        compressor.flushUnsafe { compressed.add(it) }
 
         // Decompress (append sync flush marker as permessage-deflate requires)
         val sb = StringBuilder()
         val decoder = StreamingStringDecoder()
         for (chunk in compressed) {
             chunk.position(0)
-            decompressor.decompress(chunk) { out ->
+            decompressor.decompressUnsafe(chunk) { out ->
                 if (out.position() != 0) out.position(0)
                 decoder.decode(out, sb)
             }
         }
         val marker = factory.wrap(byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte()))
-        decompressor.decompress(marker) { out ->
+        decompressor.decompressUnsafe(marker) { out ->
             if (out.position() != 0) out.position(0)
             decoder.decode(out, sb)
         }
-        decompressor.flush { out ->
+        decompressor.flushUnsafe { out ->
             if (out.position() != 0) out.position(0)
             decoder.decode(out, sb)
         }
@@ -79,30 +79,30 @@ class CompressionRoundTripTest {
     fun rawCompressDecompress_windowBits9() {
         val input = "Hello, WebSocket compression with windowBits=9!"
         val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
+            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
             windowBits = -9, // negative = raw deflate convention (websocket passes this)
         )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
 
         val compressed = mutableListOf<ReadBuffer>()
-        compressor.compress(stringToBuffer(input)) { compressed.add(it) }
-        compressor.flush { compressed.add(it) }
+        compressor.compressUnsafe(stringToBuffer(input)) { compressed.add(it) }
+        compressor.flushUnsafe { compressed.add(it) }
 
         val sb = StringBuilder()
         val decoder = StreamingStringDecoder()
         for (chunk in compressed) {
             chunk.position(0)
-            decompressor.decompress(chunk) { out ->
+            decompressor.decompressUnsafe(chunk) { out ->
                 if (out.position() != 0) out.position(0)
                 decoder.decode(out, sb)
             }
         }
         val marker = factory.wrap(byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte()))
-        decompressor.decompress(marker) { out ->
+        decompressor.decompressUnsafe(marker) { out ->
             if (out.position() != 0) out.position(0)
             decoder.decode(out, sb)
         }
-        decompressor.flush { out ->
+        decompressor.flushUnsafe { out ->
             if (out.position() != 0) out.position(0)
             decoder.decode(out, sb)
         }
@@ -120,8 +120,8 @@ class CompressionRoundTripTest {
     @Test
     fun websocketCompressDecompress_defaultWindowBits() {
         val input = "Hello, WebSocket compression!"
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
 
         // Compress using websocket helper (strips sync flush marker)
         val compressed = compressSync(stringToBuffer(input), compressor)
@@ -142,10 +142,10 @@ class CompressionRoundTripTest {
     fun websocketCompressDecompress_windowBits9() {
         val input = "Hello, WebSocket compression with windowBits=9!"
         val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
+            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
             windowBits = -9,
         )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
 
         val compressed = compressSync(stringToBuffer(input), compressor)
         val compressedSize = totalRemaining(compressed)
@@ -166,8 +166,8 @@ class CompressionRoundTripTest {
 
     @Test
     fun websocketContextTakeover_defaultWindowBits_msg0() {
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         roundTripMessage(compressor, decompressor, """{"msg":"hello"}""", "msg0")
         compressor.close()
         decompressor.close()
@@ -175,8 +175,8 @@ class CompressionRoundTripTest {
 
     @Test
     fun websocketContextTakeover_defaultWindowBits_msg1() {
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, allocator)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         // First message (sets up context)
         roundTripMessage(compressor, decompressor, """{"msg":"hello"}""", "setup")
         // Second message (uses context takeover)
@@ -207,10 +207,10 @@ class CompressionRoundTripTest {
     @Test
     fun websocketContextTakeover_windowBits9() {
         val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
+            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
             windowBits = -9,
         )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         val decoder = StreamingStringDecoder()
 
         val messages = listOf(
@@ -243,10 +243,10 @@ class CompressionRoundTripTest {
         // 1000 messages of 16 bytes each
         // Client compresses with windowBits=9 (negotiated client_max_window_bits=9)
         val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, allocator,
+            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
             windowBits = -9,
         )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         val decoder = StreamingStringDecoder()
 
         // Simulate 10 echo round-trips (enough to detect issues)

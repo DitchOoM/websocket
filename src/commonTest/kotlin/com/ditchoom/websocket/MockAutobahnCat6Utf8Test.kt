@@ -24,7 +24,6 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat6Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     @Test
     fun validAscii() = testValidUtf8("ASCII")
@@ -108,8 +107,7 @@ abstract class AbstractMockAutobahnCat6Test {
     fun invalidUtf8InFragmentedText() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Valid first fragment, invalid continuation
             val validPart = BufferFactory.Default.allocate(3)
@@ -128,10 +126,10 @@ abstract class AbstractMockAutobahnCat6Test {
             // Server acknowledges close after client sends 1007
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1007u))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1007u)
-            client.close()
+            connection.close()
         }
 
     private fun testValidUtf8(name: String) =
@@ -140,8 +138,7 @@ abstract class AbstractMockAutobahnCat6Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
@@ -150,10 +147,10 @@ abstract class AbstractMockAutobahnCat6Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Text>(msg)
-            client.close()
+            connection.close()
         }
 
     private fun testInvalidUtf8(name: String) =
@@ -162,18 +159,17 @@ abstract class AbstractMockAutobahnCat6Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
             )
             transport.enqueueReadError(Exception("done"))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1007u)
-            client.close()
+            connection.close()
         }
 }
 
@@ -194,6 +190,5 @@ class MockAutobahnCat6SharedTest : AbstractMockAutobahnCat6Test() {
 }
 
 class MockAutobahnCat6PooledTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

@@ -6,7 +6,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -45,12 +44,12 @@ class TimingProfilingTest {
                     StreamingCompressor.create(
                         CompressionAlgorithm.Raw,
                         CompressionLevel.Default,
-                        BufferAllocator.Direct,
+                        BufferFactory.Default,
                     )
                 val decompressor =
                     StreamingDecompressor.create(
                         CompressionAlgorithm.Raw,
-                        BufferAllocator.Direct,
+                        BufferFactory.Default,
                     )
                 val decoder = StreamingStringDecoder()
 

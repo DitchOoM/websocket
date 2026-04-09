@@ -5,7 +5,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
 
@@ -44,7 +43,7 @@ import kotlin.jvm.JvmInline
  */
 class MessageAssembler(
     private val compressionEnabled: Boolean = false,
-    private val pool: BufferPool? = null,
+    private val bufferFactory: BufferFactory = BufferFactory.managed(),
 ) {
     private var firstFrameOpcode: Opcode? = null
     private var firstFrameRsv1: Boolean = false
@@ -254,7 +253,7 @@ class MessageAssembler(
     }
 
     private fun combineBuffers(): ReadBuffer {
-        val combined = pool?.acquire(totalPayloadSize) ?: BufferFactory.managed().allocate(totalPayloadSize)
+        val combined = bufferFactory.allocate(totalPayloadSize)
         for (buf in fragmentBuffers) {
             // Do NOT use position(0) — the buffer may be a view/slice where
             // position > 0 is the correct payload start.

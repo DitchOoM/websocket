@@ -4,7 +4,6 @@ import agentName
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.coroutines.flow.first
 import kotlin.test.Test
@@ -153,8 +152,7 @@ class ProfilingTest {
         size: Int,
         iterations: Int,
     ) {
-        val pool = BufferPool(factory = BufferFactory.managed())
-        val writer = FrameWriter(clientMode = true, pool = pool)
+        val writer = FrameWriter(clientMode = true)
         val payload = BufferFactory.Default.allocate(size)
         repeat(size) { payload.writeByte(0x42) }
         payload.position(0)

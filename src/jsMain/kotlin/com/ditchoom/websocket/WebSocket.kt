@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.shared
 import kotlinx.coroutines.CoroutineScope
 
@@ -19,7 +18,6 @@ actual suspend fun connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope?,
     bufferFactory: BufferFactory,
-    bufferPool: BufferPool?,
 ): Connection<WebSocketMessage> =
     if (isNodeJs) {
         throw UnsupportedOperationException(
@@ -27,7 +25,7 @@ actual suspend fun connectNativeWebSocket(
         )
     } else {
         val useSharedMemory = bufferFactory == BufferFactory.shared()
-        val controller = BrowserWebSocketController(connectionOptions, bufferPool ?: BufferPool(), parentScope, useSharedMemory)
+        val controller = BrowserWebSocketController(connectionOptions, bufferFactory, parentScope, useSharedMemory)
         controller.connect()
         controller
     }

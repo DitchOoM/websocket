@@ -7,7 +7,7 @@ import com.ditchoom.buffer.ReadBuffer
  *
  * On Apple platforms, implemented using NWConnection with NWProtocolWebSocket.
  * Other platforms throw [UnsupportedOperationException] — the websocket module
- * falls back to [DefaultWebSocketClient] which implements RFC 6455 in Kotlin.
+ * falls back to [connectWebSocket] which implements RFC 6455 in Kotlin.
  */
 interface NativeWebSocketConnection {
     val isOpen: Boolean
@@ -36,7 +36,7 @@ interface NativeWebSocketConnection {
  *
  * Only implemented on Apple platforms (uses NWConnection with WebSocket protocol).
  * Non-Apple actuals throw [UnsupportedOperationException] — the websocket module's
- * factory silently falls back to [DefaultWebSocketClient] on those platforms.
+ * factory silently falls back to [connectWebSocket] on those platforms.
  */
 expect suspend fun connectNativeWebSocket(
     url: String,

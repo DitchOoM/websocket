@@ -2,14 +2,13 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.ReadWriteBuffer
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import com.ditchoom.websocket.compressSync
@@ -35,17 +34,12 @@ class FrameWriter(
     private val compressionEnabled: Boolean = false,
     private val clientMode: Boolean = true,
     private val bufferFactory: BufferFactory = BufferFactory.deterministic(),
-    private val pool: BufferPool? = null,
     private val resetCompressorPerMessage: Boolean = true,
 ) {
-    private fun allocateBuffer(size: Int): ReadWriteBuffer = pool?.acquire(size) ?: (bufferFactory.allocate(size) as ReadWriteBuffer)
+    private fun allocateBuffer(size: Int): PlatformBuffer = bufferFactory.allocate(size) as PlatformBuffer
 
     private fun releaseBuffer(buffer: ReadBuffer) {
-        if (pool != null && buffer is ReadWriteBuffer) {
-            pool.release(buffer)
-        } else {
-            buffer.freeIfNeeded()
-        }
+        buffer.freeIfNeeded()
     }
 
     /**
@@ -165,7 +159,7 @@ class FrameWriter(
 
         if (shouldCompress && compressor != null) {
             val originalSize = payload.remaining()
-            val chunks = compressSync(payload, compressor, pool = pool)
+            val chunks = compressSync(payload, compressor)
             val compressedSize = totalRemaining(chunks)
 
             // With context takeover (!resetCompressorPerMessage), always send compressed

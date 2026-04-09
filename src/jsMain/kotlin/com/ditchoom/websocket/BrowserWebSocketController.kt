@@ -1,8 +1,8 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.JsBuffer
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.buffer.pool.BufferPool
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -23,7 +23,7 @@ import org.w3c.dom.WebSocket
 
 class BrowserWebSocketController(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val pool: BufferPool,
+    private val bufferFactory: BufferFactory,
     parentScope: CoroutineScope?,
     private val useSharedMemory: Boolean = false,
 ) : Connection<WebSocketMessage> {

@@ -19,22 +19,20 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat4Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     private fun testReservedOpcode(opcodeValue: Int) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // FIN=1 | opcode, payload length=0
             transport.enqueueReadBytes((0x80 or opcodeValue).toByte(), 0x00)
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
 
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     // Non-control reserved opcodes (0x3-0x7)
@@ -77,6 +75,5 @@ class MockAutobahnCat4SharedTest : AbstractMockAutobahnCat4Test() {
 }
 
 class MockAutobahnCat4PooledTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

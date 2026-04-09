@@ -11,7 +11,6 @@ import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.frame.FrameWriter
 import kotlinx.benchmark.Benchmark
 import kotlinx.benchmark.BenchmarkMode
@@ -38,7 +37,6 @@ class CompressedMessageBenchmark {
     private lateinit var compressor: StreamingCompressor
     private lateinit var decompressor: StreamingDecompressor
     private lateinit var decoder: StreamingStringDecoder
-    private lateinit var pool: BufferPool
 
     private lateinit var compressedWriter: FrameWriter
     private lateinit var uncompressedWriter: FrameWriter
@@ -70,14 +68,12 @@ class CompressedMessageBenchmark {
         compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
         decoder = StreamingStringDecoder()
-        pool = BufferPool()
 
         compressedWriter = FrameWriter(
             compressor = StreamingCompressor.create(CompressionAlgorithm.Raw),
             compressionEnabled = true,
-            pool = pool,
         )
-        uncompressedWriter = FrameWriter(pool = pool)
+        uncompressedWriter = FrameWriter()
 
         smallText = generateAsciiText(SMALL_SIZE)
         mediumText = generateAsciiText(MEDIUM_SIZE)
@@ -104,7 +100,6 @@ class CompressedMessageBenchmark {
         largeCompressedWithMarker.freeIfNeeded()
         compressor.close()
         decompressor.close()
-        pool.clear()
     }
 
     // --- Compress benchmarks (streaming compressor + sync flush marker strip) ---
@@ -276,8 +271,8 @@ class CompressedMessageBenchmark {
         comp: StreamingCompressor,
     ): List<ReadBuffer> {
         val chunks = mutableListOf<ReadBuffer>()
-        comp.compress(buffer) { chunks.add(it) }
-        comp.flush { chunks.add(it) }
+        comp.compressUnsafe(buffer) { chunks.add(it) }
+        comp.flushUnsafe { chunks.add(it) }
 
         if (chunks.isEmpty()) return emptyList()
 
@@ -306,7 +301,7 @@ class CompressedMessageBenchmark {
     ): String {
         val sb = StringBuilder()
 
-        decomp.decompress(buffer) { chunk ->
+        decomp.decompressUnsafe(buffer) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
@@ -315,14 +310,14 @@ class CompressedMessageBenchmark {
         val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        decomp.decompress(marker) { chunk ->
+        decomp.decompressUnsafe(marker) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
         }
         marker.freeIfNeeded()
 
-        decomp.finish { chunk ->
+        decomp.finishUnsafe { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
@@ -373,12 +368,12 @@ class CompressedMessageBenchmark {
         decomp: StreamingDecompressor,
     ): String {
         val sb = StringBuilder()
-        decomp.decompress(bufferWithMarker) { chunk ->
+        decomp.decompressUnsafe(bufferWithMarker) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
         }
-        decomp.flush { chunk ->
+        decomp.flushUnsafe { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
@@ -395,7 +390,7 @@ class CompressedMessageBenchmark {
     ): String {
         val sb = StringBuilder()
 
-        decomp.decompress(buffer) { chunk ->
+        decomp.decompressUnsafe(buffer) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
@@ -404,14 +399,14 @@ class CompressedMessageBenchmark {
         val marker = BufferFactory.Default.allocate(4)
         marker.writeInt(SYNC_FLUSH_MARKER)
         marker.resetForRead()
-        decomp.decompress(marker) { chunk ->
+        decomp.decompressUnsafe(marker) { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()
         }
         marker.freeIfNeeded()
 
-        decomp.flush { chunk ->
+        decomp.flushUnsafe { chunk ->
             if (chunk.position() != 0) chunk.position(0)
             if (chunk.remaining() > 0) decoder.decode(chunk, sb)
             chunk.freeIfNeeded()

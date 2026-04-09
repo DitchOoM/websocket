@@ -4,15 +4,13 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.websocket.handshake.computeAcceptKey
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -52,30 +50,17 @@ internal object MockAutobahnHelpers {
         )
 
     // ========================================================================
-    // Client creation & handshake
+    // Connection creation (uses connectWebSocket directly — no DefaultWebSocketClient)
     // ========================================================================
 
-    fun createClient(
+    suspend fun connectWithHandshake(
         transport: MockWebSocketTransport,
         options: WebSocketConnectionOptions = defaultOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-        pool: BufferPool? = null,
-    ): DefaultWebSocketClient =
-        DefaultWebSocketClient(
-            transport = transport,
-            connectionOptions = options,
-            parentScope = null,
-            bufferFactory = bufferFactory,
-            externalPool = pool,
-        )
-
-    suspend fun connectWithHandshake(
-        client: DefaultWebSocketClient,
-        transport: MockWebSocketTransport,
-    ) = coroutineScope {
+    ): Connection<WebSocketMessage> = coroutineScope {
         val connectJob =
             async {
-                client.connect()
+                connectWebSocket(transport, options, bufferFactory = bufferFactory)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
@@ -84,12 +69,13 @@ internal object MockAutobahnHelpers {
     }
 
     suspend fun connectWithCompressionHandshake(
-        client: DefaultWebSocketClient,
         transport: MockWebSocketTransport,
-    ) = coroutineScope {
+        options: WebSocketConnectionOptions = compressionOptions,
+        bufferFactory: BufferFactory = BufferFactory.managed(),
+    ): Connection<WebSocketMessage> = coroutineScope {
         val connectJob =
             async {
-                client.connect()
+                connectWebSocket(transport, options, bufferFactory = bufferFactory)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
@@ -447,6 +433,6 @@ internal object MockAutobahnHelpers {
         StreamingCompressor.create(
             CompressionAlgorithm.Raw,
             CompressionLevel.Default,
-            BufferAllocator.Default,
+            BufferFactory.Default,
         )
 }

@@ -75,7 +75,7 @@ class WebSocketExceptionTests {
     @Test
     fun wrapException_handshakeException_becomesHandshakeRejected() {
         val hsError = HandshakeException("Bad response")
-        val wrapped = DefaultWebSocketClient.wrapException(hsError)
+        val wrapped = wrapException(hsError)
 
         assertIs<WebSocketException.HandshakeRejected>(wrapped)
         assertEquals(hsError, wrapped.cause)
@@ -84,7 +84,7 @@ class WebSocketExceptionTests {
     @Test
     fun wrapException_webSocketException_passedThrough() {
         val original = WebSocketException.ProtocolViolation("Bad frame")
-        val wrapped = DefaultWebSocketClient.wrapException(original)
+        val wrapped = wrapException(original)
 
         assertEquals(original, wrapped)
     }
@@ -92,7 +92,7 @@ class WebSocketExceptionTests {
     @Test
     fun wrapException_genericException_becomesTransportFailed() {
         val original = IllegalStateException("unexpected")
-        val wrapped = DefaultWebSocketClient.wrapException(original)
+        val wrapped = wrapException(original)
 
         assertIs<WebSocketException.TransportFailed>(wrapped)
         assertEquals(original, wrapped.cause)

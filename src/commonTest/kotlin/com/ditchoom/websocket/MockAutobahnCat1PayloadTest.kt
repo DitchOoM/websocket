@@ -26,14 +26,12 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat1Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     private fun testTextPayload(
         size: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-        MockAutobahnHelpers.connectWithHandshake(client, transport)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
         val text = "A".repeat(size)
         transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
@@ -41,20 +39,19 @@ abstract class AbstractMockAutobahnCat1Test {
 
         val msg =
             withTimeout(5.seconds) {
-                client.receive().first()
+                connection.receive().first()
             }
         assertIs<WebSocketMessage.Text>(msg)
         assertEquals(size, msg.value.length)
         if (size <= 1024) assertEquals(text, msg.value)
-        client.close()
+        connection.close()
     }
 
     private fun testBinaryPayload(
         size: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-        MockAutobahnHelpers.connectWithHandshake(client, transport)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
         val payload = BufferFactory.Default.allocate(size)
         for (i in 0 until size) payload.writeByte((i % 256).toByte())
@@ -64,11 +61,11 @@ abstract class AbstractMockAutobahnCat1Test {
 
         val msg =
             withTimeout(5.seconds) {
-                client.receive().first()
+                connection.receive().first()
             }
         assertIs<WebSocketMessage.Binary>(msg)
         assertEquals(size, msg.value.remaining())
-        client.close()
+        connection.close()
     }
 
     // Text payloads at encoding boundaries
@@ -115,6 +112,5 @@ class MockAutobahnCat1SharedTest : AbstractMockAutobahnCat1Test() {
 }
 
 class MockAutobahnCat1PooledTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

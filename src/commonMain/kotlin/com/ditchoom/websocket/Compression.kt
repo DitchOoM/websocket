@@ -5,10 +5,40 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
+import com.ditchoom.buffer.compression.decompressScoped
+import com.ditchoom.buffer.compression.flushScoped
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
+
+/**
+ * Compression configuration for a WebSocket codec connection.
+ *
+ * Models the result of permessage-deflate negotiation as a sealed type,
+ * eliminating impossible states (e.g. context takeover flags without compression,
+ * or compressionEnabled=true with null decompressor).
+ */
+sealed interface CompressionConfig {
+    data object None : CompressionConfig
+
+    /**
+     * Compression was negotiated via permessage-deflate.
+     *
+     * @param decompressor Always present — incoming messages may be compressed.
+     * @param compressor Null when the platform can't honor the negotiated client_max_window_bits
+     *   (e.g. JVM Deflater only supports window=15). In that case, outgoing frames are uncompressed
+     *   but incoming compressed frames are still decompressed.
+     * @param serverNoContextTakeover If true, reset decompressor after each message.
+     * @param clientNoContextTakeover If true, reset compressor after each message.
+     */
+    class Enabled(
+        val decompressor: StreamingDecompressor,
+        val compressor: StreamingCompressor?,
+        val serverNoContextTakeover: Boolean,
+        val clientNoContextTakeover: Boolean,
+    ) : CompressionConfig
+}
 
 // WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
 
@@ -94,8 +124,8 @@ internal fun compressSync(
     pool: BufferPool? = null,
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
-    compressor.compress(buffer) { chunks.add(it) }
-    compressor.flush { chunks.add(it) }
+    compressor.compressUnsafe(buffer) { chunks.add(it) }
+    compressor.flushUnsafe { chunks.add(it) }
 
     if (chunks.isEmpty()) return emptyList()
 
@@ -124,26 +154,11 @@ internal fun compressSync(
 }
 
 /**
- * Decodes a decompressed chunk to StringBuilder and frees it.
- */
-private fun decodeAndFree(
-    chunk: ReadBuffer,
-    decoder: StreamingStringDecoder,
-    sb: StringBuilder,
-) {
-    if (chunk.position() != 0) chunk.position(0)
-    if (chunk.remaining() > 0) {
-        decoder.decode(chunk, sb)
-    }
-    chunk.freeIfNeeded()
-}
-
-/**
  * Decompresses a buffer directly to a String using a sync streaming decompressor.
  *
  * Uses [StreamingStringDecoder] for platform-optimized UTF-8 decoding with automatic
- * multi-byte boundary handling. Each decompressed chunk is decoded and freed immediately,
- * keeping peak memory to one chunk + StringBuilder.
+ * multi-byte boundary handling. Each decompressed chunk is decoded and freed immediately
+ * via scoped API, keeping peak memory to one chunk + StringBuilder.
  */
 internal fun decompressToStringSync(
     buffer: ReadBuffer,
@@ -151,10 +166,10 @@ internal fun decompressToStringSync(
     decoder: StreamingStringDecoder,
 ): String {
     val sb = StringBuilder()
-    decompressor.decompress(buffer) { decodeAndFree(it, decoder, sb) }
+    decompressor.decompressScoped(buffer) { decoder.decode(this, sb) }
     SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { decodeAndFree(it, decoder, sb) }
-    decompressor.flush { decodeAndFree(it, decoder, sb) }
+    decompressor.decompressScoped(SYNC_FLUSH_MARKER_BUFFER) { decoder.decode(this, sb) }
+    decompressor.flushScoped { decoder.decode(this, sb) }
     decoder.finish(sb)
     decoder.reset()
     return sb.toString()
@@ -180,11 +195,11 @@ internal fun decompressToBufferSync(
         chunks.add(chunk)
     }
 
-    decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
+    decompressor.decompressUnsafe(buffer) { chunk -> addChunk(chunk) }
 
     SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-    decompressor.flush { chunk -> addChunk(chunk) }
+    decompressor.decompressUnsafe(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+    decompressor.flushUnsafe { chunk -> addChunk(chunk) }
 
     // Single chunk optimization - no copy needed
     if (chunks.size == 1) {

@@ -232,7 +232,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     if (name.contains("Browser", ignoreCase = true)) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecMockTest")
         // Browser WebSocket API doesn't support custom windowBits or context takeover control
         this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
         // Browser WebSocket API controls close frame behavior; can't handle invalid close codes correctly (7.9.x)

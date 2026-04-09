@@ -3,9 +3,8 @@ package com.ditchoom.websocket.frame
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadWriteBuffer
-import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.buffer.stream.SuspendingStreamProcessor
 import com.ditchoom.websocket.MaskingKey
@@ -106,7 +105,7 @@ value class FrameHeaderByte1(
  */
 class FrameReader(
     private val processor: SuspendingStreamProcessor,
-    private val pool: BufferPool? = null,
+    private val bufferFactory: BufferFactory = BufferFactory.Default,
 ) {
     /**
      * Attempts to read a complete frame from the processor.
@@ -180,19 +179,19 @@ class FrameReader(
         if (maskingKey == null) return buffer
 
         // Unmask in-place (SIMD-optimized)
-        val writableBuffer =
-            if (buffer is ReadWriteBuffer) {
+        val platformBuffer =
+            if (buffer is PlatformBuffer) {
                 buffer
             } else {
-                val copy = pool?.acquire(payloadLength) ?: BufferFactory.Default.allocate(payloadLength)
+                val copy = bufferFactory.allocate(payloadLength)
                 copy.write(buffer)
                 copy.resetForRead()
-                copy
+                copy as PlatformBuffer
             }
-        val payloadStart = writableBuffer.position()
-        writableBuffer.xorMask(maskingKey.raw.toInt())
-        writableBuffer.position(payloadStart)
-        return writableBuffer
+        val payloadStart = platformBuffer.position()
+        platformBuffer.xorMask(maskingKey.raw.toInt())
+        platformBuffer.position(payloadStart)
+        return platformBuffer
     }
 
     /**

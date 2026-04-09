@@ -23,19 +23,12 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat9Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     @Test
     fun compressedTextSmall() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(
-                transport,
-                options = MockAutobahnHelpers.compressionOptions,
-                bufferFactory = bufferFactory,
-                pool = pool,
-            )
-            MockAutobahnHelpers.connectWithCompressionHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, bufferFactory = bufferFactory)
 
             val text = "Hello, compressed WebSocket!"
             val payload = BufferFactory.Default.allocate(text.length * 4)
@@ -50,25 +43,19 @@ abstract class AbstractMockAutobahnCat9Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals(text, msg.value)
             compressor.close()
-            client.close()
+            connection.close()
         }
 
     @Test
     fun compressedTextMedium() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(
-                transport,
-                options = MockAutobahnHelpers.compressionOptions,
-                bufferFactory = bufferFactory,
-                pool = pool,
-            )
-            MockAutobahnHelpers.connectWithCompressionHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, bufferFactory = bufferFactory)
 
             val text = "A".repeat(4096)
             val payload = BufferFactory.Default.allocate(text.length * 4)
@@ -83,25 +70,19 @@ abstract class AbstractMockAutobahnCat9Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals(text, msg.value)
             compressor.close()
-            client.close()
+            connection.close()
         }
 
     @Test
     fun compressedBinary() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(
-                transport,
-                options = MockAutobahnHelpers.compressionOptions,
-                bufferFactory = bufferFactory,
-                pool = pool,
-            )
-            MockAutobahnHelpers.connectWithCompressionHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, bufferFactory = bufferFactory)
 
             val payload = BufferFactory.Default.allocate(256)
             for (i in 0 until 256) payload.writeByte(i.toByte())
@@ -115,25 +96,19 @@ abstract class AbstractMockAutobahnCat9Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Binary>(msg)
             assertEquals(256, msg.value.remaining())
             compressor.close()
-            client.close()
+            connection.close()
         }
 
     @Test
     fun uncompressedFrameWorksWithCompressionNegotiated() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(
-                transport,
-                options = MockAutobahnHelpers.compressionOptions,
-                bufferFactory = bufferFactory,
-                pool = pool,
-            )
-            MockAutobahnHelpers.connectWithCompressionHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, bufferFactory = bufferFactory)
 
             // RSV1=0 frame should still work even though compression is negotiated
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("not compressed"))
@@ -141,24 +116,18 @@ abstract class AbstractMockAutobahnCat9Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals("not compressed", msg.value)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun multipleCompressedMessages() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(
-                transport,
-                options = MockAutobahnHelpers.compressionOptions,
-                bufferFactory = bufferFactory,
-                pool = pool,
-            )
-            MockAutobahnHelpers.connectWithCompressionHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, bufferFactory = bufferFactory)
 
             val messages = listOf("first message", "second message", "third message")
 
@@ -177,7 +146,7 @@ abstract class AbstractMockAutobahnCat9Test {
 
             val received =
                 withTimeout(5.seconds) {
-                    client.receive().toList()
+                    connection.receive().toList()
                 }
             val textMessages = received.filter { it is WebSocketMessage.Text }
             assertEquals(3, textMessages.size)
@@ -185,7 +154,7 @@ abstract class AbstractMockAutobahnCat9Test {
                 val txt = textMessages[i] as WebSocketMessage.Text
                 assertEquals(messages[i], txt.value)
             }
-            client.close()
+            connection.close()
         }
 }
 
@@ -206,6 +175,5 @@ class MockAutobahnCat9SharedTest : AbstractMockAutobahnCat9Test() {
 }
 
 class MockAutobahnCat9PooledTest : AbstractMockAutobahnCat9Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

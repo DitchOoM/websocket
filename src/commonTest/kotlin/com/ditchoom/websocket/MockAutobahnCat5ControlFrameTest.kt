@@ -25,46 +25,42 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class AbstractMockAutobahnCat5Test {
     abstract val bufferFactory: BufferFactory
-    open val pool: BufferPool? get() = null
 
     @Test
     fun fragmentedPingIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Ping with FIN=0 (0x09 instead of 0x89), length=0
             transport.enqueueReadBytes(0x09.toByte(), 0x00)
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun fragmentedCloseIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Close with FIN=0 (0x08 instead of 0x88), length=0
             transport.enqueueReadBytes(0x08.toByte(), 0x00)
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun oversizedPingPayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Ping with 126-byte payload (exceeds 125 limit for control frames)
             val payload = BufferFactory.Default.allocate(126)
@@ -74,18 +70,17 @@ abstract class AbstractMockAutobahnCat5Test {
                 MockAutobahnHelpers.buildServerFrame(Opcode.Ping, payload),
             )
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun pingPayload125BytesIsValid() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val payload = BufferFactory.Default.allocate(125)
             for (i in 0 until 125) payload.writeByte(0x41)
@@ -97,18 +92,17 @@ abstract class AbstractMockAutobahnCat5Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first()
+                    connection.receive().first()
                 }
             assertIs<WebSocketMessage.Ping>(msg)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun continuationWithoutStartIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Continuation frame without a preceding start frame
             val payload = BufferFactory.Default.allocate(5)
@@ -118,35 +112,33 @@ abstract class AbstractMockAutobahnCat5Test {
                 MockAutobahnHelpers.buildServerContinuationFrame(payload, fin = true),
             )
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun newTextDuringFragmentationIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Start a fragmented text message, then send a new text frame
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("start", fin = false))
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("new message"))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun newBinaryDuringTextFragmentationIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val binPayload = BufferFactory.Default.allocate(3)
             binPayload.writeByte(1); binPayload.writeByte(2); binPayload.writeByte(3)
@@ -155,18 +147,17 @@ abstract class AbstractMockAutobahnCat5Test {
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("start", fin = false))
             transport.enqueueRead(MockAutobahnHelpers.buildServerFrame(Opcode.Binary, binPayload))
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun rsv2SetWithoutExtensionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -180,18 +171,17 @@ abstract class AbstractMockAutobahnCat5Test {
                 ),
             )
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun rsv3SetWithoutExtensionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -205,18 +195,17 @@ abstract class AbstractMockAutobahnCat5Test {
                 ),
             )
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun rsv1WithoutCompressionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -230,18 +219,17 @@ abstract class AbstractMockAutobahnCat5Test {
                 ),
             )
 
-            withTimeout(5.seconds) { client.receive().toList() }
+            withTimeout(5.seconds) { connection.receive().toList() }
             MockAutobahnHelpers.waitForWrite(transport, count = 2)
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1002u)
-            client.close()
+            connection.close()
         }
 
     @Test
     fun pingInterleavedPreservesFragmentation() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val client = MockAutobahnHelpers.createClient(transport, bufferFactory = bufferFactory, pool = pool)
-            MockAutobahnHelpers.connectWithHandshake(client, transport)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
 
             // Text(FIN=0, "AB") + Ping + Cont(FIN=0, "CD") + Ping + Cont(FIN=1, "EF")
             val ab = BufferFactory.Default.allocate(2)
@@ -260,11 +248,11 @@ abstract class AbstractMockAutobahnCat5Test {
 
             val msg =
                 withTimeout(5.seconds) {
-                    client.receive().first { it is WebSocketMessage.Text }
+                    connection.receive().first { it is WebSocketMessage.Text }
                 }
             assertIs<WebSocketMessage.Text>(msg)
             assertEquals("ABCDEF", msg.value)
-            client.close()
+            connection.close()
         }
 }
 
@@ -285,6 +273,5 @@ class MockAutobahnCat5SharedTest : AbstractMockAutobahnCat5Test() {
 }
 
 class MockAutobahnCat5PooledTest : AbstractMockAutobahnCat5Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-    override val pool: BufferPool = BufferPool(factory = bufferFactory)
+    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }
