@@ -720,14 +720,13 @@ class WebSocketCodecMockTest {
             val oneBytePayload = byteArrayOf(0x42)
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Close, oneBytePayload))
 
-            val messages =
-                withTimeout(5.seconds) {
-                    connection.receive().toList()
-                }
+            withTimeout(5.seconds) {
+                connection.receive().toList()
+            }
 
-            assertTrue(messages.isNotEmpty())
-            assertIs<WebSocketMessage.Close>(messages[0])
-
+            // 1-byte close payload is a protocol error — client sends 1002 close
+            MockAutobahnHelpers.waitForWrite(mockTransport, count = 2)
+            MockAutobahnHelpers.assertClientSentClose(mockTransport.writtenBuffers, 1002u)
             connection.close()
         }
 

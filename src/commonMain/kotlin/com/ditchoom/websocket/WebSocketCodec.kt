@@ -142,8 +142,8 @@ internal class WebSocketCodec(
         while (coroutineContext.isActive) {
             // Ensure at least 2 bytes (minimum header)
             if (stream.available() < 2) {
-                stream.peekByte(0)
-                if (stream.available() < 2) continue
+                stream.peekByte(stream.available())
+                continue
             }
 
             // Determine header size

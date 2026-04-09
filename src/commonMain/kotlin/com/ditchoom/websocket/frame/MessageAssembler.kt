@@ -110,6 +110,13 @@ class MessageAssembler(
 
         // RFC 6455 Section 7.4.1: Validate close frame
         if (frame is WsFrame.Close) {
+            // Close payload must be 0 or >= 2 bytes (status code is 2 bytes)
+            if (h.payloadLength == 1L) {
+                return AssemblyResult.Error(
+                    CloseCode.PROTOCOL_ERROR,
+                    "Invalid close payload length",
+                )
+            }
             val closeCode = frame.body?.statusCode ?: CloseCode.NO_STATUS_RECEIVED
             // Check if the close code is valid per RFC 6455 Section 7.4.1
             if (h.payloadLength >= 2 && !closeCode.isValidForWire) {
