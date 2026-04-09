@@ -26,6 +26,7 @@ import com.ditchoom.websocket.frame.WsFrameContinuationContext
 import com.ditchoom.websocket.frame.WsFramePingContext
 import com.ditchoom.websocket.frame.WsFramePongContext
 import com.ditchoom.websocket.frame.WsFrameTextContext
+import com.ditchoom.websocket.frame.WsCloseBody
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsMaskingKey
@@ -383,28 +384,33 @@ internal class WebSocketCodec(
         statusCode: UShort? = null,
         reason: String? = null,
     ): ReadBuffer {
-        // Close body must be masked like any other payload. Since WsFrame.Close uses
-        // WsCloseBodyCodec (not WsPayloadCodec), we encode the close body as a raw
-        // payload and use serializeFrame for masking.
-        if (statusCode == null) {
-            return serializeFrame(fin = true, rsv1 = false, Opcode.Close, EMPTY_BUFFER)
+        val body = if (statusCode != null) {
+            val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
+            // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code)
+            val reasonStr = truncated ?: ""
+            val reasonBytes = reasonStr.encodeToByteArray()
+            val cappedReason = if (reasonBytes.size > 123) reasonStr.substring(0, 123) else reasonStr
+            WsCloseBody(CloseCode(statusCode), cappedReason)
+        } else {
+            null
         }
-        val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
-        val payload = bufferFactory.allocate(2 + (truncated?.length ?: 0) * 3) as PlatformBuffer
-        payload.writeShort(statusCode.toShort())
-        if (truncated != null && truncated.isNotEmpty()) {
-            payload.writeString(truncated, Charset.UTF8)
-        }
-        if (payload.position() > 125) payload.position(125)
-        payload.resetForRead()
-        val frame = serializeFrame(fin = true, rsv1 = false, Opcode.Close, payload)
-        payload.freeIfNeeded()
-        return frame
+        val payloadSize = if (body != null) 2 + body.reason.encodeToByteArray().size else 0
+        return encodeWsFrame(
+            WsFrame.Close(
+                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Close, payloadSize),
+                body = body,
+            ),
+        )
     }
 
     private fun writePingFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
         val truncated = if (data.remaining() > 125) data.readBytes(125) else data
-        return encodeControlFrame(Opcode.Ping, truncated)
+        return encodeWsFrame(
+            WsFrame.Ping(
+                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Ping, truncated.remaining()),
+                payload = truncated,
+            ),
+        )
     }
 
     private suspend fun writePongFrame(payloadData: ReadBuffer) {
@@ -415,13 +421,13 @@ internal class WebSocketCodec(
 
     private fun encodePongFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
         val truncated = if (data.remaining() > 125) data.readBytes(125) else data
-        return encodeControlFrame(Opcode.Pong, truncated)
+        return encodeWsFrame(
+            WsFrame.Pong(
+                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Pong, truncated.remaining()),
+                payload = truncated,
+            ),
+        )
     }
-
-    private fun encodeControlFrame(
-        opcode: Opcode,
-        payload: ReadBuffer,
-    ): ReadBuffer = serializeFrame(fin = true, rsv1 = false, opcode, payload)
 
     private fun encodeDataFrame(
         opcode: Opcode,
@@ -442,49 +448,69 @@ internal class WebSocketCodec(
                 if (resetCompressorPerMessage) compressor.reset()
                 val combined = combineChunks(chunks, bufferFactory)
                 chunks.freeAll()
-                val frame = serializeFrame(fin, rsv1 = true, opcode, combined)
+                val frame = buildDataWsFrame(opcode, fin, rsv1 = true, combined)
+                val encoded = encodeWsFrame(frame)
                 combined.freeIfNeeded()
-                return frame
+                return encoded
             } else {
                 payload.resetForRead()
                 compressor.reset()
                 chunks.freeAll()
-                return serializeFrame(fin, rsv1 = false, opcode, payload)
             }
         }
 
-        return serializeFrame(fin, rsv1 = false, opcode, payload)
+        return encodeWsFrame(buildDataWsFrame(opcode, fin, rsv1 = false, payload))
     }
 
-    /**
-     * Serializes a frame with masking. Uses [WsFrameCodec.encode] with masking via
-     * [WsPayloadCodec.MaskKeyCtx] for data/control frames. The payload is always treated
-     * as raw bytes (close frame body is pre-serialized by the caller).
-     */
-    private fun serializeFrame(
-        fin: Boolean,
-        rsv1: Boolean,
-        opcode: Opcode,
-        payload: ReadBuffer,
-    ): ReadBuffer {
-        val payloadSize = payload.remaining()
-        val mask = WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt())
-        val header = WsFrameHeader.build(
+    private fun buildDataWsFrame(opcode: Opcode, fin: Boolean, rsv1: Boolean, payload: ReadBuffer): WsFrame =
+        when (opcode) {
+            Opcode.Text -> WsFrame.Text(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
+            Opcode.Binary -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
+            Opcode.Continuation -> WsFrame.Continuation(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
+            else -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
+        }
+
+    private fun buildMaskedHeader(fin: Boolean, rsv1: Boolean, opcode: Opcode, payloadSize: Int): WsFrameHeader =
+        WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, opcode),
             payloadSize = payloadSize.toLong(),
             masked = true,
-            maskingKey = mask,
+            maskingKey = WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt()),
         )
-        // Use header codec + xorMaskCopy directly for all frame types.
-        // This is simpler than routing through WsFrameCodec.encode because the
-        // Close variant uses WsCloseBody (not raw payload), and we need consistent
-        // masking for all frame types.
+
+    /**
+     * Unified encode: uses [WsFrameCodec.encode] for all frame types (including Close),
+     * then XOR-masks the payload region in-place.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun encodeWsFrame(frame: WsFrame): ReadBuffer {
+        val header = frame.header
+        val payloadSize = header.payloadLength.toInt()
         val buffer = bufferFactory.allocate(header.wireSize + payloadSize) as PlatformBuffer
-        WsFrameHeaderCodec.encode(buffer, header)
-        if (payloadSize > 0) {
-            buffer.xorMaskCopy(payload, mask.raw.toInt())
+
+        val writePayload: (com.ditchoom.buffer.WriteBuffer, Any?) -> Unit = { buf, payload ->
+            if (payload is ReadBuffer) buf.write(payload)
         }
+
+        WsFrameCodec.encode(
+            buffer, frame,
+            encodeBinaryPayload = writePayload,
+            encodeContinuationPayload = writePayload,
+            encodePingPayload = writePayload,
+            encodePongPayload = writePayload,
+            encodeTextPayload = writePayload,
+        )
+
+        // resetForRead sets limit = written position, position = 0
         buffer.resetForRead()
+
+        // Post-encode: XOR mask the payload region in-place
+        if (header.maskingKey != null && payloadSize > 0) {
+            buffer.position(header.wireSize)
+            buffer.xorMask(header.maskingKey!!.raw.toInt())
+            buffer.position(0)
+        }
+
         return buffer
     }
 
