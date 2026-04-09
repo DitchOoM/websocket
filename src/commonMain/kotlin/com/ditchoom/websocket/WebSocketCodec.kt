@@ -20,7 +20,12 @@ import com.ditchoom.websocket.frame.CloseCode
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.MessageAssembler
 import com.ditchoom.websocket.frame.WsFrame
+import com.ditchoom.websocket.frame.WsFrameBinaryContext
 import com.ditchoom.websocket.frame.WsFrameCodec
+import com.ditchoom.websocket.frame.WsFrameContinuationContext
+import com.ditchoom.websocket.frame.WsFramePingContext
+import com.ditchoom.websocket.frame.WsFramePongContext
+import com.ditchoom.websocket.frame.WsFrameTextContext
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsMaskingKey
@@ -165,13 +170,18 @@ internal class WebSocketCodec(
             // Read and decode
             val buffer = stream.readBuffer(totalFrameSize)
             val frame = try {
-                WsFrameCodec.decode(buffer) {
-                    if (remaining() == 0) return@decode ReadBuffer.EMPTY_BUFFER
-                    val copy = bufferFactory.allocate(remaining())
-                    copy.write(this)
-                    copy.resetForRead()
-                    copy
+                val copyPayload: Any.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer = { pr ->
+                    pr.copyToBuffer(bufferFactory)
                 }
+                @Suppress("UNCHECKED_CAST")
+                WsFrameCodec.decode(
+                    buffer,
+                    decodeBinaryPayload = copyPayload as WsFrameBinaryContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
+                    decodeContinuationPayload = copyPayload as WsFrameContinuationContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
+                    decodePingPayload = copyPayload as WsFramePingContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
+                    decodePongPayload = copyPayload as WsFramePongContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
+                    decodeTextPayload = copyPayload as WsFrameTextContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
+                )
             } catch (_: IllegalArgumentException) {
                 // Reserved opcode — protocol error
                 sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")

@@ -32,7 +32,7 @@ class WsFrameWireTest {
     fun `decode - RFC 5-7 Example 1 - unmasked text Hi`() {
         // 0x81 0x05 0x48 0x65 0x6C 0x6C 0x6F ("Hello")
         val buffer = buf(0x81, 0x05, 0x48, 0x65, 0x6C, 0x6C, 0x6F)
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
         assertTrue(frame.header.byte1.fin)
@@ -44,7 +44,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - unmasked empty text frame`() {
         val buffer = buf(0x81, 0x00)
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
         assertEquals(0, frame.header.payloadLength.toInt())
@@ -54,7 +54,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - unmasked binary frame`() {
         val buffer = buf(0x82, 0x03, 0x01, 0x02, 0x03)
-        val frame = WsFrameCodec.decode(buffer) { remaining() }
+        val frame = decodeSkipPayload(buffer)
 
         assertTrue(frame is WsFrame.Binary<*>)
         assertEquals(3, frame.header.payloadLength.toInt())
@@ -63,7 +63,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - FIN=0 text fragment`() {
         val buffer = buf(0x01, 0x02, 0x48, 0x69) // FIN=0, Text, "Hi"
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
         assertEquals(false, frame.header.byte1.fin)
@@ -72,7 +72,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - continuation frame`() {
         val buffer = buf(0x80, 0x02, 0x48, 0x69) // FIN=1, Continuation, "Hi"
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Continuation<*>)
         assertTrue(frame.header.byte1.fin)
@@ -87,7 +87,7 @@ class WsFrameWireTest {
         val payload = ByteArray(126) { 0x41 }
         val header = byteArrayOf(0x82.toByte(), 0x7E, 0x00, 0x7E)
         val buffer = buf(header + payload)
-        val frame = WsFrameCodec.decode(buffer) { remaining() }
+        val frame = decodeSkipPayload(buffer)
 
         assertEquals(126, frame.header.payloadLength.toInt())
     }
@@ -97,7 +97,7 @@ class WsFrameWireTest {
         val payload = ByteArray(300) { 0x42 }
         val header = byteArrayOf(0x82.toByte(), 0x7E, 0x01, 0x2C)
         val buffer = buf(header + payload)
-        val frame = WsFrameCodec.decode(buffer) { remaining() }
+        val frame = decodeSkipPayload(buffer)
 
         assertEquals(300, frame.header.payloadLength.toInt())
     }
@@ -110,7 +110,7 @@ class WsFrameWireTest {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x11, 0x70,
         )
         val buffer = buf(header + payload)
-        val frame = WsFrameCodec.decode(buffer) { remaining() }
+        val frame = decodeSkipPayload(buffer)
 
         assertEquals(70000, frame.header.payloadLength.toInt())
     }
@@ -122,7 +122,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - RSV1 set for compression`() {
         val buffer = buf(0xC1, 0x00) // FIN=1, RSV1=1, Text
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame.header.byte1.rsv1)
         assertEquals(false, frame.header.byte1.rsv2)
@@ -132,7 +132,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - all RSV bits set`() {
         val buffer = buf(0xF1, 0x00) // FIN=1, RSV1=1, RSV2=1, RSV3=1, Text
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame.header.byte1.rsv1)
         assertTrue(frame.header.byte1.rsv2)
@@ -146,7 +146,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - close frame with status 1000`() {
         val buffer = buf(0x88, 0x02, 0x03, 0xE8) // Close, len=2, code=1000
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Close)
         val close = frame as WsFrame.Close
@@ -160,7 +160,7 @@ class WsFrameWireTest {
         val reason = "bye"
         val reasonBytes = reason.encodeToByteArray()
         val buffer = buf(byteArrayOf(0x88.toByte(), (2 + reasonBytes.size).toByte(), 0x03, 0xE8.toByte()) + reasonBytes)
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Close)
         val close = frame as WsFrame.Close
@@ -171,7 +171,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - close frame with empty payload`() {
         val buffer = buf(0x88, 0x00) // Close, len=0
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Close)
         assertNull((frame as WsFrame.Close).body)
@@ -180,7 +180,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - close frame with 1 byte payload has no body`() {
         val buffer = buf(0x88, 0x01, 0xFF) // Close, len=1 (invalid per RFC but codec handles it)
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Close)
         assertNull((frame as WsFrame.Close).body) // @WhenRemaining(2) skips body
@@ -193,7 +193,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - ping with payload`() {
         val buffer = buf(0x89, 0x04, 0x70, 0x69, 0x6E, 0x67) // Ping, "ping"
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Ping<*>)
         assertEquals("ping", ((frame as WsFrame.Ping<*>).payload as TestPayload).text)
@@ -202,7 +202,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - pong with payload`() {
         val buffer = buf(0x8A, 0x04, 0x70, 0x6F, 0x6E, 0x67) // Pong, "pong"
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Pong<*>)
         assertEquals("pong", ((frame as WsFrame.Pong<*>).payload as TestPayload).text)
@@ -211,7 +211,7 @@ class WsFrameWireTest {
     @Test
     fun `decode - empty ping`() {
         val buffer = buf(0x89, 0x00)
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Ping<*>)
         assertEquals("", ((frame as WsFrame.Ping<*>).payload as TestPayload).text)
@@ -225,7 +225,7 @@ class WsFrameWireTest {
     fun `decode - reserved opcode 0x3 throws`() {
         val buffer = buf(0x83, 0x00) // FIN=1, opcode=3
         assertFailsWith<IllegalArgumentException> {
-            WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+            decodeTestFrame(buffer)
         }
     }
 
@@ -233,7 +233,7 @@ class WsFrameWireTest {
     fun `decode - reserved opcode 0xB throws`() {
         val buffer = buf(0x8B, 0x00) // FIN=1, opcode=0xB
         assertFailsWith<IllegalArgumentException> {
-            WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+            decodeTestFrame(buffer)
         }
     }
 
@@ -387,7 +387,7 @@ class WsFrameWireTest {
         buffer.writeBytes("Hello".encodeToByteArray())
         buffer.resetForRead()
 
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
         assertTrue(frame is WsFrame.Text<*>)
         assertEquals("Hello", (frame as WsFrame.Text<*>).payload.let { (it as TestPayload).text })
     }
@@ -408,7 +408,7 @@ class WsFrameWireTest {
         buffer.writeBytes(reasonBytes)
         buffer.resetForRead()
 
-        val frame = WsFrameCodec.decode(buffer) { TestPayloadCodec.decode(this) }
+        val frame = decodeTestFrame(buffer)
         assertTrue(frame is WsFrame.Close)
         val close = frame as WsFrame.Close
         assertEquals(1001u.toUShort(), close.body!!.statusCode.code)

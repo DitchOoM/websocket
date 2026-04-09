@@ -1,8 +1,12 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.annotations.DispatchOn
+import com.ditchoom.buffer.codec.annotations.DispatchValue
+import com.ditchoom.buffer.codec.annotations.PacketType
+import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
+import com.ditchoom.buffer.codec.annotations.WhenRemaining
 import com.ditchoom.buffer.codec.annotations.WhenTrue
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
@@ -158,6 +162,10 @@ data class WsFrameHeader(
             (if (extendedLength64 != null) 8 else 0) +
             (if (maskingKey != null) 4 else 0)
 
+    /** Opcode as Int for sealed dispatch matching via @DispatchOn */
+    @DispatchValue
+    val opcodeValue: Int get() = byte1.raw.toInt() and 0x0F
+
     companion object {
         /** Build a header from logical parameters — zero allocation */
         fun build(
@@ -198,64 +206,65 @@ data class WsCloseBody(
 // ──────────────────────── WsFrame sealed dispatch ────────────────────────
 
 /**
- * WebSocket frame dispatched by opcode.
+ * WebSocket frame dispatched by opcode via [WsFrameHeader].
  *
- * Payload variants are generic — the consumer provides a decode function via
- * [WsFrameCodec.decode], so the frame carries the consumer's type (not a raw buffer).
- * This is zero-copy (consumer reads directly from the buffer), type-safe, and free
- * from impossible states (no buffer reference stored in the model).
+ * KSP generates `WsFrameCodec` which reads the header, extracts
+ * [WsFrameHeader.opcodeValue], and dispatches to the correct variant.
  *
- * Header parsing uses the KSP-generated [WsFrameHeaderCodec].
- * Close body parsing uses the KSP-generated [WsCloseBodyCodec].
- * Opcode dispatch is a simple `when` in [WsFrameCodec].
+ * Payload-bearing variants ([Data]) use `@Payload T` — the consumer provides
+ * a decode lambda so the frame carries the consumer's type, not a raw buffer.
+ * This is zero-copy (reads directly from buffer), type-safe, and free from
+ * impossible states (no buffer reference stored in the model).
+ *
+ * [Data] is a sealed sub-interface giving typed `.payload` access without
+ * casting when the assembler handles data/control frames.
  */
+@DispatchOn(WsFrameHeader::class)
+@ProtocolMessage
 sealed interface WsFrame {
     val header: WsFrameHeader
 
-    data class Text<T>(override val header: WsFrameHeader, val payload: T) : WsFrame
-    data class Binary<T>(override val header: WsFrameHeader, val payload: T) : WsFrame
-    data class Continuation<T>(override val header: WsFrameHeader, val payload: T) : WsFrame
-    data class Close(override val header: WsFrameHeader, val body: WsCloseBody? = null) : WsFrame
-    data class Ping<T>(override val header: WsFrameHeader, val payload: T) : WsFrame
-    data class Pong<T>(override val header: WsFrameHeader, val payload: T) : WsFrame
-}
+    @PacketType(0x1)
+    @ProtocolMessage
+    data class Text<@Payload T>(
+        override val header: WsFrameHeader,
+        @RemainingBytes val payload: T,
+    ) : WsFrame
 
-// ──────────────────────── WsFrameCodec ────────────────────────
+    @PacketType(0x2)
+    @ProtocolMessage
+    data class Binary<@Payload T>(
+        override val header: WsFrameHeader,
+        @RemainingBytes val payload: T,
+    ) : WsFrame
 
-/**
- * WebSocket frame codec using generated [WsFrameHeaderCodec] and [WsCloseBodyCodec].
- *
- * The consumer provides a `decodePayload` function that reads remaining bytes from the
- * buffer after the header. This enables zero-copy: the consumer reads directly from
- * the buffer and returns their own type `T`.
- */
-object WsFrameCodec {
-    /**
-     * Decodes a complete WebSocket frame from a pre-sized buffer.
-     *
-     * @param buffer Buffer containing exactly `headerSize + payloadLength` bytes.
-     * @param decodePayload Reads remaining bytes after header — called for all non-Close frames.
-     * @return Decoded frame with payload type [T].
-     * @throws IllegalArgumentException for reserved opcodes (0x3-0x7, 0xB-0xF).
-     */
-    fun <T> decode(
-        buffer: ReadBuffer,
-        decodePayload: ReadBuffer.() -> T,
-    ): WsFrame {
-        val header = WsFrameHeaderCodec.decode(buffer)
-        return when (header.byte1.opcode) {
-            Opcode.Text -> WsFrame.Text(header, buffer.decodePayload())
-            Opcode.Binary -> WsFrame.Binary(header, buffer.decodePayload())
-            Opcode.Continuation -> WsFrame.Continuation(header, buffer.decodePayload())
-            Opcode.Ping -> WsFrame.Ping(header, buffer.decodePayload())
-            Opcode.Pong -> WsFrame.Pong(header, buffer.decodePayload())
-            Opcode.Close -> {
-                val body = if (buffer.remaining() >= 2) WsCloseBodyCodec.decode(buffer) else null
-                WsFrame.Close(header, body)
-            }
-            else -> throw IllegalArgumentException("Reserved opcode: ${header.byte1.opcode}")
-        }
-    }
+    @PacketType(0x0)
+    @ProtocolMessage
+    data class Continuation<@Payload T>(
+        override val header: WsFrameHeader,
+        @RemainingBytes val payload: T,
+    ) : WsFrame
+
+    @PacketType(0x8)
+    @ProtocolMessage
+    data class Close(
+        override val header: WsFrameHeader,
+        @WhenRemaining(2) val body: WsCloseBody? = null,
+    ) : WsFrame
+
+    @PacketType(0x9)
+    @ProtocolMessage
+    data class Ping<@Payload T>(
+        override val header: WsFrameHeader,
+        @RemainingBytes val payload: T,
+    ) : WsFrame
+
+    @PacketType(0xA)
+    @ProtocolMessage
+    data class Pong<@Payload T>(
+        override val header: WsFrameHeader,
+        @RemainingBytes val payload: T,
+    ) : WsFrame
 }
 
 /**
