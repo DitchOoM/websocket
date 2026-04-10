@@ -433,14 +433,6 @@ class WsFrameWireTest {
         return b
     }
 
-    @JvmName("bufInts")
-    private fun buf(vararg bytes: Byte): ReadBuffer {
-        val b = BufferFactory.Default.allocate(bytes.size, ByteOrder.BIG_ENDIAN)
-        b.writeBytes(bytes)
-        b.resetForRead()
-        return b
-    }
-
     private fun allocEncode(header: WsFrameHeader, payloadSize: Int): PlatformBuffer =
         BufferFactory.Default.allocate(header.wireSize + payloadSize, ByteOrder.BIG_ENDIAN) as PlatformBuffer
 }

@@ -188,21 +188,25 @@ internal class WebSocketCodec(
                 sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
                 closed = true
                 return null
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (
-                @Suppress("TooGenericExceptionCaught") _: Exception,
+                @Suppress("TooGenericExceptionCaught") _: Throwable,
             ) {
-                // Decode error (e.g., invalid UTF-8 in close reason on some platforms)
+                // Decode error (e.g., invalid UTF-8 in close reason — JS throws non-Exception errors)
                 sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
                 closed = true
                 return null
             }
 
-            // Post-decode validation: close frame reason must be valid UTF-8
+            // Post-decode validation: close frame reason must be valid UTF-8.
+            // If readString replaced invalid bytes, re-encoding produces different bytes
+            // than the original wire payload (payloadLength - 2 bytes for status code).
             @Suppress("USELESS_IS_CHECK")
             if (frame is WsFrame.Close && frame.body != null && frame.header.payloadLength > 2) {
-                val reasonBytes = frame.body.reason.encodeToByteArray()
-                if (reasonBytes.any { it == 0xEF.toByte() } && frame.body.reason.contains('\uFFFD')) {
-                    // Replacement character in decoded reason indicates invalid UTF-8 source
+                val reasonByteCount = frame.body.reason.encodeToByteArray().size
+                val expectedByteCount = frame.header.payloadLength.toInt() - 2
+                if (reasonByteCount != expectedByteCount) {
                     sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8 in close reason")
                     closed = true
                     return null
