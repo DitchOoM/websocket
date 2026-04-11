@@ -121,7 +121,7 @@ internal class WebSocketCodec(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (
-                @Suppress("TooGenericExceptionCaught") e: Exception,
+                @Suppress("TooGenericExceptionCaught") _: Exception,
             ) {
                 // Transport or protocol error
             } finally {
@@ -538,7 +538,9 @@ internal class WebSocketCodec(
             while (buffer.hasRemaining()) {
                 transport.write(buffer, writeTimeout)
             }
-        } catch (e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
             closed = true
         }
     }

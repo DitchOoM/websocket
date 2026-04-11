@@ -90,6 +90,72 @@ class CompressionPathTest {
     @Test fun stringRoundTrip32KB() = stringRoundTrip(32768)
     @Test fun stringRoundTrip64KB() = stringRoundTrip(65536)
 
+    // Echo simulation: decompress then re-compress (like Autobahn cat-12)
+    @Test
+    fun echoRoundTrip16KB() = echoRoundTrip(16384)
+
+    @Test
+    fun echoRoundTrip32KB() = echoRoundTrip(32768)
+
+    @Test
+    fun echoRoundTrip24KB() = echoRoundTrip(24576)
+
+    @Test
+    fun echoRoundTrip28KB() = echoRoundTrip(28672)
+
+    @Test
+    fun echoRoundTrip30KB() = echoRoundTrip(30720)
+
+    @Test
+    fun echoRoundTrip31KB() = echoRoundTrip(31744)
+
+    private fun echoRoundTrip(size: Int) {
+        val serverCompressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+        val clientDecompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+        val clientCompressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
+
+        // Server compresses payload
+        val original = BufferFactory.Default.allocate(size)
+        repeat(size) { original.writeByte((it % 256).toByte()) }
+        original.resetForRead()
+
+        val serverCompressed = compressSync(original, serverCompressor)
+        val serverCompressedBuf = combineChunks(serverCompressed, BufferFactory.Default)
+        serverCompressed.freeAll()
+        println("echoRoundTrip($size): server compressed ${original.remaining()} → ${serverCompressedBuf.remaining()} bytes")
+
+        // Client decompresses
+        val decompressed = decompressToBufferSync(serverCompressedBuf, clientDecompressor, BufferFactory.Default)
+        serverCompressedBuf.freeIfNeeded()
+        assertEquals(size, decompressed.remaining(), "Decompressed size mismatch at $size")
+
+        // Client re-compresses for echo
+        val clientCompressed = compressSync(decompressed, clientCompressor)
+        val clientCompressedBuf = combineChunks(clientCompressed, BufferFactory.Default)
+        clientCompressed.freeAll()
+        println("echoRoundTrip($size): client re-compressed ${decompressed.remaining()} → ${clientCompressedBuf.remaining()} bytes")
+
+        // Server decompresses echo — verify round-trip
+        val serverDecompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw)
+        val echoResult = decompressToBufferSync(clientCompressedBuf, serverDecompressor, BufferFactory.Default)
+        clientCompressedBuf.freeIfNeeded()
+
+        assertEquals(size, echoResult.remaining(), "Echo round-trip size mismatch at $size: got ${echoResult.remaining()}")
+
+        // Verify content
+        original.position(0)
+        for (i in 0 until size) {
+            assertEquals(original.readByte(), echoResult.readByte(), "Byte mismatch at offset $i for size $size")
+        }
+
+        decompressed.freeIfNeeded()
+        echoResult.freeIfNeeded()
+        serverCompressor.close()
+        clientDecompressor.close()
+        clientCompressor.close()
+        serverDecompressor.close()
+    }
+
     // Sequential (simulates echo of multiple messages)
     @Test
     fun sequential100Messages32KB() {
