@@ -29,12 +29,13 @@ import kotlinx.coroutines.CoroutineScope
  * Performs the HTTP upgrade handshake, negotiates permessage-deflate compression,
  * and assembles a [WebSocketCodec] from composable components.
  */
-suspend fun connectWebSocket(
+suspend fun <P> connectWebSocket(
     transport: ByteStream,
     connectionOptions: WebSocketConnectionOptions,
+    payloadCodec: PayloadCodec<P>,
     parentScope: CoroutineScope? = null,
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
-): Connection<WebSocketMessage> {
+): Connection<WebSocketMessage<P>> {
+    val bufferFactory = connectionOptions.bufferFactory
     try {
         // Build handshake request
         val handshakeRequest =
@@ -107,6 +108,7 @@ suspend fun connectWebSocket(
                         stream = autoFillingStream,
                         compression = compression,
                         bufferFactory = bufferFactory,
+                        payloadCodec = payloadCodec,
                         readTimeout = connectionOptions.readTimeout,
                         writeTimeout = connectionOptions.writeTimeout,
                         parentScope = parentScope,
@@ -223,8 +225,8 @@ internal fun wrapException(e: Exception): Exception =
 /**
  * Create a platform-native WebSocket connection.
  */
-expect suspend fun connectNativeWebSocket(
+expect suspend fun <P> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
+    payloadCodec: PayloadCodec<P>,
     parentScope: CoroutineScope? = null,
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
-): Connection<WebSocketMessage>
+): Connection<WebSocketMessage<P>>

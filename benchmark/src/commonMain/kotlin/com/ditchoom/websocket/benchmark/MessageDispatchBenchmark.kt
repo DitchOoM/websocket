@@ -52,7 +52,7 @@ class MessageDispatchBenchmark {
      */
     @Benchmark
     fun channelTrySendReceive(bh: Blackhole) {
-        val channel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+        val channel = Channel<WebSocketMessage<ReadBuffer>>(Channel.UNLIMITED)
         channel.trySend(WebSocketMessage.Binary(binaryPayload))
         val result = channel.tryReceive()
         bh.consume(result.getOrNull())
@@ -64,11 +64,11 @@ class MessageDispatchBenchmark {
      */
     @Benchmark
     fun flowFilterTakeFirst(bh: Blackhole) {
-        val channel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+        val channel = Channel<WebSocketMessage<ReadBuffer>>(Channel.UNLIMITED)
         channel.trySend(WebSocketMessage.Binary(binaryPayload))
         val result = runBlocking {
             channel.receiveAsFlow()
-                .filterIsInstance<WebSocketMessage.Binary>()
+                .filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>()
                 .take(1)
                 .first()
         }
@@ -81,7 +81,7 @@ class MessageDispatchBenchmark {
      */
     @Benchmark
     fun flowFirstWithPredicate(bh: Blackhole) {
-        val channel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+        val channel = Channel<WebSocketMessage<ReadBuffer>>(Channel.UNLIMITED)
         channel.trySend(WebSocketMessage.Binary(binaryPayload))
         val result = runBlocking {
             channel.receiveAsFlow().first { it is WebSocketMessage.Binary }
@@ -120,11 +120,11 @@ class MessageDispatchBenchmark {
      */
     @Benchmark
     fun textFilterTakeFirst(bh: Blackhole) {
-        val channel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+        val channel = Channel<WebSocketMessage<String>>(Channel.UNLIMITED)
         channel.trySend(WebSocketMessage.Text(textPayload))
         val result = runBlocking {
             channel.receiveAsFlow()
-                .filterIsInstance<WebSocketMessage.Text>()
+                .filterIsInstance<WebSocketMessage.Text<String>>()
                 .take(1)
                 .first()
         }

@@ -6,6 +6,7 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
+import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
@@ -15,6 +16,7 @@ import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.websocket.frame.AssembledMessage
+import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import com.ditchoom.websocket.frame.AssemblyResult
 import com.ditchoom.websocket.frame.CloseCode
 import com.ditchoom.websocket.frame.FrameHeaderByte1
@@ -50,18 +52,19 @@ import kotlinx.coroutines.launch
  * and [WsFrameHeaderCodec] + [WsPayloadCodec] for encode (with masking via context).
  * Fragment assembly via [MessageAssembler].
  */
-internal class WebSocketCodec(
+internal class WebSocketCodec<P>(
     private val transport: ByteStream,
     private val stream: AutoFillingSuspendingStreamProcessor,
     private val compression: CompressionConfig,
     private val bufferFactory: BufferFactory,
+    private val payloadCodec: PayloadCodec<P>,
     private val readTimeout: Duration,
     private val writeTimeout: Duration,
     parentScope: CoroutineScope?,
     private val compressor: StreamingCompressor? = null,
     private val compressionEnabled: Boolean = false,
     private val resetCompressorPerMessage: Boolean = true,
-) : Connection<WebSocketMessage> {
+) : Connection<WebSocketMessage<P>> {
     private val codecJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
 
     init {
@@ -82,9 +85,9 @@ internal class WebSocketCodec(
     private var serverInitiatedClose = false
     private val stringDecoder = StreamingStringDecoder()
 
-    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    private val incomingMessageChannel = Channel<WebSocketMessage<P>>(Channel.UNLIMITED)
 
-    override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
+    override fun receive(): Flow<WebSocketMessage<P>> = incomingMessageChannel.receiveAsFlow()
 
     fun isOpen() = !closed && transport.isOpen
 
@@ -252,16 +255,33 @@ internal class WebSocketCodec(
         when (frame) {
             is WsFrame.Ping<*> -> {
                 val payload = frame.payload as ReadBuffer
-                val pongData = if (frame.header.payloadLength > 0) payload else EMPTY_BUFFER
                 val payloadStart = payload.position()
-                writePongFrame(pongData)
-                if (frame.header.payloadLength > 0) {
-                    payload.position(payloadStart)
-                }
-                incomingMessageChannel.trySend(WebSocketMessage.Ping(payload))
+                // Echo payload bytes back as Pong (RFC 6455 requires identical application data).
+                writePongFrameBytes(if (frame.header.payloadLength > 0) payload else EMPTY_BUFFER)
+                // Decode payload as UTF-8 String for the user-facing Ping message.
+                // RFC 6455 caps control frame app data at 125 bytes; it's usually empty or a small
+                // identifier, so a best-effort UTF-8 decode is fine. If bytes aren't UTF-8, we
+                // still pass through without throwing (readString replaces invalid sequences).
+                payload.position(payloadStart)
+                val appData =
+                    if (frame.header.payloadLength > 0) {
+                        payload.readString(payload.remaining(), Charset.UTF8)
+                    } else {
+                        ""
+                    }
+                payload.freeIfNeeded()
+                incomingMessageChannel.trySend(WebSocketMessage.Ping(appData))
             }
             is WsFrame.Pong<*> -> {
-                incomingMessageChannel.trySend(WebSocketMessage.Pong(frame.payload as ReadBuffer))
+                val payload = frame.payload as ReadBuffer
+                val appData =
+                    if (frame.header.payloadLength > 0) {
+                        payload.readString(payload.remaining(), Charset.UTF8)
+                    } else {
+                        ""
+                    }
+                payload.freeIfNeeded()
+                incomingMessageChannel.trySend(WebSocketMessage.Pong(appData))
             }
             is WsFrame.Close -> {
                 serverInitiatedClose = true
@@ -288,25 +308,38 @@ internal class WebSocketCodec(
     private suspend fun emitMessage(message: AssembledMessage) {
         when (message.opcode) {
             Opcode.Text -> {
-                val text =
+                val rawPayload =
                     try {
                         if (message.compressed && compression is CompressionConfig.Enabled) {
-                            decompressPayloadToString(message.payload)
+                            decompressPayload(message.payload)
                         } else {
-                            message.payload.readString(message.payload.remaining(), Charset.UTF8)
+                            message.payload
                         }
                     } catch (
-                        @Suppress("TooGenericExceptionCaught") e: Throwable,
+                        @Suppress("TooGenericExceptionCaught") _: Throwable,
                     ) {
-                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
+                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Decompression failed")
                         message.payload.freeIfNeeded()
                         return
                     }
+                val payload =
+                    try {
+                        val reader = ReadBufferPayloadReader(rawPayload)
+                        with(payloadCodec) { reader.decode() }
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught") _: Throwable,
+                    ) {
+                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
+                        if (rawPayload !== message.payload) rawPayload.freeIfNeeded()
+                        message.payload.freeIfNeeded()
+                        return
+                    }
+                if (rawPayload !== message.payload) rawPayload.freeIfNeeded()
                 message.payload.freeIfNeeded()
-                incomingMessageChannel.trySend(WebSocketMessage.Text(text))
+                incomingMessageChannel.trySend(WebSocketMessage.Text(payload))
             }
             Opcode.Binary -> {
-                val payload =
+                val rawPayload =
                     if (message.compressed && compression is CompressionConfig.Enabled) {
                         val decompressed = decompressPayload(message.payload)
                         if (decompressed !== message.payload) {
@@ -316,6 +349,18 @@ internal class WebSocketCodec(
                     } else {
                         message.payload
                     }
+                val payload =
+                    try {
+                        val reader = ReadBufferPayloadReader(rawPayload)
+                        with(payloadCodec) { reader.decode() }
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught") _: Throwable,
+                    ) {
+                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Payload decode failed")
+                        rawPayload.freeIfNeeded()
+                        return
+                    }
+                rawPayload.freeIfNeeded()
                 incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
             }
             else -> {}
@@ -355,41 +400,47 @@ internal class WebSocketCodec(
 
     // ──────────────────────── Send path ────────────────────────
 
-    override suspend fun send(message: WebSocketMessage) {
+    override suspend fun send(message: WebSocketMessage<P>) {
         if (closed) {
             throw WebSocketException.ConnectionClosed("Cannot send: not connected")
         }
         val frameBuffer =
             when (message) {
-                is WebSocketMessage.Text -> writeTextFrame(message.value)
-                is WebSocketMessage.Binary -> writeBinaryFrame(message.value)
-                is WebSocketMessage.Ping -> writePingFrame(message.value)
-                is WebSocketMessage.Pong -> encodePongFrame(message.value)
+                is WebSocketMessage.Text -> writeDataFrameFromCodec(Opcode.Text, message.payload)
+                is WebSocketMessage.Binary -> writeDataFrameFromCodec(Opcode.Binary, message.payload)
+                is WebSocketMessage.Ping -> writePingFrame(message.appData)
+                is WebSocketMessage.Pong -> encodePongFrame(message.appData)
                 is WebSocketMessage.Close -> writeCloseFrame(message.code, message.reason)
             }
         writeToTransport(frameBuffer)
         frameBuffer.freeIfNeeded()
     }
 
-    private fun writeTextFrame(
-        text: String,
+    /**
+     * Encodes a user-supplied payload [value] via [payloadCodec] into a scratch buffer,
+     * then delegates to [encodeDataFrame] for framing/compression/masking. Reuses the
+     * existing frame-encoding pipeline; the only new step is the codec writing payload
+     * bytes up front.
+     */
+    private fun writeDataFrameFromCodec(
+        opcode: Opcode,
+        value: P,
         fin: Boolean = true,
     ): ReadBuffer {
-        if (text.isEmpty()) {
-            return encodeDataFrame(Opcode.Text, EMPTY_BUFFER, fin)
+        val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
+        with(payloadCodec) { scratch.encode(value) }
+        val inner = scratch.underlying
+        val size = inner.position()
+        if (size == 0) {
+            inner.freeIfNeeded()
+            return encodeDataFrame(opcode, EMPTY_BUFFER, fin)
         }
-        val payload = (bufferFactory.allocate(text.length * 3) as PlatformBuffer)
-        payload.writeString(text, Charset.UTF8)
-        payload.resetForRead()
-        val frame = encodeDataFrame(Opcode.Text, payload, fin)
-        payload.freeIfNeeded()
+        inner.position(0)
+        inner.setLimit(size)
+        val frame = encodeDataFrame(opcode, inner, fin)
+        inner.freeIfNeeded()
         return frame
     }
-
-    private fun writeBinaryFrame(
-        data: ReadBuffer,
-        fin: Boolean = true,
-    ): ReadBuffer = encodeDataFrame(Opcode.Binary, data, fin)
 
     private fun writeCloseFrame(
         statusCode: UShort? = null,
@@ -414,30 +465,52 @@ internal class WebSocketCodec(
         )
     }
 
-    private fun writePingFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
-        val truncated = if (data.remaining() > 125) data.readBytes(125) else data
-        return encodeWsFrame(
-            WsFrame.Ping(
-                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Ping, truncated.remaining()),
-                payload = truncated,
-            ),
-        )
+    private fun writePingFrame(appData: String = ""): ReadBuffer =
+        encodeControlFrameWithAppData(Opcode.Ping, appData) { header, payload ->
+            WsFrame.Ping(header = header, payload = payload)
+        }
+
+    /** Echoes raw payload bytes (used by ping handler where the RFC requires identical app data). */
+    private suspend fun writePongFrameBytes(payloadData: ReadBuffer) {
+        val truncated = if (payloadData.remaining() > 125) payloadData.readBytes(125) else payloadData
+        val frame =
+            encodeWsFrame(
+                WsFrame.Pong(
+                    header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Pong, truncated.remaining()),
+                    payload = truncated,
+                ),
+            )
+        writeToTransport(frame)
+        frame.freeIfNeeded()
     }
 
-    private suspend fun writePongFrame(payloadData: ReadBuffer) {
-        val frameBuffer = encodePongFrame(payloadData)
-        writeToTransport(frameBuffer)
-        frameBuffer.freeIfNeeded()
-    }
+    private fun encodePongFrame(appData: String = ""): ReadBuffer =
+        encodeControlFrameWithAppData(Opcode.Pong, appData) { header, payload ->
+            WsFrame.Pong(header = header, payload = payload)
+        }
 
-    private fun encodePongFrame(data: ReadBuffer = EMPTY_BUFFER): ReadBuffer {
-        val truncated = if (data.remaining() > 125) data.readBytes(125) else data
-        return encodeWsFrame(
-            WsFrame.Pong(
-                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Pong, truncated.remaining()),
-                payload = truncated,
-            ),
-        )
+    private inline fun encodeControlFrameWithAppData(
+        opcode: Opcode,
+        appData: String,
+        build: (WsFrameHeader, ReadBuffer) -> WsFrame,
+    ): ReadBuffer {
+        if (appData.isEmpty()) {
+            return encodeWsFrame(
+                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, 0), EMPTY_BUFFER),
+            )
+        }
+        // Pessimistic UTF-8 allocation (3 bytes/char BMP); real size measured after write.
+        val scratch = bufferFactory.allocate(appData.length * 3) as PlatformBuffer
+        scratch.writeString(appData, Charset.UTF8)
+        scratch.resetForRead()
+        // RFC 6455 caps control-frame application data at 125 bytes.
+        val truncated = if (scratch.remaining() > 125) scratch.readBytes(125) else scratch
+        val frame =
+            encodeWsFrame(
+                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, truncated.remaining()), truncated),
+            )
+        scratch.freeIfNeeded()
+        return frame
     }
 
     private fun encodeDataFrame(

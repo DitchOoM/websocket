@@ -1,17 +1,16 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.flow.Connection
 import kotlinx.coroutines.CoroutineScope
 
 internal actual val supportsCustomDeflateWindowBits: Boolean = false
 internal actual val supportsDeflateContextTakeover: Boolean = true
 
-actual suspend fun connectNativeWebSocket(
+actual suspend fun <P> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
+    payloadCodec: PayloadCodec<P>,
     parentScope: CoroutineScope?,
-    bufferFactory: BufferFactory,
-): Connection<WebSocketMessage> =
+): Connection<WebSocketMessage<P>> =
     throw UnsupportedOperationException(
-        "Apple: Use connectWebSocket(transport, options) with a pre-connected ByteStream",
+        "Apple: Use connectWebSocket(transport, options, payloadCodec) with a pre-connected ByteStream",
     )

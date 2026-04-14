@@ -1,8 +1,12 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.JsBuffer
+import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader
 import com.ditchoom.buffer.flow.Connection
+import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import js.buffer.SharedArrayBuffer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -21,12 +25,33 @@ import org.w3c.dom.BinaryType
 import org.w3c.dom.CloseEvent
 import org.w3c.dom.WebSocket
 
-class BrowserWebSocketController(
+/**
+ * Browser WebSocket connection wrapping the native `WebSocket` API.
+ *
+ * Unlike the TCP-backed code path that implements RFC 6455 framing directly,
+ * the browser path delegates framing to the native `WebSocket`. The codec still
+ * bridges `P` to/from payload bytes:
+ * - **Receive**: text frames arrive as `String` (per WebSocket spec, text is always
+ *   delivered as String regardless of `binaryType`). We encode that String's UTF-8
+ *   bytes into a scratch buffer, wrap it in a `PayloadReader`, and invoke
+ *   `codec.decode`. Binary frames arrive as `ArrayBuffer` and flow through the codec
+ *   via a zero-copy slice.
+ * - **Send**: `codec.encode` writes bytes into a `GrowableWriteBuffer`. For `Binary`
+ *   we extract the bytes as an `ArrayBuffer`. For `Text` we decode the bytes back to
+ *   a String so the native API emits a text frame.
+ *
+ * The text-frame round-trip (String → bytes → String) is a small overhead to keep
+ * the API shape uniform with the TCP/native path. Callers who need browser-optimal
+ * throughput can pin `P = String` + `StringCodec` and rely on the UTF-8 encode/decode
+ * being cheap; or for perf-critical paths, use the Node.js / TCP transport.
+ */
+class BrowserWebSocketController<P>(
     private val connectionOptions: WebSocketConnectionOptions,
+    private val payloadCodec: PayloadCodec<P>,
     private val bufferFactory: BufferFactory,
     parentScope: CoroutineScope?,
     private val useSharedMemory: Boolean = false,
-) : Connection<WebSocketMessage> {
+) : Connection<WebSocketMessage<P>> {
     private val scope =
         if (parentScope == null) {
             CoroutineScope(
@@ -55,9 +80,9 @@ class BrowserWebSocketController(
     override val id: Long = 0L
     private var closed = false
     private val connectDeferred = CompletableDeferred<Unit>()
-    private val incomingMessageChannel = Channel<WebSocketMessage>(Channel.UNLIMITED)
+    private val incomingMessageChannel = Channel<WebSocketMessage<P>>(Channel.UNLIMITED)
 
-    override fun receive(): Flow<WebSocketMessage> = incomingMessageChannel.receiveAsFlow()
+    override fun receive(): Flow<WebSocketMessage<P>> = incomingMessageChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
 
@@ -119,12 +144,24 @@ class BrowserWebSocketController(
                             jsBuffer.slice()
                         }
                     scope.launch {
-                        incomingMessageChannel.trySend(WebSocketMessage.Binary(buffer))
+                        val reader = ReadBufferPayloadReader(buffer)
+                        val payload = with(payloadCodec) { reader.decode() }
+                        buffer.freeIfNeeded()
+                        incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
                     }
                 }
                 is String ->
                     scope.launch {
-                        incomingMessageChannel.trySend(WebSocketMessage.Text(data))
+                        // Encode the String as UTF-8 into a scratch buffer so the codec
+                        // can decode from a uniform PayloadReader interface.
+                        val bytes = data.encodeToByteArray()
+                        val scratch = bufferFactory.allocate(bytes.size)
+                        scratch.writeBytes(bytes)
+                        scratch.resetForRead()
+                        val reader = ReadBufferPayloadReader(scratch)
+                        val payload = with(payloadCodec) { reader.decode() }
+                        scratch.freeIfNeeded()
+                        incomingMessageChannel.trySend(WebSocketMessage.Text(payload))
                     }
                 else -> throw IllegalArgumentException("Received invalid message type!")
             }
@@ -139,24 +176,46 @@ class BrowserWebSocketController(
         }
     }
 
-    override suspend fun send(message: WebSocketMessage) {
+    override suspend fun send(message: WebSocketMessage<P>) {
         when (message) {
-            is WebSocketMessage.Text -> webSocket.send(message.value)
+            is WebSocketMessage.Text -> {
+                val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
+                with(payloadCodec) { scratch.encode(message.payload) }
+                val inner = scratch.underlying
+                val size = inner.position()
+                inner.position(0)
+                inner.setLimit(size)
+                // Text frame: convert bytes back to a String so the browser emits as text.
+                val text = inner.readString(size, Charset.UTF8)
+                inner.freeIfNeeded()
+                webSocket.send(text)
+            }
             is WebSocketMessage.Binary -> {
-                val jsBuffer = message.value as JsBuffer
+                val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
+                with(payloadCodec) { scratch.encode(message.payload) }
+                val inner = scratch.underlying
+                val size = inner.position()
+                inner.position(0)
+                inner.setLimit(size)
+                val jsBuffer = inner as JsBuffer
                 val arrayBufferView =
                     if (jsBuffer.sharedArrayBuffer != null) {
-                        val copy = Int8Array(message.value.capacity)
-                        copy.set(jsBuffer.buffer)
+                        val copy = Int8Array(size)
+                        copy.set(jsBuffer.buffer.subarray(0, size))
                         copy
                     } else {
-                        message.value.buffer.subarray(0, message.value.limit())
+                        jsBuffer.buffer.subarray(0, size)
                     }
                 webSocket.send(arrayBufferView)
+                // Note: browser-owned ArrayBuffer keeps the memory alive until the
+                // send completes; freeIfNeeded after webSocket.send is safe since the
+                // Int8Array.subarray view only references the bytes, and the browser
+                // has already copied them into its own send queue.
+                inner.freeIfNeeded()
             }
             is WebSocketMessage.Ping,
             is WebSocketMessage.Pong,
-            -> { /* Not surfaced on browser */ }
+            -> { /* Browser WebSocket API does not expose app-level ping/pong */ }
             is WebSocketMessage.Close -> webSocket.close()
         }
     }
