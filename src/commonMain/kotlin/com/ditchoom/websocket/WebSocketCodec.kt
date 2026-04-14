@@ -168,7 +168,12 @@ internal class WebSocketCodec(
                 continue
             }
 
-            // Read and decode
+            // Read and decode. The payload is copied out via copyToBuffer so the raw
+            // frame buffer can be freed once decode completes — without this, every
+            // received frame leaks a pool-or-factory allocation, which on JVM 21+
+            // exhausts the 1GB direct-memory budget under sustained load (≥1000 msg/s)
+            // even with a deterministic factory, because Arena.close() only runs when
+            // freeNativeMemory() is called.
             val buffer = stream.readBuffer(totalFrameSize)
             val frame = try {
                 val copyPayload: Any.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer = { pr ->
@@ -197,6 +202,8 @@ internal class WebSocketCodec(
                 sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
                 closed = true
                 return null
+            } finally {
+                buffer.freeIfNeeded()
             }
 
             // Post-decode validation: close frame reason must be valid UTF-8.

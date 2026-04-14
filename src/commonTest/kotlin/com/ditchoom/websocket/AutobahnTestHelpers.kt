@@ -7,12 +7,10 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.buffer.managed
 import com.ditchoom.socket.ConnectionContext
 import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.transport.TcpTransport
-import com.ditchoom.buffer.pool.ThreadingMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -48,6 +46,11 @@ internal suspend fun connectForTest(
                 ConnectionOptions(
                     socketOptions = socketOptions,
                     connectionTimeout = connectionOptions.connectionTimeout,
+                    // Propagate the caller's factory choice into the socket transport too —
+                    // otherwise the socket pool silently falls back to BufferFactory.Default
+                    // (FFM on JVM 21+) regardless of what the codec uses, and sustained
+                    // workloads hit the 1GB direct-memory cap.
+                    bufferFactory = bufferFactory,
                 ),
             ),
         )
@@ -62,17 +65,20 @@ internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
     awaitClose: Boolean = true,
+    bufferFactory: BufferFactory = BufferFactory.Default,
+    agentSuffix: String = "",
 ): Connection<WebSocketMessage> {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}$agentSuffix",
             requestCompression = requestCompression,
         )
     val websocket =
         connectForTest(
             connectionOptions,
+            bufferFactory = bufferFactory,
         )
 
     if (awaitClose) {
@@ -99,21 +105,22 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
+    agentSuffix: String = "",
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}$agentSuffix",
             requestCompression = requestCompression,
             compressionOptions = compressionOptions,
         )
-    val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
         connectForTest(
             connectionOptions,
-            bufferFactory = factory,
+            bufferFactory = bufferFactory,
         )
     val connectTime = mark.elapsedNow()
     try {
@@ -148,7 +155,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     val closeTime = totalTime - connectTime - echoTime
     val avgMsg = if (count > 0) echoTime / count else echoTime
     println(
-        "AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
+        "AUTOBAHN_TIMING [${agentName()}$agentSuffix] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
     )
 }
 
@@ -157,21 +164,22 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
+    agentSuffix: String = "",
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}$agentSuffix",
             requestCompression = requestCompression,
             compressionOptions = compressionOptions,
         )
-    val factory = if (case in 277..300 || count > 100) BufferFactory.managed() else BufferFactory.Default
     val mark = TimeSource.Monotonic.markNow()
     val ws =
         connectForTest(
             connectionOptions,
-            bufferFactory = factory,
+            bufferFactory = bufferFactory,
         )
     val connectTime = mark.elapsedNow()
     try {
@@ -199,24 +207,27 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     val closeTime = totalTime - connectTime - echoTime
     val avgMsg = if (count > 0) echoTime / count else echoTime
     println(
-        "AUTOBAHN_TIMING [${agentName()}] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
+        "AUTOBAHN_TIMING [${agentName()}$agentSuffix] case=$case count=$count connect=${connectTime.inWholeMilliseconds}ms echo=${echoTime.inWholeMilliseconds}ms close=${closeTime.inWholeMilliseconds}ms total=${totalTime.inWholeMilliseconds}ms avg_msg=${avgMsg.inWholeMicroseconds}us",
     )
 }
 
 internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     case: Int,
     requestCompression: Boolean = false,
+    bufferFactory: BufferFactory = BufferFactory.Default,
+    agentSuffix: String = "",
 ) {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
             port = 9001,
-            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}",
+            websocketEndpoint = "/runCase?case=$case&agent=${agentName()}$agentSuffix",
             requestCompression = requestCompression,
         )
     val ws =
         connectForTest(
             connectionOptions,
+            bufferFactory = bufferFactory,
         )
     try {
         val msg = ws.receive().first { it is WebSocketMessage.Text } as WebSocketMessage.Text
