@@ -2,10 +2,7 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.deterministic
-import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.shared
+import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -22,9 +19,7 @@ import kotlin.time.Duration.Companion.seconds
  * Tests valid sequences (client should emit Text message) and invalid sequences
  * (client should send close 1007).
  */
-abstract class AbstractMockAutobahnCat6Test {
-    abstract val bufferFactory: BufferFactory
-
+class MockAutobahnCat6Utf8Test {
     @Test
     fun validAscii() = testValidUtf8("ASCII")
 
@@ -107,7 +102,7 @@ abstract class AbstractMockAutobahnCat6Test {
     fun invalidUtf8InFragmentedText() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
 
             // Valid first fragment, invalid continuation
             val validPart = BufferFactory.Default.allocate(3)
@@ -138,7 +133,7 @@ abstract class AbstractMockAutobahnCat6Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
@@ -149,7 +144,7 @@ abstract class AbstractMockAutobahnCat6Test {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text>(msg)
+            assertIs<WebSocketMessage.Text<String>>(msg)
             connection.close()
         }
 
@@ -159,7 +154,7 @@ abstract class AbstractMockAutobahnCat6Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
@@ -171,24 +166,4 @@ abstract class AbstractMockAutobahnCat6Test {
             MockAutobahnHelpers.assertClientSentClose(transport.writtenBuffers, 1007u)
             connection.close()
         }
-}
-
-class MockAutobahnCat6DefaultTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.Default
-}
-
-class MockAutobahnCat6ManagedTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-}
-
-class MockAutobahnCat6DeterministicTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.deterministic()
-}
-
-class MockAutobahnCat6SharedTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.shared()
-}
-
-class MockAutobahnCat6PooledTest : AbstractMockAutobahnCat6Test() {
-    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

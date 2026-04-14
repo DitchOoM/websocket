@@ -1,12 +1,9 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.deterministic
-import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.shared
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -23,15 +20,17 @@ import kotlin.time.Duration.Companion.seconds
  * - 126 bytes (min 2-byte/16-bit length)
  * - 65535 bytes (max 16-bit length)
  * - 65536 bytes (min 8-byte/64-bit length)
+ *
+ * In v2 the payload allocator is picked by the codec / connection options, no longer a
+ * user parameter; the per-factory variants (Default/Managed/Deterministic/Shared/Pooled)
+ * that existed in v1 retired — factory-matrix coverage lives in [AllocatorLeakTests] now.
  */
-abstract class AbstractMockAutobahnCat1Test {
-    abstract val bufferFactory: BufferFactory
-
+class MockAutobahnCat1PayloadTest {
     private fun testTextPayload(
         size: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
 
         val text = "A".repeat(size)
         transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
@@ -41,9 +40,9 @@ abstract class AbstractMockAutobahnCat1Test {
             withTimeout(5.seconds) {
                 connection.receive().first()
             }
-        assertIs<WebSocketMessage.Text>(msg)
-        assertEquals(size, msg.value.length)
-        if (size <= 1024) assertEquals(text, msg.value)
+        assertIs<WebSocketMessage.Text<String>>(msg)
+        assertEquals(size, msg.payload.length)
+        if (size <= 1024) assertEquals(text, msg.payload)
         connection.close()
     }
 
@@ -51,7 +50,7 @@ abstract class AbstractMockAutobahnCat1Test {
         size: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, BinaryPassThroughCodec)
 
         val payload = BufferFactory.Default.allocate(size)
         for (i in 0 until size) payload.writeByte((i % 256).toByte())
@@ -63,8 +62,10 @@ abstract class AbstractMockAutobahnCat1Test {
             withTimeout(5.seconds) {
                 connection.receive().first()
             }
-        assertIs<WebSocketMessage.Binary>(msg)
-        assertEquals(size, msg.value.remaining())
+        assertIs<WebSocketMessage.Binary<*>>(msg)
+        @Suppress("UNCHECKED_CAST")
+        val binary = msg as WebSocketMessage.Binary<com.ditchoom.buffer.ReadBuffer>
+        assertEquals(size, binary.payload.remaining())
         connection.close()
     }
 
@@ -93,24 +94,4 @@ abstract class AbstractMockAutobahnCat1Test {
     @Test fun binary65535Bytes() = testBinaryPayload(65535)
 
     @Test fun binary65536Bytes() = testBinaryPayload(65536)
-}
-
-class MockAutobahnCat1DefaultTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.Default
-}
-
-class MockAutobahnCat1ManagedTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-}
-
-class MockAutobahnCat1DeterministicTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.deterministic()
-}
-
-class MockAutobahnCat1SharedTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.shared()
-}
-
-class MockAutobahnCat1PooledTest : AbstractMockAutobahnCat1Test() {
-    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

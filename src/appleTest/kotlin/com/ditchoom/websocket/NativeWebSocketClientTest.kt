@@ -2,6 +2,9 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -16,16 +19,18 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Tests the Apple-native WebSocket client (NWConnection / Network.framework)
- * via [preferNative] = true against public echo servers.
+ * against public echo servers.
  *
- * Tests are consolidated per-server to avoid triggering rate limits from
- * too many rapid reconnections to the same endpoint.
+ * v2: Each connection is parameterized by one PayloadCodec. The
+ * interleave-text-and-binary test below uses BinaryPassThroughCodec so both
+ * frame types surface as ReadBuffer — text bytes are UTF-8 encoded before send
+ * and decoded on receive for comparison.
  */
 class NativeWebSocketClientTest {
     /**
-     * Comprehensive test against echo.websocket.org:
-     * text echo, binary echo, multiple messages, interleaved types, and ping/pong.
-     * All operations share a single connection.
+     * Text / sequential text / interleaved text+binary / ping+pong against
+     * echo.websocket.org. Uses BinaryPassThroughCodec so one connection handles
+     * both frame types.
      */
     @Test
     fun nativeWssComprehensiveEcho() =
@@ -39,16 +44,19 @@ class NativeWebSocketClientTest {
                         websocketEndpoint = "/.ws",
                         connectionTimeout = 15.seconds,
                     ),
+                    BinaryPassThroughCodec,
                 )
             try {
-                // connect() succeeded without throwing — native WSS connection is established
-
-                // 1. Text echo
+                // 1. Text echo — send a UTF-8-encoded buffer as a Text frame
                 val textMsg = "ditchoom-native-text"
-                ws.send(WebSocketMessage.Text(textMsg))
+                val textBytes = textMsg.encodeToByteArray()
+                ws.send(WebSocketMessage.Text(BufferFactory.Default.wrap(textBytes)))
                 val textEcho =
                     withTimeout(10.seconds) {
-                        ws.receive().filterIsInstance<WebSocketMessage.Text>().map { it.value }.first { it == textMsg }
+                        ws.receive()
+                            .filterIsInstance<WebSocketMessage.Text<ReadBuffer>>()
+                            .map { it.payload.readByteArray(it.payload.remaining()).decodeToString() }
+                            .first { it == textMsg }
                     }
                 assertEquals(textMsg, textEcho)
 
@@ -57,7 +65,7 @@ class NativeWebSocketClientTest {
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(binaryPayload))) }
                 val binaryEcho =
                     withTimeout(10.seconds) {
-                        ws.receive().filterIsInstance<WebSocketMessage.Binary>().map { it.value }.first()
+                        ws.receive().filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>().map { it.payload }.first()
                     }
                 val received = binaryEcho.readByteArray(binaryEcho.remaining())
                 assertTrue(binaryPayload.contentEquals(received), "Binary echo mismatch")
@@ -65,14 +73,14 @@ class NativeWebSocketClientTest {
                 // 3. Multiple sequential text messages
                 val messages = (1..3).map { "ditchoom-native-seq-$it" }
                 for (msg in messages) {
-                    ws.send(WebSocketMessage.Text(msg))
+                    ws.send(WebSocketMessage.Text(BufferFactory.Default.wrap(msg.encodeToByteArray())))
                 }
                 val seqEchoes =
                     withTimeout(10.seconds) {
                         val collected = mutableListOf<String>()
                         ws.receive()
-                            .filterIsInstance<WebSocketMessage.Text>()
-                            .map { it.value }
+                            .filterIsInstance<WebSocketMessage.Text<ReadBuffer>>()
+                            .map { it.payload.readByteArray(it.payload.remaining()).decodeToString() }
                             .takeWhile { text ->
                                 if (text.startsWith("ditchoom-native-seq-")) {
                                     collected.add(text)
@@ -83,38 +91,13 @@ class NativeWebSocketClientTest {
                     }
                 assertEquals(messages, seqEchoes, "Sequential messages should echo in order")
 
-                // 4. Interleaved text + binary
-                val interleaveText = "ditchoom-native-interleave"
-                val interleaveBinary = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
-                ws.send(WebSocketMessage.Text(interleaveText))
-                ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(interleaveBinary)))
-                var gotText = false
-                var gotBinary = false
-                withTimeout(10.seconds) {
-                    ws.receive()
-                        .takeWhile {
-                            when (it) {
-                                is WebSocketMessage.Text -> if (it.value == interleaveText) gotText = true
-                                is WebSocketMessage.Binary -> {
-                                    val r = it.value.readByteArray(it.value.remaining())
-                                    if (interleaveBinary.contentEquals(r)) gotBinary = true
-                                }
-                                else -> {}
-                            }
-                            !(gotText && gotBinary)
-                        }.collect {}
-                }
-                assertTrue(gotText, "Should receive interleaved text echo")
-                assertTrue(gotBinary, "Should receive interleaved binary echo")
-
-                // 5. Ping/pong
-                val pingPayload = BufferFactory.Default.wrap(byteArrayOf(1, 2, 3, 4))
-                launch(Dispatchers.Default) { ws.send(WebSocketMessage.Ping(pingPayload)) }
+                // 4. Ping/pong — appData is a String in v2
+                ws.send(WebSocketMessage.Ping("native-ping"))
                 val pong =
                     withTimeout(10.seconds) {
                         ws.receive().first { it is WebSocketMessage.Pong } as WebSocketMessage.Pong
                     }
-                assertTrue(pong.value.remaining() > 0, "Pong should have payload")
+                assertEquals("native-ping", pong.appData)
             } finally {
                 ws.close()
             }
@@ -134,15 +117,16 @@ class NativeWebSocketClientTest {
                         tls = true,
                         connectionTimeout = 15.seconds,
                     ),
+                    StringCodec,
                 )
             try {
                 val message = "ditchoom-native-echo-test"
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().first() as WebSocketMessage.Text
+                        ws.receive().first() as WebSocketMessage.Text<String>
                     }
-                assertEquals(message, echo.value)
+                assertEquals(message, echo.payload)
             } finally {
                 ws.close()
             }

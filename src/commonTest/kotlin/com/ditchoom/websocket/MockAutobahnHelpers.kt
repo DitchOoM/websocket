@@ -53,14 +53,16 @@ internal object MockAutobahnHelpers {
     // Connection creation (uses connectWebSocket directly — no DefaultWebSocketClient)
     // ========================================================================
 
-    suspend fun connectWithHandshake(
+    suspend fun <P> connectWithHandshake(
         transport: MockWebSocketTransport,
+        payloadCodec: PayloadCodec<P>,
         options: WebSocketConnectionOptions = defaultOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage> = coroutineScope {
+    ): Connection<WebSocketMessage<P>> = coroutineScope {
+        val resolved = options.copy(bufferFactory = bufferFactory)
         val connectJob =
             async {
-                connectWebSocket(transport, options, bufferFactory = bufferFactory)
+                connectWebSocket(transport, resolved, payloadCodec)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
@@ -68,14 +70,16 @@ internal object MockAutobahnHelpers {
         withTimeout(5.seconds) { connectJob.await() }
     }
 
-    suspend fun connectWithCompressionHandshake(
+    suspend fun <P> connectWithCompressionHandshake(
         transport: MockWebSocketTransport,
+        payloadCodec: PayloadCodec<P>,
         options: WebSocketConnectionOptions = compressionOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage> = coroutineScope {
+    ): Connection<WebSocketMessage<P>> = coroutineScope {
+        val resolved = options.copy(bufferFactory = bufferFactory)
         val connectJob =
             async {
-                connectWebSocket(transport, options, bufferFactory = bufferFactory)
+                connectWebSocket(transport, resolved, payloadCodec)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])

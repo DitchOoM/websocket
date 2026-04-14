@@ -3,10 +3,13 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.managed
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -24,6 +27,7 @@ class CompressionEchoTest {
         val transport = MockWebSocketTransport()
         val connection = MockAutobahnHelpers.connectWithCompressionHandshake(
             transport,
+            StringCodec,
             bufferFactory = BufferFactory.managed(),
         )
 
@@ -40,8 +44,8 @@ class CompressionEchoTest {
         compressor.close()
 
         val msg = withTimeout(10.seconds) { connection.receive().first() }
-        assertIs<WebSocketMessage.Text>(msg)
-        assertEquals(size, msg.value.length, "Text echo failed at $size bytes: got ${msg.value.length}")
+        assertIs<WebSocketMessage.Text<String>>(msg)
+        assertEquals(size, msg.payload.length, "Text echo failed at $size bytes: got ${msg.payload.length}")
         connection.close()
     }
 
@@ -49,6 +53,7 @@ class CompressionEchoTest {
         val transport = MockWebSocketTransport()
         val connection = MockAutobahnHelpers.connectWithCompressionHandshake(
             transport,
+            BinaryPassThroughCodec,
             bufferFactory = BufferFactory.managed(),
         )
 
@@ -63,8 +68,10 @@ class CompressionEchoTest {
         compressor.close()
 
         val msg = withTimeout(10.seconds) { connection.receive().first() }
-        assertIs<WebSocketMessage.Binary>(msg)
-        assertEquals(size, msg.value.remaining(), "Binary echo failed at $size bytes: got ${msg.value.remaining()}")
+        assertIs<WebSocketMessage.Binary<*>>(msg)
+        @Suppress("UNCHECKED_CAST")
+        val binary = msg as WebSocketMessage.Binary<ReadBuffer>
+        assertEquals(size, binary.payload.remaining(), "Binary echo failed at $size bytes: got ${binary.payload.remaining()}")
         connection.close()
     }
 

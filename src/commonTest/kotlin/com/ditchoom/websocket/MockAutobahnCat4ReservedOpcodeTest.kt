@@ -1,11 +1,6 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.deterministic
-import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.shared
+import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -17,13 +12,11 @@ import kotlin.time.Duration.Companion.seconds
  * RFC 6455 Section 5.2: Opcodes 0x3-0x7 (non-control) and 0xB-0xF (control)
  * are reserved. A client receiving a reserved opcode MUST close with 1002 (Protocol Error).
  */
-abstract class AbstractMockAutobahnCat4Test {
-    abstract val bufferFactory: BufferFactory
-
+class MockAutobahnCat4ReservedOpcodeTest {
     private fun testReservedOpcode(opcodeValue: Int) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = bufferFactory)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
 
             // FIN=1 | opcode, payload length=0
             transport.enqueueReadBytes((0x80 or opcodeValue).toByte(), 0x00)
@@ -56,24 +49,4 @@ abstract class AbstractMockAutobahnCat4Test {
     @Test fun reservedOpcode0xE() = testReservedOpcode(0xE)
 
     @Test fun reservedOpcode0xF() = testReservedOpcode(0xF)
-}
-
-class MockAutobahnCat4DefaultTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.Default
-}
-
-class MockAutobahnCat4ManagedTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.managed()
-}
-
-class MockAutobahnCat4DeterministicTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.deterministic()
-}
-
-class MockAutobahnCat4SharedTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferFactory.shared()
-}
-
-class MockAutobahnCat4PooledTest : AbstractMockAutobahnCat4Test() {
-    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
 }

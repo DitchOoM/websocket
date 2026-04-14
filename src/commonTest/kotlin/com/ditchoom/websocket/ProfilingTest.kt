@@ -5,6 +5,8 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
@@ -43,7 +45,7 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = connectForTest(connectionOptions, bufferFactory = BufferFactory.managed())
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()), BinaryPassThroughCodec)
 
             // Force GC before measurement
             forceGc()
@@ -89,7 +91,7 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = connectForTest(connectionOptions)
+                val ws = connectForTest(connectionOptions, StringCodec)
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
             }
@@ -208,7 +210,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = connectForTest(connectionOptions, bufferFactory = factory)
+        val ws = connectForTest(connectionOptions.copy(bufferFactory = factory), BinaryPassThroughCodec)
         val connectTime = connectMark.elapsedNow()
 
         // Echo loop - measure write and read separately
@@ -229,7 +231,10 @@ class ProfilingTest {
                 buf.position(0)
                 ws.send(WebSocketMessage.Binary(buf))
             } else {
-                ws.send(WebSocketMessage.Text(textPayload))
+                val buf = factory.allocate(payloadSize)
+                buf.writeString(textPayload)
+                buf.resetForRead()
+                ws.send(WebSocketMessage.Text(buf))
             }
             writeTimes.add(wMark.elapsedNow().inWholeMicroseconds)
 
