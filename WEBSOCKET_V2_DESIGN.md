@@ -247,9 +247,30 @@ Rough shape of the commits:
 - The `BufferPool`'s LIFO-without-size-classes behavior under mixed payload sizes. Worth a follow-up in the `buffer` repo.
 - The double-pooling behavior when a user passes a `BufferPool` as the factory (gets wrapped in another `BufferPool` by `ConnectionContext`). Also a `buffer`/`socket` repo concern.
 
-## References
+## References (post-implementation)
 
-- `../mqtt/models-base/src/commonMain/kotlin/com/ditchoom/mqtt/controlpacket/IPublishMessage.kt` — the generic-payload pattern we're mirroring.
-- `../buffer/buffer-codec/src/commonMain/kotlin/com/ditchoom/buffer/codec/annotations/Annotations.kt` — `@ProtocolMessage`, `@Payload`, KSP annotations we reuse.
-- `src/commonTest/kotlin/com/ditchoom/websocket/AllocatorLeakTests.kt` — regression harness that will port cleanly to v2.
-- `src/commonTest/kotlin/com/ditchoom/websocket/AutobahnStressTests.kt` — factory-parameterized stress; v2 retires the parameterization and keeps the shape.
+Library code:
+- `src/commonMain/kotlin/com/ditchoom/websocket/WebSocketMessage.kt` — generic sealed interface `WebSocketMessage<out P>`. Text/Binary carry a `payload: P`; Ping/Pong/Close are `WebSocketMessage<Nothing>` with fixed String/UShort fields.
+- `src/commonMain/kotlin/com/ditchoom/websocket/PayloadCodec.kt` — `PayloadDecoder<P>` / `PayloadEncoder<P>` fun interfaces + combined `PayloadCodec<P>`.
+- `src/commonMain/kotlin/com/ditchoom/websocket/codecs/StringCodec.kt`, `EmptyCodec.kt`, `BinaryPassThroughCodec.kt` — built-in codecs.
+- `src/commonMain/kotlin/com/ditchoom/websocket/Factory.kt` — `connectWebSocket<P>(transport, opts, payloadCodec)`.
+- `src/commonMain/kotlin/com/ditchoom/websocket/WebSocketConnectionOptions.kt` — adds `bufferFactory` field (defaults `BufferFactory.deterministic()`).
+- `src/commonMain/kotlin/com/ditchoom/websocket/WebSocketCodec.kt` — `WebSocketCodec<P>`. Data-frame decode path invokes `payloadCodec.decode(reader)` over the assembled payload; send path goes through `writeDataFrameFromCodec` which scratch-encodes via `GrowableWriteBuffer` and delegates to the existing frame-encoding pipeline.
+- `src/commonMain/kotlin/com/ditchoom/websocket/internal/GrowableWriteBuffer.kt` — local copy of `buffer-codec`'s internal growable `WriteBuffer`, needed because the upstream class is module-internal.
+- `src/jsMain/kotlin/com/ditchoom/websocket/BrowserWebSocketController.kt` — `BrowserWebSocketController<P>`. Bridges the browser's String/ArrayBuffer API to the codec; text-frame round-trip adds a UTF-8 encode/decode cost documented in the file header.
+
+Tests:
+- `src/commonTest/kotlin/com/ditchoom/websocket/PayloadCodecRoundTripTests.kt` — round-trip tests for the three built-in codecs.
+- `src/commonTest/kotlin/com/ditchoom/websocket/AllocatorLeakTests.kt` — factory-matrix leak regression, parameterized over Default/Managed/Deterministic/Shared via a user-constructed `BufferPool`.
+- `src/commonTest/kotlin/com/ditchoom/websocket/MockAutobahnCat{1,2,4,5,6,7,9}*Test.kt` — collapsed from 5 per-factory variants to one class per category.
+- `src/commonTest/kotlin/com/ditchoom/websocket/AutobahnTestHelpers.kt` — `echoMessageAndClose` uses `StringCodec`, `echoBinaryMessageAndClose` uses `BinaryPassThroughCodec`.
+
+Cross-repo reference:
+- `../mqtt/models-base/src/commonMain/kotlin/com/ditchoom/mqtt/controlpacket/IPublishMessage.kt` — the generic-payload pattern v2 mirrors.
+- `../mqtt/mqtt-client/src/commonMain/kotlin/com/ditchoom/mqtt/client/PayloadCodec.kt` — `PayloadDecoder`/`PayloadEncoder` fun-interface shape we adopted.
+- `../buffer/buffer-codec/src/commonMain/kotlin/com/ditchoom/buffer/codec/annotations/Annotations.kt` — `@ProtocolMessage`, `@Payload` annotations compatible with v2 (define a `@ProtocolMessage` type, wrap its KSP-generated codec in a `PayloadCodec<T>` adapter).
+
+Follow-ups not done in v2:
+- True header backpatch on encode — the send path still goes through the scratch-then-copy flow for compatibility with `encodeDataFrame`'s compression handling. Saving the intermediate copy needs either a refactor of the compression branch or a new uncompressed-only fast path.
+- Zero-copy binary receive — `BinaryPassThroughCodec.decode` calls `PayloadReader.copyToBuffer()` which still copies. Going to a ref-counted slice (or transferring frame-buffer ownership to the message) would eliminate this for callers who hold the returned buffer briefly.
+- Elimination of the intermediate `copyToBuffer(bufferFactory)` inside `WebSocketCodec.readNextFrame` — requires reworking `MessageAssembler` to operate on `PayloadReader`s rather than materialized `ReadBuffer`s.
