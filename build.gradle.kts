@@ -144,6 +144,23 @@ kotlin {
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
+        androidInstrumentedTest.dependsOn(commonJvmTest)
+
+        // R8 refuses to emit Kotlin backtick method names containing spaces into
+        // dex at any minSdk. Parser unit tests use such names — exclude those
+        // files from the Android instrumentation Kotlin compilation. (Covered by jvmTest.)
+        tasks.matching { it.name == "compileDebugAndroidTestKotlinAndroid" }.configureEach {
+            val compile = this as org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+            compile.exclude(
+                "**/frame/WsFrameWireTest.kt",
+                "**/frame/WsFrameCodecTest.kt",
+                "**/frame/FrameReaderTest.kt",
+                "**/frame/MessageAssemblerTest.kt",
+                "**/handshake/HandshakeRequestTest.kt",
+                "**/handshake/HandshakeResponseParserTest.kt",
+                "**/handshake/HandshakeValidatorTest.kt",
+            )
+        }
 
         androidInstrumentedTest.dependencies {
             implementation(kotlin("test"))
@@ -254,8 +271,48 @@ android {
     compileSdk = 36
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 21
+        // Library minSdk is 21; tests need 26 so D8 emits dex v040 which allows
+        // spaces in identifiers (Kotlin backtick test names). Override to 26 only
+        // when building the instrumentation test APK via -PinstrumentedTestsMinSdk26.
+        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 21
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
+        // profilingTestPatterns / integrationTestPatterns filters applied above
+        // via tasks.withType<Test> do not affect it. Filter at the runner instead.
+        val profilingClasses =
+            listOf(
+                "com.ditchoom.websocket.ProfilingTest",
+                "com.ditchoom.websocket.TimingProfilingTest",
+            )
+        val integrationClasses =
+            listOf(
+                "com.ditchoom.websocket.AutobahnCase1PayloadTests",
+                "com.ditchoom.websocket.AutobahnCase2FragmentationTests",
+                "com.ditchoom.websocket.AutobahnCase3Utf8Tests",
+                "com.ditchoom.websocket.AutobahnCase4ReservedOpcodeTests",
+                "com.ditchoom.websocket.AutobahnCase5ControlFrameTests",
+                "com.ditchoom.websocket.AutobahnCase6PingPongTests",
+                "com.ditchoom.websocket.AutobahnCase7CloseTests",
+                "com.ditchoom.websocket.AutobahnCase9CompressionTests",
+                "com.ditchoom.websocket.AutobahnCase10MiscTests",
+                "com.ditchoom.websocket.AutobahnCase12CompressionTests",
+                "com.ditchoom.websocket.AutobahnCase13CompressionTests",
+                "com.ditchoom.websocket.AutobahnStressDefaultTests",
+                "com.ditchoom.websocket.AutobahnStressManagedTests",
+                "com.ditchoom.websocket.AutobahnStressDeterministicTests",
+                "com.ditchoom.websocket.AutobahnStressSharedTests",
+                "com.ditchoom.websocket.AutobahnStressPooledTests",
+                "com.ditchoom.websocket.WebSocketTests",
+                "com.ditchoom.websocket.PublicWssValidationTest",
+            )
+        val notClasses = buildList {
+            addAll(profilingClasses)
+            if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
+        }
+        if (notClasses.isNotEmpty()) {
+            testInstrumentationRunnerArguments["notClass"] = notClasses.joinToString(",")
+        }
     }
     namespace = "$group.${rootProject.name}"
 
@@ -490,6 +547,10 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
             val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
             val failures = mutableListOf<String>()
             json.forEach { (agent, cases) ->
+                // Skip stress agents — they exist for factory-matrix coverage and
+                // their pass/fail is judged by the JUnit assertion completing without
+                // exception, not by per-case fuzzingserver validation.
+                if (agent.contains("-stress-")) return@forEach
                 // Skip agents not in the filter set (when a filter is specified)
                 if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
                 @Suppress("UNCHECKED_CAST")
@@ -531,6 +592,10 @@ val validateAutobahnResultsBrowser =
     tasks.register("validateAutobahnResultsBrowser") {
         doLast(createAutobahnValidationAction(setOf("BrowserJS")))
     }
+val validateAutobahnResultsAndroid =
+    tasks.register("validateAutobahnResultsAndroid") {
+        doLast(createAutobahnValidationAction(setOf("Android")))
+    }
 // Validates all agents (used by the convenience integrationTest task)
 val validateAutobahnResults =
     tasks.register("validateAutobahnResults") {
@@ -549,6 +614,12 @@ if (runIntegrationTests) {
         dependsOn(echoWebsocket)
         dependsOn(autobahnContainer)
         finalizedBy(validateAutobahnResultsLinuxX64)
+    }
+    // AGP's connectedDebugAndroidTest is not a gradle Test task - wire it by name.
+    tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        finalizedBy(validateAutobahnResultsAndroid)
     }
     tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
         dependsOn(echoWebsocket)
