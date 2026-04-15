@@ -146,22 +146,6 @@ kotlin {
         androidUnitTest.dependsOn(commonJvmTest)
         androidInstrumentedTest.dependsOn(commonJvmTest)
 
-        // R8 refuses to emit Kotlin backtick method names containing spaces into
-        // dex at any minSdk. Parser unit tests use such names — exclude those
-        // files from the Android instrumentation Kotlin compilation. (Covered by jvmTest.)
-        tasks.matching { it.name == "compileDebugAndroidTestKotlinAndroid" }.configureEach {
-            val compile = this as org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-            compile.exclude(
-                "**/frame/WsFrameWireTest.kt",
-                "**/frame/WsFrameCodecTest.kt",
-                "**/frame/FrameReaderTest.kt",
-                "**/frame/MessageAssemblerTest.kt",
-                "**/handshake/HandshakeRequestTest.kt",
-                "**/handshake/HandshakeResponseParserTest.kt",
-                "**/handshake/HandshakeValidatorTest.kt",
-            )
-        }
-
         androidInstrumentedTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.core)

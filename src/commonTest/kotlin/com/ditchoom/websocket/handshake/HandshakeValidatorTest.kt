@@ -47,7 +47,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - status code 101 is valid`() {
+    fun rfc6455Section41StatusCode101IsValid() {
         // "If the status code received from the server is not 101, the client
         // handles the response per HTTP [RFC2616] procedures."
         val response = validResponse(statusCode = 101)
@@ -58,7 +58,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - status code 200 fails validation`() {
+    fun rfc6455Section41StatusCode200FailsValidation() {
         val response = validResponse(statusCode = 200)
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -69,7 +69,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - status code 400 fails validation`() {
+    fun rfc6455Section41StatusCode400FailsValidation() {
         val response = validResponse(statusCode = 400)
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -80,7 +80,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - status code 426 fails validation`() {
+    fun rfc6455Section41StatusCode426FailsValidation() {
         // 426 Upgrade Required - server wants different protocol version
         val response = validResponse(statusCode = 426)
 
@@ -97,7 +97,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - Upgrade header websocket is valid`() {
+    fun rfc6455Section41UpgradeHeaderWebsocketIsValid() {
         // "If the response lacks an |Upgrade| header field or the |Upgrade|
         // header field contains a value that is not an ASCII case-insensitive
         // match for the value 'websocket', the client MUST Fail the WebSocket
@@ -110,7 +110,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - Upgrade header case insensitive - WebSocket`() {
+    fun rfc6455Section41UpgradeHeaderCaseInsensitiveWebSocket() {
         val response = validResponse(upgrade = "WebSocket")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -119,7 +119,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - Upgrade header case insensitive - WEBSOCKET`() {
+    fun rfc6455Section41UpgradeHeaderCaseInsensitiveWEBSOCKET() {
         val response = validResponse(upgrade = "WEBSOCKET")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -128,7 +128,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - missing Upgrade header fails`() {
+    fun rfc6455Section41MissingUpgradeHeaderFails() {
         val response =
             HandshakeResponse(
                 statusCode = 101,
@@ -149,7 +149,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - wrong Upgrade value fails`() {
+    fun rfc6455Section41WrongUpgradeValueFails() {
         val response = validResponse(upgrade = "http")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -165,7 +165,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - Connection header Upgrade is valid`() {
+    fun rfc6455Section41ConnectionHeaderUpgradeIsValid() {
         // "If the response lacks a |Connection| header field or the
         // |Connection| header field doesn't contain a token that is an ASCII
         // case-insensitive match for the value 'Upgrade', the client MUST
@@ -178,7 +178,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - Connection header case insensitive - upgrade`() {
+    fun rfc6455Section41ConnectionHeaderCaseInsensitiveUpgrade() {
         val response = validResponse(connection = "upgrade")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -187,7 +187,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - Connection header with multiple tokens`() {
+    fun rfc6455Section41ConnectionHeaderWithMultipleTokens() {
         // Connection header can contain multiple tokens
         val response = validResponse(connection = "keep-alive, Upgrade")
 
@@ -197,7 +197,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - missing Connection header fails`() {
+    fun rfc6455Section41MissingConnectionHeaderFails() {
         val response =
             HandshakeResponse(
                 statusCode = 101,
@@ -218,7 +218,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - Connection without Upgrade token fails`() {
+    fun rfc6455Section41ConnectionWithoutUpgradeTokenFails() {
         val response = validResponse(connection = "keep-alive")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -234,7 +234,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - valid Sec-WebSocket-Accept passes`() {
+    fun rfc6455Section41ValidSecWebSocketAcceptPasses() {
         // "If the response lacks a |Sec-WebSocket-Accept| header field or the
         // |Sec-WebSocket-Accept| contains a value other than the base64-encoded
         // SHA-1 [...], the client MUST Fail the WebSocket Connection."
@@ -246,7 +246,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - missing Sec-WebSocket-Accept fails`() {
+    fun rfc6455Section41MissingSecWebSocketAcceptFails() {
         val response = validResponse(acceptKey = null)
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -257,7 +257,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - wrong Sec-WebSocket-Accept value fails`() {
+    fun rfc6455Section41WrongSecWebSocketAcceptValueFails() {
         val response = validResponse(acceptKey = "wrongvalue==")
 
         val result = HandshakeValidator.validate(response, validAcceptKey)
@@ -273,7 +273,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - selected protocol was offered - valid`() {
+    fun rfc6455Section41SelectedProtocolWasOfferedValid() {
         // "If the response includes a |Sec-WebSocket-Protocol| header field
         // and this header field indicates the use of a subprotocol that was
         // not present in the client's handshake [...], the client MUST Fail
@@ -291,7 +291,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - selected protocol was not offered - fails`() {
+    fun rfc6455Section41SelectedProtocolWasNotOfferedFails() {
         val response = validResponse(protocol = "unknown")
 
         val result =
@@ -307,7 +307,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - no protocol selected when none offered - valid`() {
+    fun rfc6455Section41NoProtocolSelectedWhenNoneOfferedValid() {
         val response = validResponse(protocol = null)
 
         val result =
@@ -321,7 +321,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - protocol selected when none offered - valid`() {
+    fun rfc6455Section41ProtocolSelectedWhenNoneOfferedValid() {
         // If client didn't offer protocols, server can still select one
         // (this is a server-initiated protocol)
         val response = validResponse(protocol = "server-protocol")
@@ -342,7 +342,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-1 - extension was offered - valid`() {
+    fun rfc6455Section41ExtensionWasOfferedValid() {
         // "If the response includes a |Sec-WebSocket-Extensions| header field
         // and this header field indicates the use of an extension that was
         // not present in the client's handshake [...], the client MUST Fail
@@ -363,7 +363,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - extension was not offered - fails`() {
+    fun rfc6455Section41ExtensionWasNotOfferedFails() {
         val response =
             validResponse(
                 extensions = listOf(ExtensionOffer("unknown-extension", emptyMap())),
@@ -382,7 +382,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - no extensions when none offered - valid`() {
+    fun rfc6455Section41NoExtensionsWhenNoneOfferedValid() {
         val response = validResponse(extensions = emptyList())
 
         val result =
@@ -396,7 +396,7 @@ class HandshakeValidatorTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-1 - extension when none offered - valid`() {
+    fun rfc6455Section41ExtensionWhenNoneOfferedValid() {
         // If client didn't offer extensions, server offering one is actually
         // protocol-compliant (though unusual). The check only applies when
         // client did offer extensions.
@@ -420,7 +420,7 @@ class HandshakeValidatorTest {
     // ========================================================================
 
     @Test
-    fun `validation stops at first error - status code before headers`() {
+    fun validationStopsAtFirstErrorStatusCodeBeforeHeaders() {
         val response =
             validResponse(
                 statusCode = 400,

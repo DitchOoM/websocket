@@ -29,7 +29,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - RFC 5-7 Example 1 - unmasked text Hi`() {
+    fun decodeRFC57Example1UnmaskedTextHi() {
         // 0x81 0x05 0x48 0x65 0x6C 0x6C 0x6F ("Hello")
         val buffer = buf(0x81, 0x05, 0x48, 0x65, 0x6C, 0x6C, 0x6F)
         val frame = decodeTestFrame(buffer)
@@ -42,7 +42,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - unmasked empty text frame`() {
+    fun decodeUnmaskedEmptyTextFrame() {
         val buffer = buf(0x81, 0x00)
         val frame = decodeTestFrame(buffer)
 
@@ -52,7 +52,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - unmasked binary frame`() {
+    fun decodeUnmaskedBinaryFrame() {
         val buffer = buf(0x82, 0x03, 0x01, 0x02, 0x03)
         val frame = decodeSkipPayload(buffer)
 
@@ -61,7 +61,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - FIN=0 text fragment`() {
+    fun decodeFIN0TextFragment() {
         val buffer = buf(0x01, 0x02, 0x48, 0x69) // FIN=0, Text, "Hi"
         val frame = decodeTestFrame(buffer)
 
@@ -70,7 +70,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - continuation frame`() {
+    fun decodeContinuationFrame() {
         val buffer = buf(0x80, 0x02, 0x48, 0x69) // FIN=1, Continuation, "Hi"
         val frame = decodeTestFrame(buffer)
 
@@ -83,7 +83,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - 16-bit extended length boundary 126`() {
+    fun decode16BitExtendedLengthBoundary126() {
         val payload = ByteArray(126) { 0x41 }
         val header = byteArrayOf(0x82.toByte(), 0x7E, 0x00, 0x7E)
         val buffer = buf(header + payload)
@@ -93,7 +93,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - 16-bit extended length 300`() {
+    fun decode16BitExtendedLength300() {
         val payload = ByteArray(300) { 0x42 }
         val header = byteArrayOf(0x82.toByte(), 0x7E, 0x01, 0x2C)
         val buffer = buf(header + payload)
@@ -103,7 +103,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - 64-bit extended length 70000`() {
+    fun decode64BitExtendedLength70000() {
         val payload = ByteArray(70000) { 0x43 }
         val header = byteArrayOf(
             0x82.toByte(), 0x7F,
@@ -120,7 +120,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - RSV1 set for compression`() {
+    fun decodeRSV1SetForCompression() {
         val buffer = buf(0xC1, 0x00) // FIN=1, RSV1=1, Text
         val frame = decodeTestFrame(buffer)
 
@@ -130,7 +130,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - all RSV bits set`() {
+    fun decodeAllRSVBitsSet() {
         val buffer = buf(0xF1, 0x00) // FIN=1, RSV1=1, RSV2=1, RSV3=1, Text
         val frame = decodeTestFrame(buffer)
 
@@ -144,7 +144,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - close frame with status 1000`() {
+    fun decodeCloseFrameWithStatus1000() {
         val buffer = buf(0x88, 0x02, 0x03, 0xE8) // Close, len=2, code=1000
         val frame = decodeTestFrame(buffer)
 
@@ -156,7 +156,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - close frame with status and reason`() {
+    fun decodeCloseFrameWithStatusAndReason() {
         val reason = "bye"
         val reasonBytes = reason.encodeToByteArray()
         val buffer = buf(byteArrayOf(0x88.toByte(), (2 + reasonBytes.size).toByte(), 0x03, 0xE8.toByte()) + reasonBytes)
@@ -169,7 +169,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - close frame with empty payload`() {
+    fun decodeCloseFrameWithEmptyPayload() {
         val buffer = buf(0x88, 0x00) // Close, len=0
         val frame = decodeTestFrame(buffer)
 
@@ -178,7 +178,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - close frame with 1 byte payload has no body`() {
+    fun decodeCloseFrameWith1BytePayloadHasNoBody() {
         val buffer = buf(0x88, 0x01, 0xFF) // Close, len=1 (invalid per RFC but codec handles it)
         val frame = decodeTestFrame(buffer)
 
@@ -191,7 +191,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - ping with payload`() {
+    fun decodePingWithPayload() {
         val buffer = buf(0x89, 0x04, 0x70, 0x69, 0x6E, 0x67) // Ping, "ping"
         val frame = decodeTestFrame(buffer)
 
@@ -200,7 +200,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - pong with payload`() {
+    fun decodePongWithPayload() {
         val buffer = buf(0x8A, 0x04, 0x70, 0x6F, 0x6E, 0x67) // Pong, "pong"
         val frame = decodeTestFrame(buffer)
 
@@ -209,7 +209,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - empty ping`() {
+    fun decodeEmptyPing() {
         val buffer = buf(0x89, 0x00)
         val frame = decodeTestFrame(buffer)
 
@@ -222,7 +222,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `decode - reserved opcode 0x3 throws`() {
+    fun decodeReservedOpcode0x3Throws() {
         val buffer = buf(0x83, 0x00) // FIN=1, opcode=3
         assertFailsWith<IllegalArgumentException> {
             decodeTestFrame(buffer)
@@ -230,7 +230,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `decode - reserved opcode 0xB throws`() {
+    fun decodeReservedOpcode0xBThrows() {
         val buffer = buf(0x8B, 0x00) // FIN=1, opcode=0xB
         assertFailsWith<IllegalArgumentException> {
             decodeTestFrame(buffer)
@@ -242,7 +242,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `encode - unmasked text Hi wire bytes`() {
+    fun encodeUnmaskedTextHiWireBytes() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
             payloadSize = 2,
@@ -260,7 +260,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - close frame 1000 wire bytes`() {
+    fun encodeCloseFrame1000WireBytes() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Close),
             payloadSize = 2,
@@ -278,7 +278,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - RSV1 set produces 0xC1`() {
+    fun encodeRSV1SetProduces0xC1() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, rsv1 = true, false, false, Opcode.Text),
             payloadSize = 0,
@@ -292,7 +292,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - masked frame has MASK bit and 4-byte key`() {
+    fun encodeMaskedFrameHasMASKBitAnd4ByteKey() {
         val mask = WsMaskingKey(0xDEADBEEFu)
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
@@ -317,7 +317,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - 16-bit extended length wire format`() {
+    fun encode16BitExtendedLengthWireFormat() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
             payloadSize = 256,
@@ -334,7 +334,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - 64-bit extended length wire format`() {
+    fun encode64BitExtendedLengthWireFormat() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
             payloadSize = 70000,
@@ -358,7 +358,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `encode - FIN=0 fragment wire format`() {
+    fun encodeFIN0FragmentWireFormat() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin = false, false, false, false, Opcode.Text),
             payloadSize = 0,
@@ -376,7 +376,7 @@ class WsFrameWireTest {
     // ========================================================================
 
     @Test
-    fun `round-trip - unmasked text frame`() {
+    fun roundTripUnmaskedTextFrame() {
         val header = WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
             payloadSize = 5,
@@ -393,7 +393,7 @@ class WsFrameWireTest {
     }
 
     @Test
-    fun `round-trip - close frame with reason`() {
+    fun roundTripCloseFrameWithReason() {
         val reason = "goodbye"
         val reasonBytes = reason.encodeToByteArray()
         val payloadSize = 2 + reasonBytes.size

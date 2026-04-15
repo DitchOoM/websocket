@@ -29,7 +29,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `single text frame returns complete message`() {
+    fun singleTextFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello"))
 
@@ -40,7 +40,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `single binary frame returns complete message`() {
+    fun singleBinaryFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(binaryFrame(byteCount = 3))
 
@@ -50,7 +50,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `single frame with RSV1 indicates compression`() {
+    fun singleFrameWithRSV1IndicatesCompression() {
         val assembler = MessageAssembler(compressionEnabled = true)
         val result = assembler.addFrame(textFrame("Hello", rsv1 = true))
 
@@ -59,7 +59,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `empty text frame returns complete message`() {
+    fun emptyTextFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame(""))
 
@@ -72,7 +72,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `two fragment message assembles correctly`() {
+    fun twoFragmentMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("Hello ", fin = false))
@@ -85,7 +85,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `three fragment message assembles correctly`() {
+    fun threeFragmentMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("One", fin = false))
@@ -100,7 +100,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `fragmented binary message assembles correctly`() {
+    fun fragmentedBinaryMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(binaryFrame(byteCount = 2, fin = false))
@@ -114,7 +114,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV1 from first fragment is preserved`() {
+    fun rsv1FromFirstFragmentIsPreserved() {
         val assembler = MessageAssembler(compressionEnabled = true)
 
         assembler.addFrame(textFrame("A", fin = false, rsv1 = true))
@@ -125,7 +125,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `isFragmentInProgress tracks state correctly`() {
+    fun isFragmentInProgressTracksStateCorrectly() {
         val assembler = MessageAssembler()
 
         assertFalse(assembler.isFragmentInProgress)
@@ -142,7 +142,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `control frame returns immediately`() {
+    fun controlFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pingFrame("ping"))
 
@@ -151,7 +151,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `control frame during fragmentation returns control frame`() {
+    fun controlFrameDuringFragmentationReturnsControlFrame() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -165,7 +165,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `pong frame returns immediately`() {
+    fun pongFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pongFrame("pong"))
 
@@ -174,7 +174,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `close frame returns immediately`() {
+    fun closeFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(closeFrame(CloseCode.NORMAL))
 
@@ -183,7 +183,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `control frame without FIN returns error`() {
+    fun controlFrameWithoutFINReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pingFrame("ping", fin = false))
 
@@ -192,7 +192,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `control frame over 125 bytes returns error`() {
+    fun controlFrameOver125BytesReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(oversizedPingFrame(byteCount = 126))
 
@@ -205,7 +205,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `continuation without first frame returns error`() {
+    fun continuationWithoutFirstFrameReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(continuationFrame("data"))
 
@@ -214,7 +214,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `new message during fragmentation returns error`() {
+    fun newMessageDuringFragmentationReturnsError() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -225,7 +225,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `binary frame during text fragmentation returns error`() {
+    fun binaryFrameDuringTextFragmentationReturnsError() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -236,7 +236,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV2 bit set returns error`() {
+    fun rsv2BitSetReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello", rsv2 = true))
 
@@ -245,7 +245,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV3 bit set returns error`() {
+    fun rsv3BitSetReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello", rsv3 = true))
 
@@ -254,7 +254,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV1 without compression enabled returns error`() {
+    fun rsv1WithoutCompressionEnabledReturnsError() {
         val assembler = MessageAssembler(compressionEnabled = false)
         val result = assembler.addFrame(textFrame("Hello", rsv1 = true))
 
@@ -267,7 +267,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `multi-fragment assembly returns fragments for cleanup`() {
+    fun multiFragmentAssemblyReturnsFragmentsForCleanup() {
         val assembler = MessageAssembler()
 
         val frag1 = textFrame("Hello ", fin = false)
@@ -284,7 +284,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `three-fragment assembly returns all fragments for cleanup`() {
+    fun threeFragmentAssemblyReturnsAllFragmentsForCleanup() {
         val assembler = MessageAssembler()
 
         val frag1 = textFrame("A", fin = false)
@@ -300,7 +300,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `single frame message returns empty fragments to close`() {
+    fun singleFrameMessageReturnsEmptyFragmentsToClose() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello"))
 
@@ -309,7 +309,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `assembled message payload is independent of fragment buffers`() {
+    fun assembledMessagePayloadIsIndependentOfFragmentBuffers() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello ", fin = false))
@@ -330,7 +330,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `reset clears fragment state`() {
+    fun resetClearsFragmentState() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -342,7 +342,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `can start new message after reset`() {
+    fun canStartNewMessageAfterReset() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -359,7 +359,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `can assemble multiple messages in sequence`() {
+    fun canAssembleMultipleMessagesInSequence() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("First"))
@@ -372,7 +372,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `can assemble fragmented then single message`() {
+    fun canAssembleFragmentedThenSingleMessage() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("A", fin = false))
@@ -392,7 +392,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `combine fragments with non-zero position payloads`() {
+    fun combineFragmentsWithNonZeroPositionPayloads() {
         val assembler = MessageAssembler()
 
         // Create fragment payloads with position > 0 (simulates sliced buffers)

@@ -31,7 +31,7 @@ class WsFrameCodecTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse minimal unmasked frame`() {
+    fun rfc6455Section52ParseMinimalUnmaskedFrame() {
         // Unmasked text frame with "Hi" payload
         // Byte 1: 0x81 = FIN=1, opcode=1 (text)
         // Byte 2: 0x02 = MASK=0, len=2
@@ -56,7 +56,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse masked frame with 4-byte key`() {
+    fun rfc6455Section52ParseMaskedFrameWith4ByteKey() {
         // Masked text frame with "Hi" payload
         // Byte 1: 0x81 = FIN=1, opcode=1 (text)
         // Byte 2: 0x82 = MASK=1, len=2
@@ -85,7 +85,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse frame with 16-bit extended length`() {
+    fun rfc6455Section52ParseFrameWith16BitExtendedLength() {
         // Frame with payload length 126 (uses 16-bit extended length)
         val payloadSize = 200
         val payload = ByteArray(payloadSize) { it.toByte() }
@@ -108,7 +108,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse frame with 64-bit extended length`() {
+    fun rfc6455Section52ParseFrameWith64BitExtendedLength() {
         // Frame with payload length > 65535 (uses 64-bit extended length)
         val payloadSize = 70000
         val payload = ByteArray(payloadSize) { (it % 256).toByte() }
@@ -136,7 +136,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - FIN bit parsing`() {
+    fun rfc6455Section52FINBitParsing() {
         // FIN=0 (continuation expected)
         val fragmentFrame = byteArrayOf(0x01, 0x02, 'H'.code.toByte(), 'i'.code.toByte())
 
@@ -149,7 +149,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - RSV1 bit parsing for compression`() {
+    fun rfc6455Section52RSV1BitParsingForCompression() {
         // RSV1=1 indicates compressed frame (permessage-deflate)
         // 0xC1 = 1100 0001 = FIN=1, RSV1=1, opcode=1
         val compressedFrame = byteArrayOf(0xC1.toByte(), 0x02, 'H'.code.toByte(), 'i'.code.toByte())
@@ -163,7 +163,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - all RSV bits parsing`() {
+    fun rfc6455Section52AllRSVBitsParsing() {
         // All RSV bits set: 0xF1 = 1111 0001 = FIN=1, RSV1=1, RSV2=1, RSV3=1, opcode=1
         val frameBytes = byteArrayOf(0xF1.toByte(), 0x00)
 
@@ -182,7 +182,7 @@ class WsFrameCodecTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse continuation frame opcode 0x0`() {
+    fun rfc6455Section52ParseContinuationFrameOpcode0x0() {
         val frameBytes = byteArrayOf(0x00, 0x02, 'H'.code.toByte(), 'i'.code.toByte())
 
         val buffer = createBuffer(frameBytes)
@@ -195,7 +195,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse text frame opcode 0x1`() {
+    fun rfc6455Section52ParseTextFrameOpcode0x1() {
         val frameBytes = byteArrayOf(0x81.toByte(), 0x00)
 
         val buffer = createBuffer(frameBytes)
@@ -206,7 +206,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-2 - parse binary frame opcode 0x2`() {
+    fun rfc6455Section52ParseBinaryFrameOpcode0x2() {
         val frameBytes = byteArrayOf(0x82.toByte(), 0x00)
 
         val buffer = createBuffer(frameBytes)
@@ -222,7 +222,7 @@ class WsFrameCodecTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 5-5 - parse close frame opcode 0x8`() {
+    fun rfc6455Section55ParseCloseFrameOpcode0x8() {
         // Close frame with status code 1000 (normal closure)
         val frameBytes =
             byteArrayOf(
@@ -243,7 +243,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-5-2 - parse ping frame opcode 0x9`() {
+    fun rfc6455Section552ParsePingFrameOpcode0x9() {
         val pingData = "ping".encodeToByteArray()
         val frameBytes =
             byteArrayOf(
@@ -263,7 +263,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `RFC 6455 Section 5-5-3 - parse pong frame opcode 0xA`() {
+    fun rfc6455Section553ParsePongFrameOpcode0xA() {
         val pongData = "pong".encodeToByteArray()
         val frameBytes =
             byteArrayOf(
@@ -285,7 +285,7 @@ class WsFrameCodecTest {
     // ========================================================================
 
     @Test
-    fun `parse multiple frames sequentially`() {
+    fun parseMultipleFramesSequentially() {
         val frame1Bytes = byteArrayOf(0x81.toByte(), 0x02, 'H'.code.toByte(), 'i'.code.toByte())
         val frame2Bytes = byteArrayOf(0x82.toByte(), 0x03, 0x01, 0x02, 0x03)
 
@@ -313,7 +313,7 @@ class WsFrameCodecTest {
     // ========================================================================
 
     @Test
-    fun `text frame payload readable after decode`() {
+    fun textFramePayloadReadableAfterDecode() {
         // Build a text frame: FIN=1, opcode=Text, payload="Hello"
         val text = "Hello"
         val frameBytes =
@@ -334,7 +334,7 @@ class WsFrameCodecTest {
     }
 
     @Test
-    fun `close frame payload parsed correctly`() {
+    fun closeFramePayloadParsedCorrectly() {
         // Close frame: FIN=1, opcode=Close, status=1000, reason="bye"
         val reason = "bye"
         val reasonBytes = reason.encodeToByteArray()
