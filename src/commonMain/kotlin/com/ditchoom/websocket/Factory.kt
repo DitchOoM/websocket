@@ -1,6 +1,7 @@
 package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -32,7 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 suspend fun <P> connectWebSocket(
     transport: ByteStream,
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: PayloadCodec<P>,
+    payloadCodec: Codec<P>,
     parentScope: CoroutineScope? = null,
 ): Connection<WebSocketMessage<P>> {
     val bufferFactory = connectionOptions.bufferFactory
@@ -227,6 +228,6 @@ internal fun wrapException(e: Exception): Exception =
  */
 expect suspend fun <P> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: PayloadCodec<P>,
+    payloadCodec: Codec<P>,
     parentScope: CoroutineScope? = null,
 ): Connection<WebSocketMessage<P>>

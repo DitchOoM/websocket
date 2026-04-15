@@ -246,10 +246,12 @@ sealed interface AssemblyResult {
     /**
      * A complete message has been assembled.
      *
-     * @property fragmentsToClose Fragment payload buffers that should be closed after processing.
-     *   For multi-fragment messages, combineBuffers() copies data to a new buffer, but the
-     *   original fragment NativeBuffers must be explicitly freed on Linux (no GC for native heap).
-     *   Empty for single-frame messages where the payload IS the fragment buffer.
+     * @property fragmentsToClose Raw frame buffers the caller must free after processing.
+     *   For multi-fragment messages, [combineBuffers] copies the fragment payloads into
+     *   a new buffer; the original frame buffers (now owned by the assembler via their
+     *   `payload` views) must still be freed explicitly on Linux (no GC for native heap).
+     *   Empty for single-frame messages, where the assembled `message.payload` IS the
+     *   raw frame buffer — the caller frees it once after decode.
      */
     data class CompleteMessage(
         val message: AssembledMessage,

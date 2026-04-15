@@ -6,7 +6,6 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
@@ -15,20 +14,19 @@ import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.PeekResult
+import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import com.ditchoom.websocket.frame.AssemblyResult
 import com.ditchoom.websocket.frame.CloseCode
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.MessageAssembler
-import com.ditchoom.websocket.frame.WsFrame
-import com.ditchoom.websocket.frame.WsFrameBinaryContext
-import com.ditchoom.websocket.frame.WsFrameCodec
-import com.ditchoom.websocket.frame.WsFrameContinuationContext
-import com.ditchoom.websocket.frame.WsFramePingContext
-import com.ditchoom.websocket.frame.WsFramePongContext
-import com.ditchoom.websocket.frame.WsFrameTextContext
 import com.ditchoom.websocket.frame.WsCloseBody
+import com.ditchoom.websocket.frame.WsCloseBodyCodec
+import com.ditchoom.websocket.frame.WsFrame
+import com.ditchoom.websocket.frame.WsFrameCodec
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsMaskingKey
@@ -42,22 +40,35 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
+ * Couples a decoded [WebSocketMessage] with the library-owned raw payload buffer
+ * that backs it (if any). The Flow emitted from [WebSocketCodec.receive] frees
+ * [cleanup] after the collector's lambda returns — so zero-copy payload decoders
+ * (e.g. `BinaryPassThroughCodec.decode = this`) can return a view of the raw frame
+ * buffer without burdening the user with manual free().
+ */
+private data class MessageEnvelope<P>(
+    val message: WebSocketMessage<P>,
+    val cleanup: ReadBuffer? = null,
+)
+
+/**
  * WebSocket codec connection over a [ByteStream].
  *
- * Uses generated [WsFrameCodec] for frame decode (sealed dispatch by opcode)
- * and [WsFrameHeaderCodec] + [WsPayloadCodec] for encode (with masking via context).
- * Fragment assembly via [MessageAssembler].
+ * Uses [WsFrameHeaderCodec] to parse frame headers, then constructs [WsFrame]
+ * variants directly from the raw buffer (zero-copy payload views). Fragment
+ * assembly via [MessageAssembler].
  */
 internal class WebSocketCodec<P>(
     private val transport: ByteStream,
     private val stream: AutoFillingSuspendingStreamProcessor,
     private val compression: CompressionConfig,
     private val bufferFactory: BufferFactory,
-    private val payloadCodec: PayloadCodec<P>,
+    private val payloadCodec: Codec<P>,
     private val readTimeout: Duration,
     private val writeTimeout: Duration,
     parentScope: CoroutineScope?,
@@ -85,9 +96,23 @@ internal class WebSocketCodec<P>(
     private var serverInitiatedClose = false
     private val stringDecoder = StreamingStringDecoder()
 
-    private val incomingMessageChannel = Channel<WebSocketMessage<P>>(Channel.UNLIMITED)
+    private val incomingMessageChannel = Channel<MessageEnvelope<P>>(Channel.UNLIMITED)
 
-    override fun receive(): Flow<WebSocketMessage<P>> = incomingMessageChannel.receiveAsFlow()
+    /**
+     * Emits received messages. For messages whose `payload` aliases a library-owned
+     * frame buffer (e.g. [com.ditchoom.websocket.codecs.BinaryPassThroughCodec]), the
+     * buffer is valid only within the collector's `emit` block — the library frees it
+     * as soon as the collector's lambda returns. Copy bytes out if you need them later.
+     */
+    override fun receive(): Flow<WebSocketMessage<P>> =
+        incomingMessageChannel.receiveAsFlow()
+            .transform { env ->
+                try {
+                    emit(env.message)
+                } finally {
+                    env.cleanup?.freeIfNeeded()
+                }
+            }
 
     fun isOpen() = !closed && transport.isOpen
 
@@ -136,10 +161,16 @@ internal class WebSocketCodec<P>(
     }
 
     /**
-     * Reads the next complete frame from the stream using [WsFrameCodec].
+     * Reads the next complete frame from the stream.
      *
      * Manual peekFrameSize: determines header size via [WsFrameHeaderCodec.peekFrameSize],
-     * peeks payload length from byte2, waits for all bytes, then decodes.
+     * peeks payload length from byte2, waits for all bytes, then parses.
+     *
+     * **Ownership:** for data / ping / pong frames, the returned frame's `payload` is the
+     * raw frame buffer itself, positioned at payload start with `limit()` set to payload
+     * end. Ownership transfers to the caller (MessageAssembler or handleControlFrame),
+     * which must eventually free it. On decode failure or close-frame path the buffer is
+     * freed here via the `owned` flag.
      */
     private suspend fun readNextFrame(): WsFrame? {
         while (coroutineContext.isActive) {
@@ -171,26 +202,51 @@ internal class WebSocketCodec<P>(
                 continue
             }
 
-            // Read and decode. The payload is copied out via copyToBuffer so the raw
-            // frame buffer can be freed once decode completes — without this, every
-            // received frame leaks a pool-or-factory allocation, which on JVM 21+
-            // exhausts the 1GB direct-memory budget under sustained load (≥1000 msg/s)
-            // even with a deterministic factory, because Arena.close() only runs when
-            // freeNativeMemory() is called.
+            // Zero-copy receive: decode the header, then construct the WsFrame with the
+            // raw frame buffer itself as the payload (position at payload start, limit
+            // at payload end). Ownership moves out via the returned frame.
             val buffer = stream.readBuffer(totalFrameSize)
+            var owned = true
             val frame = try {
-                val copyPayload: Any.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer = { pr ->
-                    pr.copyToBuffer(bufferFactory)
+                val header = WsFrameHeaderCodec.decode(buffer)
+                // buffer.position() is now at payload start; buffer.limit() is at frame end.
+                val payloadStart = buffer.position()
+                val payloadEnd = payloadStart + header.payloadLength.toInt()
+                buffer.setLimit(payloadEnd)
+
+                when (val op = header.byte1.opcode) {
+                    Opcode.Text -> {
+                        owned = false
+                        WsFrame.Text(header, buffer)
+                    }
+                    Opcode.Binary -> {
+                        owned = false
+                        WsFrame.Binary(header, buffer)
+                    }
+                    Opcode.Continuation -> {
+                        owned = false
+                        WsFrame.Continuation(header, buffer)
+                    }
+                    Opcode.Ping -> {
+                        owned = false
+                        WsFrame.Ping(header, buffer)
+                    }
+                    Opcode.Pong -> {
+                        owned = false
+                        WsFrame.Pong(header, buffer)
+                    }
+                    Opcode.Close -> {
+                        val body =
+                            if (buffer.remaining() >= 2) {
+                                WsCloseBodyCodec.decode(buffer, DecodeContext.Empty)
+                            } else {
+                                null
+                            }
+                        // Close body was fully read; buffer can be freed in the finally.
+                        WsFrame.Close(header, body)
+                    }
+                    else -> throw IllegalArgumentException("Reserved opcode: $op")
                 }
-                @Suppress("UNCHECKED_CAST")
-                WsFrameCodec.decode(
-                    buffer,
-                    decodeBinaryPayload = copyPayload as WsFrameBinaryContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
-                    decodeContinuationPayload = copyPayload as WsFrameContinuationContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
-                    decodePingPayload = copyPayload as WsFramePingContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
-                    decodePongPayload = copyPayload as WsFramePongContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
-                    decodeTextPayload = copyPayload as WsFrameTextContext.(com.ditchoom.buffer.codec.payload.PayloadReader) -> ReadBuffer,
-                )
             } catch (_: IllegalArgumentException) {
                 // Reserved opcode — protocol error
                 sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
@@ -206,7 +262,7 @@ internal class WebSocketCodec<P>(
                 closed = true
                 return null
             } finally {
-                buffer.freeIfNeeded()
+                if (owned) buffer.freeIfNeeded()
             }
 
             // Post-decode validation: close frame reason must be valid UTF-8.
@@ -270,7 +326,7 @@ internal class WebSocketCodec<P>(
                         ""
                     }
                 payload.freeIfNeeded()
-                incomingMessageChannel.trySend(WebSocketMessage.Ping(appData))
+                incomingMessageChannel.trySend(MessageEnvelope(WebSocketMessage.Ping(appData)))
             }
             is WsFrame.Pong<*> -> {
                 val payload = frame.payload as ReadBuffer
@@ -281,7 +337,7 @@ internal class WebSocketCodec<P>(
                         ""
                     }
                 payload.freeIfNeeded()
-                incomingMessageChannel.trySend(WebSocketMessage.Pong(appData))
+                incomingMessageChannel.trySend(MessageEnvelope(WebSocketMessage.Pong(appData)))
             }
             is WsFrame.Close -> {
                 serverInitiatedClose = true
@@ -298,73 +354,64 @@ internal class WebSocketCodec<P>(
                     sendCloseFrame(responseCode, reason)
                 }
 
-                incomingMessageChannel.trySend(WebSocketMessage.Close(closeCode.code, reason))
+                incomingMessageChannel.trySend(
+                    MessageEnvelope(WebSocketMessage.Close(closeCode.code, reason)),
+                )
                 closed = true
             }
             else -> {}
         }
     }
 
+    /**
+     * Decodes an assembled data message and enqueues it with the raw payload buffer
+     * as the cleanup target. The Flow.transform in [receive] frees `cleanup` after the
+     * user's collector lambda returns — letting `BinaryPassThroughCodec` alias the
+     * raw buffer without the user ever needing to manage its lifetime.
+     */
     private suspend fun emitMessage(message: AssembledMessage) {
-        when (message.opcode) {
-            Opcode.Text -> {
-                val rawPayload =
-                    try {
-                        if (message.compressed && compression is CompressionConfig.Enabled) {
-                            decompressPayload(message.payload)
-                        } else {
-                            message.payload
-                        }
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught") _: Throwable,
-                    ) {
-                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Decompression failed")
-                        message.payload.freeIfNeeded()
-                        return
-                    }
-                val payload =
-                    try {
-                        val reader = ReadBufferPayloadReader(rawPayload)
-                        with(payloadCodec) { reader.decode() }
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught") _: Throwable,
-                    ) {
-                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8")
-                        if (rawPayload !== message.payload) rawPayload.freeIfNeeded()
-                        message.payload.freeIfNeeded()
-                        return
-                    }
-                if (rawPayload !== message.payload) rawPayload.freeIfNeeded()
+        val opcode = message.opcode
+        if (opcode != Opcode.Text && opcode != Opcode.Binary) return
+
+        val rawPayload =
+            try {
+                if (message.compressed && compression is CompressionConfig.Enabled) {
+                    val decompressed = decompressPayload(message.payload)
+                    if (decompressed !== message.payload) message.payload.freeIfNeeded()
+                    decompressed
+                } else {
+                    message.payload
+                }
+            } catch (
+                @Suppress("TooGenericExceptionCaught") _: Throwable,
+            ) {
+                sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Decompression failed")
                 message.payload.freeIfNeeded()
-                incomingMessageChannel.trySend(WebSocketMessage.Text(payload))
+                return
             }
-            Opcode.Binary -> {
-                val rawPayload =
-                    if (message.compressed && compression is CompressionConfig.Enabled) {
-                        val decompressed = decompressPayload(message.payload)
-                        if (decompressed !== message.payload) {
-                            message.payload.freeIfNeeded()
-                        }
-                        decompressed
-                    } else {
-                        message.payload
-                    }
-                val payload =
-                    try {
-                        val reader = ReadBufferPayloadReader(rawPayload)
-                        with(payloadCodec) { reader.decode() }
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught") _: Throwable,
-                    ) {
-                        sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Payload decode failed")
-                        rawPayload.freeIfNeeded()
-                        return
-                    }
+
+        val payload =
+            try {
+                payloadCodec.decode(rawPayload, DecodeContext.Empty)
+            } catch (
+                @Suppress("TooGenericExceptionCaught") _: Throwable,
+            ) {
+                sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Payload decode failed")
                 rawPayload.freeIfNeeded()
-                incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
+                return
             }
-            else -> {}
-        }
+
+        val wsMessage =
+            if (opcode == Opcode.Text) {
+                WebSocketMessage.Text(payload)
+            } else {
+                WebSocketMessage.Binary(payload)
+            }
+        // rawPayload is freed after the user's `.collect { }` lambda returns (see receive()).
+        // For value-returning decoders (e.g. StringCodec), this just defers the free by one
+        // coroutine hop — harmless. For BinaryPassThroughCodec.decode-returns-`this`, this
+        // is what keeps the aliased buffer valid during the collector's handler.
+        incomingMessageChannel.trySend(MessageEnvelope(wsMessage, cleanup = rawPayload))
     }
 
     private fun decompressPayload(payload: ReadBuffer): ReadBuffer {
@@ -417,29 +464,73 @@ internal class WebSocketCodec<P>(
     }
 
     /**
-     * Encodes a user-supplied payload [value] via [payloadCodec] into a scratch buffer,
-     * then delegates to [encodeDataFrame] for framing/compression/masking. Reuses the
-     * existing frame-encoding pipeline; the only new step is the codec writing payload
-     * bytes up front.
+     * Encodes a user-supplied payload [value] via [payloadCodec] into a scratch buffer
+     * and returns the wire frame bytes ready for transmission.
+     *
+     * **Uncompressed fast path** (default): reserves 14 bytes at offset 0 for the worst-case
+     * RFC 6455 header (byte1 + byte2 + 8-byte extended length + 4-byte mask), lets the codec
+     * write the payload starting at offset 14, then backpatches the actual header bytes into
+     * the reserved prefix (right-aligned at offset `14 - headerSize`) and XOR-masks the
+     * payload in place. This eliminates the scratch→frame copy — a 1MB × 1000 msg batch
+     * saves ~1GB of memcpy per connection.
+     *
+     * **Compressed path**: compressed size isn't known ahead of time, so we stage payload
+     * bytes into a scratch buffer, compress, and go through [encodeDataFrame] (which allocates
+     * a fresh frame buffer and writes header + compressed payload). The scratch→compressed
+     * copy is unavoidable without a custom streaming compressor.
      */
     private fun writeDataFrameFromCodec(
         opcode: Opcode,
         value: P,
         fin: Boolean = true,
     ): ReadBuffer {
-        val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
-        with(payloadCodec) { scratch.encode(value) }
-        val inner = scratch.underlying
-        val size = inner.position()
-        if (size == 0) {
+        val shouldCompress = compressionEnabled && !opcode.isControlFrame()
+
+        if (shouldCompress && compressor != null) {
+            // Compressed path: keep the existing staging flow.
+            val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
+            payloadCodec.encode(scratch, value, EncodeContext.Empty)
+            val inner = scratch.underlying
+            val size = inner.position()
+            if (size == 0) {
+                inner.freeIfNeeded()
+                return encodeDataFrame(opcode, EMPTY_BUFFER, fin)
+            }
+            inner.position(0)
+            inner.setLimit(size)
+            val frame = encodeDataFrame(opcode, inner, fin)
             inner.freeIfNeeded()
-            return encodeDataFrame(opcode, EMPTY_BUFFER, fin)
+            return frame
         }
-        inner.position(0)
-        inner.setLimit(size)
-        val frame = encodeDataFrame(opcode, inner, fin)
-        inner.freeIfNeeded()
-        return frame
+
+        // Uncompressed fast path: reserved prefix + backpatch.
+        val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
+        scratch.position(HEADER_PREFIX_BYTES)
+        payloadCodec.encode(scratch, value, EncodeContext.Empty)
+        val payloadEnd = scratch.position()
+        val payloadSize = payloadEnd - HEADER_PREFIX_BYTES
+        val inner = scratch.underlying
+
+        val header = buildMaskedHeader(fin, rsv1 = false, opcode, payloadSize)
+        val headerSize = header.wireSize
+        val headerStart = HEADER_PREFIX_BYTES - headerSize
+
+        // Write header bytes so they end exactly at offset HEADER_PREFIX_BYTES.
+        inner.position(headerStart)
+        WsFrameHeaderCodec.encode(inner, header, EncodeContext.Empty)
+
+        // XOR-mask the payload in place. xorMask uses [position, limit) and does not
+        // advance position, so we set them to the payload window.
+        if (payloadSize > 0) {
+            inner.position(HEADER_PREFIX_BYTES)
+            inner.setLimit(payloadEnd)
+            inner.xorMask(header.maskingKey!!.raw.toInt())
+        }
+
+        // Expose the wire window: position = header start, limit = payload end.
+        inner.position(headerStart)
+        inner.setLimit(payloadEnd)
+        return inner
     }
 
     private fun writeCloseFrame(
@@ -647,5 +738,15 @@ internal class WebSocketCodec<P>(
             codecJob.cancelAndJoin()
         } catch (_: Exception) {}
         (bufferFactory as? com.ditchoom.buffer.pool.BufferPool)?.clear()
+    }
+
+    private companion object {
+        /**
+         * Maximum RFC 6455 client header size: byte1(1) + byte2(1) + 8-byte extended
+         * length + 4-byte mask = 14 bytes. The uncompressed send path reserves this
+         * prefix in a scratch buffer so the real header (6, 8, or 14 bytes) can be
+         * right-aligned into the prefix after the payload is written.
+         */
+        const val HEADER_PREFIX_BYTES = 14
     }
 }

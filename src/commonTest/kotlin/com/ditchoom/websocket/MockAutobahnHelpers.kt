@@ -4,6 +4,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -55,7 +56,7 @@ internal object MockAutobahnHelpers {
 
     suspend fun <P> connectWithHandshake(
         transport: MockWebSocketTransport,
-        payloadCodec: PayloadCodec<P>,
+        payloadCodec: Codec<P>,
         options: WebSocketConnectionOptions = defaultOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
     ): Connection<WebSocketMessage<P>> = coroutineScope {
@@ -72,7 +73,7 @@ internal object MockAutobahnHelpers {
 
     suspend fun <P> connectWithCompressionHandshake(
         transport: MockWebSocketTransport,
-        payloadCodec: PayloadCodec<P>,
+        payloadCodec: Codec<P>,
         options: WebSocketConnectionOptions = compressionOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
     ): Connection<WebSocketMessage<P>> = coroutineScope {

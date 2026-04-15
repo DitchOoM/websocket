@@ -3,7 +3,9 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.JsBuffer
-import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader
+import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
@@ -33,9 +35,9 @@ import org.w3c.dom.WebSocket
  * bridges `P` to/from payload bytes:
  * - **Receive**: text frames arrive as `String` (per WebSocket spec, text is always
  *   delivered as String regardless of `binaryType`). We encode that String's UTF-8
- *   bytes into a scratch buffer, wrap it in a `PayloadReader`, and invoke
- *   `codec.decode`. Binary frames arrive as `ArrayBuffer` and flow through the codec
- *   via a zero-copy slice.
+ *   bytes into a scratch buffer and invoke `codec.decode` with the buffer as the
+ *   `ReadBuffer` receiver. Binary frames arrive as `ArrayBuffer` and flow through
+ *   the codec via a zero-copy slice.
  * - **Send**: `codec.encode` writes bytes into a `GrowableWriteBuffer`. For `Binary`
  *   we extract the bytes as an `ArrayBuffer`. For `Text` we decode the bytes back to
  *   a String so the native API emits a text frame.
@@ -47,7 +49,7 @@ import org.w3c.dom.WebSocket
  */
 class BrowserWebSocketController<P>(
     private val connectionOptions: WebSocketConnectionOptions,
-    private val payloadCodec: PayloadCodec<P>,
+    private val payloadCodec: Codec<P>,
     private val bufferFactory: BufferFactory,
     parentScope: CoroutineScope?,
     private val useSharedMemory: Boolean = false,
@@ -82,6 +84,12 @@ class BrowserWebSocketController<P>(
     private val connectDeferred = CompletableDeferred<Unit>()
     private val incomingMessageChannel = Channel<WebSocketMessage<P>>(Channel.UNLIMITED)
 
+    /**
+     * On the browser path the native `WebSocket` manages its own bytes, so there is no
+     * library-owned cleanup buffer to release per message — we return the channel as-is.
+     * The JVM / Linux code path uses an envelope + cleanup hook; parity is structural,
+     * not observable.
+     */
     override fun receive(): Flow<WebSocketMessage<P>> = incomingMessageChannel.receiveAsFlow()
 
     private val crossOriginIsolated = js("crossOriginIsolated") == true
@@ -144,8 +152,7 @@ class BrowserWebSocketController<P>(
                             jsBuffer.slice()
                         }
                     scope.launch {
-                        val reader = ReadBufferPayloadReader(buffer)
-                        val payload = with(payloadCodec) { reader.decode() }
+                        val payload = payloadCodec.decode(buffer, DecodeContext.Empty)
                         buffer.freeIfNeeded()
                         incomingMessageChannel.trySend(WebSocketMessage.Binary(payload))
                     }
@@ -153,13 +160,12 @@ class BrowserWebSocketController<P>(
                 is String ->
                     scope.launch {
                         // Encode the String as UTF-8 into a scratch buffer so the codec
-                        // can decode from a uniform PayloadReader interface.
+                        // can decode from a uniform ReadBuffer receiver.
                         val bytes = data.encodeToByteArray()
                         val scratch = bufferFactory.allocate(bytes.size)
                         scratch.writeBytes(bytes)
                         scratch.resetForRead()
-                        val reader = ReadBufferPayloadReader(scratch)
-                        val payload = with(payloadCodec) { reader.decode() }
+                        val payload = payloadCodec.decode(scratch, DecodeContext.Empty)
                         scratch.freeIfNeeded()
                         incomingMessageChannel.trySend(WebSocketMessage.Text(payload))
                     }
@@ -180,7 +186,7 @@ class BrowserWebSocketController<P>(
         when (message) {
             is WebSocketMessage.Text -> {
                 val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
-                with(payloadCodec) { scratch.encode(message.payload) }
+                payloadCodec.encode(scratch, message.payload, EncodeContext.Empty)
                 val inner = scratch.underlying
                 val size = inner.position()
                 inner.position(0)
@@ -192,7 +198,7 @@ class BrowserWebSocketController<P>(
             }
             is WebSocketMessage.Binary -> {
                 val scratch = GrowableWriteBuffer(bufferFactory, initialSize = 256)
-                with(payloadCodec) { scratch.encode(message.payload) }
+                payloadCodec.encode(scratch, message.payload, EncodeContext.Empty)
                 val inner = scratch.underlying
                 val size = inner.position()
                 inner.position(0)

@@ -6,6 +6,7 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
+import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.socket.ConnectionContext
@@ -38,7 +39,7 @@ import kotlin.time.TimeSource
  */
 internal suspend fun <P> connectForTest(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: PayloadCodec<P>,
+    payloadCodec: Codec<P>,
 ): Connection<WebSocketMessage<P>> {
     val socketOptions =
         if (connectionOptions.tls) {
@@ -186,8 +187,9 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
         ws.receive().filter { it is WebSocketMessage.Binary<*> }.take(count).collect {
             @Suppress("UNCHECKED_CAST")
             val m = it as WebSocketMessage.Binary<ReadBuffer>
+            // Library owns m.payload for the duration of this collect block; it frees
+            // the buffer once we return. send() copies/writes the bytes immediately.
             ws.send(WebSocketMessage.Binary(m.payload))
-            m.payload.freeIfNeeded() // Free NativeBuffer after echo
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.

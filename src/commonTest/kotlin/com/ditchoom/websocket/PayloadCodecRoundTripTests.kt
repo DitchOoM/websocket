@@ -2,8 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.codec.payload.ReadBufferPayloadReader
-import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import com.ditchoom.websocket.codecs.EmptyCodec
 import com.ditchoom.websocket.codecs.StringCodec
@@ -13,12 +11,11 @@ import kotlin.test.assertTrue
 
 /**
  * Round-trip tests for the v2 built-in payload codecs. These exercise encode/decode
- * without going through a `Connection` — the codecs are pure and should be testable
- * in isolation.
+ * without going through a `Connection` — the codecs are pure `Codec<T>` implementations
+ * and should be testable in isolation.
  *
- * Each codec encodes a known value to a buffer, rewinds, constructs a
- * [ReadBufferPayloadReader] over the written bytes, and decodes back. The result
- * must equal the original.
+ * Each codec encodes a known value, rewinds, and decodes back. The result must equal
+ * the original.
  */
 class PayloadCodecRoundTripTests {
     @Test
@@ -39,16 +36,11 @@ class PayloadCodecRoundTripTests {
     @Test
     fun emptyCodecRoundTrip() {
         val buffer = BufferFactory.Default.allocate(16)
-        with(EmptyCodec) {
-            buffer.encode(Unit)
-        }
+        EmptyCodec.encode(buffer, Unit)
         assertEquals(0, buffer.position(), "EmptyCodec should write zero bytes")
         buffer.resetForRead()
-        val reader = ReadBufferPayloadReader(buffer)
-        with(EmptyCodec) {
-            reader.decode()
-        }
-        // decode on empty reader is a no-op; nothing to assert beyond not throwing
+        EmptyCodec.decode(buffer)
+        // decode on empty buffer is a no-op; nothing to assert beyond not throwing
     }
 
     @Test
@@ -56,16 +48,10 @@ class PayloadCodecRoundTripTests {
         // If a caller sends EmptyCodec but receives a non-empty payload, decode
         // must still complete cleanly (the bytes are discarded, not retained).
         val buffer = BufferFactory.Default.allocate(64)
-        with(StringCodec) {
-            buffer.encode("surprise")
-        }
+        StringCodec.encode(buffer, "surprise")
         buffer.resetForRead()
-        val reader = ReadBufferPayloadReader(buffer)
-        with(EmptyCodec) {
-            reader.decode()
-        }
-        // Reader was advanced; remaining should be 0.
-        assertEquals(0, reader.remaining())
+        EmptyCodec.decode(buffer)
+        assertEquals(0, buffer.remaining())
     }
 
     @Test
@@ -74,22 +60,13 @@ class PayloadCodecRoundTripTests {
         repeat(256) { originalBytes.writeByte((it and 0xFF).toByte()) }
         originalBytes.resetForRead()
 
-        // Encode: write the payload into a wire buffer via BinaryPassThroughCodec.
         val wire = BufferFactory.Default.allocate(512)
-        with(BinaryPassThroughCodec) {
-            wire.encode(originalBytes)
-        }
+        BinaryPassThroughCodec.encode(wire, originalBytes)
         assertEquals(256, wire.position())
 
-        // Decode: build a reader over the written bytes and round-trip through the codec.
-        // copyToBuffer() already calls resetForRead() on the returned buffer, so
-        // `decoded` comes back in read mode with position=0, limit=256.
+        // BinaryPassThroughCodec.decode returns the same buffer aliased at payload range.
         wire.resetForRead()
-        val reader = ReadBufferPayloadReader(wire)
-        val decoded =
-            with(BinaryPassThroughCodec) {
-                reader.decode()
-            }
+        val decoded = BinaryPassThroughCodec.decode(wire)
 
         assertEquals(256, decoded.remaining())
         repeat(256) { i ->
@@ -110,15 +87,9 @@ class PayloadCodecRoundTripTests {
         originalBytes.resetForRead()
 
         val wire = BufferFactory.Default.allocate(size + 64)
-        with(BinaryPassThroughCodec) {
-            wire.encode(originalBytes)
-        }
+        BinaryPassThroughCodec.encode(wire, originalBytes)
         wire.resetForRead()
-        val reader = ReadBufferPayloadReader(wire)
-        val decoded =
-            with(BinaryPassThroughCodec) {
-                reader.decode()
-            }
+        val decoded = BinaryPassThroughCodec.decode(wire)
 
         assertEquals(size, decoded.remaining())
         // Spot-check a few positions
@@ -134,18 +105,12 @@ class PayloadCodecRoundTripTests {
     private fun roundTripString(value: String) {
         val estimated = (value.length * 3).coerceAtLeast(16)
         val wire = BufferFactory.Default.allocate(estimated)
-        with(StringCodec) {
-            wire.encode(value)
-        }
+        StringCodec.encode(wire, value)
         val encodedSize = wire.position()
         assertTrue(encodedSize >= 0, "encode should advance the buffer position")
 
         wire.resetForRead()
-        val reader = ReadBufferPayloadReader(wire)
-        val decoded =
-            with(StringCodec) {
-                reader.decode()
-            }
+        val decoded = StringCodec.decode(wire)
         assertEquals(value, decoded)
     }
 }
