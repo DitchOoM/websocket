@@ -244,11 +244,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     if (!runIntegrationTests) {
         integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
-    // Exclude tests from browser that require Node.js APIs or raw socket access
-    // Browser WebSocket handles handshake/compression internally via native API
+    // Exclude tests from browser that require Node.js APIs or raw socket access.
+    // Browser WebSocket handles framing, masking, and permessage-deflate internally
+    // via the native WebSocket API — none of these tests exercise BrowserWebSocketController's
+    // code path. They live in commonTest because they validate the TCP-path codec
+    // (WebSocketCodec) which is shared across jvm/linux/jsNode but not used in the browser.
     if (name.contains("Browser", ignoreCase = true)) {
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecMockTest")
         // Browser WebSocket API doesn't support custom windowBits or context takeover control
         this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
@@ -262,8 +264,14 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
         this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat5SharedTest")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat6SharedTest")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat7SharedTest")
-        // Browser has no sync streaming compression — buffer library throws on StreamingCompressor.create()
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat9*")
+        // Compression tests exercise the TCP-path WebSocketCodec's sync compression
+        // (StreamingCompressor.create() — zlib's sync API). The browser only has the
+        // async CompressionStream API, so sync compression throws on construction.
+        // Real browser apps don't see this: the native WebSocket negotiates and runs
+        // permessage-deflate itself, never hitting our codec.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.*Compression*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.*Decompress*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.JsBugRegressionTests")
     }
 }
 
