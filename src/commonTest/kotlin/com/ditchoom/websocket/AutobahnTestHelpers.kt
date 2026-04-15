@@ -9,7 +9,6 @@ import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.socket.ConnectionContext
 import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.transport.TcpTransport
@@ -50,12 +49,10 @@ internal suspend fun <B> connectForTest(
         TcpTransport().connect(
             hostname = connectionOptions.name,
             port = connectionOptions.port,
-            context = ConnectionContext(
-                ConnectionOptions(
-                    socketOptions = socketOptions,
-                    connectionTimeout = connectionOptions.connectionTimeout,
-                    bufferFactory = connectionOptions.bufferFactory,
-                ),
+            options = ConnectionOptions(
+                socketOptions = socketOptions,
+                connectionTimeout = connectionOptions.connectionTimeout,
+                bufferFactory = connectionOptions.bufferFactory,
             ),
         )
     return connectWebSocket(
