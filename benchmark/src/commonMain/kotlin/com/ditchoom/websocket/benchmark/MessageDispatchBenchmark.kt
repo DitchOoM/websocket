@@ -124,7 +124,7 @@ class MessageDispatchBenchmark {
         channel.trySend(WebSocketMessage.Text(textPayload))
         val result = runBlocking {
             channel.receiveAsFlow()
-                .filterIsInstance<WebSocketMessage.Text<String>>()
+                .filterIsInstance<WebSocketMessage.Text>()
                 .take(1)
                 .first()
         }

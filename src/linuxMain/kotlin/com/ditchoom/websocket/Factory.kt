@@ -7,11 +7,11 @@ import kotlinx.coroutines.CoroutineScope
 internal actual val supportsCustomDeflateWindowBits: Boolean = true
 internal actual val supportsDeflateContextTakeover: Boolean = true
 
-actual suspend fun <P> connectNativeWebSocket(
+actual suspend fun <B> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: Codec<P>,
+    binaryCodec: Codec<B>,
     parentScope: CoroutineScope?,
-): Connection<WebSocketMessage<P>> =
+): Connection<WebSocketMessage<B>> =
     throw UnsupportedOperationException(
-        "Linux: Use connectWebSocket(transport, options, payloadCodec) with a pre-connected ByteStream",
+        "Linux: Use connectWebSocket(transport, options, binaryCodec) with a pre-connected ByteStream",
     )

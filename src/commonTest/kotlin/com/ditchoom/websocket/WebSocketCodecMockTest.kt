@@ -5,7 +5,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -47,7 +46,7 @@ class WebSocketCodecMockTest {
 
             val exception =
                 assertFailsWith<WebSocketException> {
-                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec)
+                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()))
                 }
             assertIs<WebSocketException.TransportFailed>(exception)
         }
@@ -59,7 +58,7 @@ class WebSocketCodecMockTest {
 
             val connectJob = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.simulateDisconnect()
@@ -74,7 +73,7 @@ class WebSocketCodecMockTest {
     fun transportDisconnectDuringMessageRead() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.simulateDisconnect()
 
@@ -90,7 +89,7 @@ class WebSocketCodecMockTest {
     fun transportErrorDuringReadLoop() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueReadError(Exception("Connection reset"))
 
@@ -106,7 +105,7 @@ class WebSocketCodecMockTest {
     fun transportDisconnectMidFrame() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueReadBytes(0x81.toByte(), 0x0A)
             mockTransport.enqueueReadError(Exception("Connection lost mid-frame"))
@@ -123,7 +122,7 @@ class WebSocketCodecMockTest {
     fun tcpCloseWithoutWsCloseUnblocksCollector() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg1"))
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("msg2"))
@@ -135,10 +134,10 @@ class WebSocketCodecMockTest {
                 }
 
             assertEquals(2, messages.size)
-            assertIs<WebSocketMessage.Text<String>>(messages[0])
-            assertEquals("msg1", (messages[0] as WebSocketMessage.Text<String>).payload)
-            assertIs<WebSocketMessage.Text<String>>(messages[1])
-            assertEquals("msg2", (messages[1] as WebSocketMessage.Text<String>).payload)
+            assertIs<WebSocketMessage.Text>(messages[0])
+            assertEquals("msg1", (messages[0] as WebSocketMessage.Text).payload)
+            assertIs<WebSocketMessage.Text>(messages[1])
+            assertEquals("msg2", (messages[1] as WebSocketMessage.Text).payload)
             connection.close()
         }
 
@@ -146,7 +145,7 @@ class WebSocketCodecMockTest {
     fun tcpCloseImmediatelyAfterConnectUnblocksCollector() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueReadError(Exception("Server TCP close"))
 
@@ -163,7 +162,7 @@ class WebSocketCodecMockTest {
     fun midFrameTcpCloseUnblocksCollector() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("before-crash"))
             mockTransport.enqueueReadBytes(0x81.toByte(), 0x0A)
@@ -175,7 +174,7 @@ class WebSocketCodecMockTest {
                 }
 
             assertEquals(1, messages.size)
-            assertEquals("before-crash", (messages[0] as WebSocketMessage.Text<String>).payload)
+            assertEquals("before-crash", (messages[0] as WebSocketMessage.Text).payload)
             connection.close()
         }
 
@@ -187,7 +186,7 @@ class WebSocketCodecMockTest {
     fun successfulHandshakeReturnsConnection() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             // Connection is returned — send succeeds (proves connected state)
             connection.send(WebSocketMessage.Text("hello"))
@@ -198,7 +197,7 @@ class WebSocketCodecMockTest {
     fun textMessageReceived() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerTextFrame("Hello, WebSocket!"))
 
@@ -207,7 +206,7 @@ class WebSocketCodecMockTest {
                     connection.receive().first()
                 }
 
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello, WebSocket!", msg.payload)
             connection.close()
         }
@@ -241,7 +240,7 @@ class WebSocketCodecMockTest {
     fun clientSendTextWritesMaskedFrame() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.send(WebSocketMessage.Text("hello"))
 
@@ -273,7 +272,7 @@ class WebSocketCodecMockTest {
     fun serverInitiatedClose() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
@@ -298,7 +297,7 @@ class WebSocketCodecMockTest {
     fun clientInitiatedClose() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.close()
 
@@ -319,7 +318,7 @@ class WebSocketCodecMockTest {
     fun pingAutoRespondsWithPong() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             val pingPayload = "ping-data".encodeToByteArray()
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerPingFrame(pingPayload))
@@ -357,7 +356,7 @@ class WebSocketCodecMockTest {
     fun pongMessageEmitted() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerPongFrame("pong-data".encodeToByteArray()))
 
@@ -380,7 +379,7 @@ class WebSocketCodecMockTest {
 
             val result = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(200, "OK"))
@@ -397,7 +396,7 @@ class WebSocketCodecMockTest {
 
             val result = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.enqueueRead(MockHandshakeHelper.buildMissingAcceptResponse())
@@ -414,7 +413,7 @@ class WebSocketCodecMockTest {
 
             val result = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
@@ -435,7 +434,7 @@ class WebSocketCodecMockTest {
 
             val result = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
@@ -453,7 +452,7 @@ class WebSocketCodecMockTest {
 
             val result = coroutineScope {
                 val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec) }
+                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
@@ -468,7 +467,7 @@ class WebSocketCodecMockTest {
     fun serverCloseNormal1000FlowCompletes() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
@@ -487,7 +486,7 @@ class WebSocketCodecMockTest {
     fun serverCloseAbnormalSurfacesCloseMessage() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1011u, "internal error"))
 
@@ -506,7 +505,7 @@ class WebSocketCodecMockTest {
     fun reservedOpcodeClosesConnection() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueReadBytes(0x83.toByte(), 0x00)
 
@@ -522,7 +521,7 @@ class WebSocketCodecMockTest {
     fun transportErrorDuringReadLoopClosesFlow() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueReadError(Exception("Connection reset by peer"))
 
@@ -542,7 +541,7 @@ class WebSocketCodecMockTest {
     fun sendTextAfterCloseThrowsConnectionClosed() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.close()
 
@@ -572,7 +571,7 @@ class WebSocketCodecMockTest {
     fun sendPingAfterCloseThrowsConnectionClosed() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.close()
 
@@ -585,7 +584,7 @@ class WebSocketCodecMockTest {
     fun doubleCloseIsIdempotent() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.close()
             connection.close()
@@ -595,7 +594,7 @@ class WebSocketCodecMockTest {
     fun sendAfterServerCloseThrowsConnectionClosed() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerCloseFrame(1000u, "bye"))
 
@@ -639,7 +638,7 @@ class WebSocketCodecMockTest {
     fun sendPingWritesMaskedFrame() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.send(WebSocketMessage.Ping("test"))
 
@@ -658,7 +657,7 @@ class WebSocketCodecMockTest {
     fun sendPongWritesMaskedFrame() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.send(WebSocketMessage.Pong(""))
 
@@ -674,7 +673,7 @@ class WebSocketCodecMockTest {
     fun sendCloseWritesCloseFrame() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             connection.send(WebSocketMessage.Close(1000.toUShort(), "bye"))
 
@@ -694,7 +693,7 @@ class WebSocketCodecMockTest {
     fun invalidUtf8TextMessageSendsClose1007() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             val invalidUtf8 = byteArrayOf(0xC0.toByte(), 0x01)
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Text, invalidUtf8))
@@ -717,7 +716,7 @@ class WebSocketCodecMockTest {
     fun serverCloseWithOneBytePayloadIsProtocolError() =
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(mockTransport)
 
             val oneBytePayload = byteArrayOf(0x42)
             mockTransport.enqueueRead(MockHandshakeHelper.buildServerFrame(Opcode.Close, oneBytePayload))
@@ -745,7 +744,7 @@ class WebSocketCodecMockTest {
             val mockTransport = MockWebSocketTransport()
             val connection = coroutineScope {
                 val job = async {
-                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec, parentScope = parentScope)
+                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), parentScope = parentScope)
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
@@ -772,7 +771,7 @@ class WebSocketCodecMockTest {
             val mockTransport = MockWebSocketTransport()
             val connection = coroutineScope {
                 val job = async {
-                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec, parentScope = parentScope)
+                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), parentScope = parentScope)
                 }
                 MockAutobahnHelpers.waitForWrite(mockTransport)
                 val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])

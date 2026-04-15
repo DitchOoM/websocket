@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
@@ -50,7 +49,6 @@ class PublicWssValidationTest {
                         protocols = listOf("mqtt"),
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 // connectForTest() already performed the handshake — WSS connection is established
@@ -74,7 +72,6 @@ class PublicWssValidationTest {
                         protocols = listOf("mqtt"),
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 // connectForTest() already performed the handshake — WSS connection is established
@@ -97,7 +94,6 @@ class PublicWssValidationTest {
                         websocketEndpoint = "/.ws",
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 val message = "ditchoom-wss-test"
@@ -105,7 +101,7 @@ class PublicWssValidationTest {
                 ws.send(WebSocketMessage.Text(message))
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().filterIsInstance<WebSocketMessage.Text<String>>().map { it.payload }.first { it == message }
+                        ws.receive().filterIsInstance<WebSocketMessage.Text>().map { it.payload }.first { it == message }
                     }
                 assertEquals(message, echo)
             } finally {
@@ -154,14 +150,13 @@ class PublicWssValidationTest {
                         tls = true,
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 val message = "ditchoom-echo-test"
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().first() as WebSocketMessage.Text<String>
+                        ws.receive().first() as WebSocketMessage.Text
                     }
                 assertEquals(message, echo.payload)
             } finally {
@@ -187,7 +182,6 @@ class PublicWssValidationTest {
                         websocketEndpoint = "/.ws",
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 val messageCount = 5
@@ -200,7 +194,7 @@ class PublicWssValidationTest {
                 val echoes =
                     withTimeout(15.seconds) {
                         ws.receive()
-                            .filterIsInstance<WebSocketMessage.Text<String>>()
+                            .filterIsInstance<WebSocketMessage.Text>()
                             .map { it.payload }
                             .filter { it.startsWith("ditchoom-multi-") }
                             .take(messageCount)
@@ -235,10 +229,9 @@ class PublicWssValidationTest {
                 // distinguished only by message class (Text vs Binary) — correct match for
                 // frame-type interleave testing.
                 val textMsg = "ditchoom-interleave-text"
-                val textBytes = textMsg.encodeToByteArray()
                 val binaryPayload = byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0xBE.toByte(), 0xEF.toByte())
 
-                ws.send(WebSocketMessage.Text(BufferFactory.Default.wrap(textBytes)))
+                ws.send(WebSocketMessage.Text(textMsg))
                 ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(binaryPayload)))
 
                 // Collect both echoes
@@ -248,9 +241,8 @@ class PublicWssValidationTest {
                     ws.receive()
                         .takeWhile {
                             when (it) {
-                                is WebSocketMessage.Text<ReadBuffer> -> {
-                                    val bytes = it.payload.readByteArray(it.payload.remaining())
-                                    if (textBytes.contentEquals(bytes)) gotText = true
+                                is WebSocketMessage.Text -> {
+                                    if (it.payload == textMsg) gotText = true
                                 }
                                 is WebSocketMessage.Binary<ReadBuffer> -> {
                                     val received = it.payload.readByteArray(it.payload.remaining())

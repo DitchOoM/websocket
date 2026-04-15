@@ -1,29 +1,27 @@
 package com.ditchoom.websocket
 
 /**
- * A WebSocket message whose data-frame payload is of type [P].
+ * A WebSocket message. Text frames always carry [String] (UTF-8 per RFC 6455 §5.6),
+ * so [Text] is not parameterized. Binary frames carry [B], whose type is determined
+ * by the binary [com.ditchoom.buffer.codec.Codec] supplied to [connectWebSocket].
+ * Control frames ([Ping], [Pong], [Close]) carry fixed RFC 6455 structures and are
+ * not parameterized.
  *
- * The payload type [P] is determined by the [PayloadCodec] supplied to
- * [connectWebSocket] — users only see their own materialized values, never a
- * raw buffer. Control frames ([Ping], [Pong], [Close]) carry fixed RFC 6455
- * structures and are not parameterized.
- *
- * Migration from v1: the `value` field was renamed to `payload`. Text.value
- * (String) became Text.payload (whatever the codec produces). Binary.value
- * (ReadBuffer) became Binary.payload (P). Ping/Pong.value (ReadBuffer) became
- * Ping/Pong.appData (String — decoded from UTF-8, since RFC 6455 caps control
- * frame application data at 125 bytes and it's typically a small identifier).
+ * Migration from v1: the `value` field was renamed to `payload`. Text.value (String)
+ * became Text.payload (still String). Binary.value (ReadBuffer) became Binary.payload
+ * (B). Ping/Pong.value (ReadBuffer) became Ping/Pong.appData (String — decoded from
+ * UTF-8, since RFC 6455 caps control frame application data at 125 bytes).
  */
-sealed interface WebSocketMessage<out P> {
-    /** Data message fragment carrying text (rsv1=0 or decoded from permessage-deflate). */
-    class Text<out P>(
-        val payload: P,
-    ) : WebSocketMessage<P>
+sealed interface WebSocketMessage<out B> {
+    /** Data message carrying text. Always a UTF-8 [String] per RFC 6455 §5.6. */
+    class Text(
+        val payload: String,
+    ) : WebSocketMessage<Nothing>
 
-    /** Data message fragment carrying binary (rsv1=0 or decoded from permessage-deflate). */
-    class Binary<out P>(
-        val payload: P,
-    ) : WebSocketMessage<P>
+    /** Data message carrying binary of type [B]. */
+    class Binary<out B>(
+        val payload: B,
+    ) : WebSocketMessage<B>
 
     /** RFC 6455 ping. [appData] is the optional application data (≤ 125 bytes UTF-8). */
     class Ping(

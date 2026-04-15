@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -47,15 +46,14 @@ class NativeWebSocketClientTest {
                     BinaryPassThroughCodec,
                 )
             try {
-                // 1. Text echo — send a UTF-8-encoded buffer as a Text frame
+                // 1. Text echo — send a Text frame
                 val textMsg = "ditchoom-native-text"
-                val textBytes = textMsg.encodeToByteArray()
-                ws.send(WebSocketMessage.Text(BufferFactory.Default.wrap(textBytes)))
+                ws.send(WebSocketMessage.Text(textMsg))
                 val textEcho =
                     withTimeout(10.seconds) {
                         ws.receive()
-                            .filterIsInstance<WebSocketMessage.Text<ReadBuffer>>()
-                            .map { it.payload.readByteArray(it.payload.remaining()).decodeToString() }
+                            .filterIsInstance<WebSocketMessage.Text>()
+                            .map { it.payload }
                             .first { it == textMsg }
                     }
                 assertEquals(textMsg, textEcho)
@@ -73,14 +71,14 @@ class NativeWebSocketClientTest {
                 // 3. Multiple sequential text messages
                 val messages = (1..3).map { "ditchoom-native-seq-$it" }
                 for (msg in messages) {
-                    ws.send(WebSocketMessage.Text(BufferFactory.Default.wrap(msg.encodeToByteArray())))
+                    ws.send(WebSocketMessage.Text(msg))
                 }
                 val seqEchoes =
                     withTimeout(10.seconds) {
                         val collected = mutableListOf<String>()
                         ws.receive()
-                            .filterIsInstance<WebSocketMessage.Text<ReadBuffer>>()
-                            .map { it.payload.readByteArray(it.payload.remaining()).decodeToString() }
+                            .filterIsInstance<WebSocketMessage.Text>()
+                            .map { it.payload }
                             .takeWhile { text ->
                                 if (text.startsWith("ditchoom-native-seq-")) {
                                     collected.add(text)
@@ -117,14 +115,13 @@ class NativeWebSocketClientTest {
                         tls = true,
                         connectionTimeout = 15.seconds,
                     ),
-                    StringCodec,
                 )
             try {
                 val message = "ditchoom-native-echo-test"
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Text(message)) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().first() as WebSocketMessage.Text<String>
+                        ws.receive().first() as WebSocketMessage.Text
                     }
                 assertEquals(message, echo.payload)
             } finally {

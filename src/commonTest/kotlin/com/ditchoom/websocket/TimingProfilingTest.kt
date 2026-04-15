@@ -7,7 +7,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.CompressionAlgorithm
-import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
@@ -136,14 +135,14 @@ class TimingProfilingTest {
                     requestCompression = true,
                 )
             val connectMark = TimeSource.Monotonic.markNow()
-            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec)
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()))
 
             var writeTotal = Duration.ZERO
             var readTotal = Duration.ZERO
 
             try {
                 ws.receive().take(count).collect { msg ->
-                    val text = (msg as WebSocketMessage.Text<String>).payload
+                    val text = (msg as WebSocketMessage.Text).payload
 
                     // Measure write (includes compress + frame + socket write)
                     val writeMark = TimeSource.Monotonic.markNow()
@@ -190,13 +189,13 @@ class TimingProfilingTest {
                     requestCompression = false, // NO compression
                 )
             val connectMark = TimeSource.Monotonic.markNow()
-            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()), StringCodec)
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()))
 
             var writeTotal = Duration.ZERO
 
             try {
                 ws.receive().take(count).collect { msg ->
-                    val text = (msg as WebSocketMessage.Text<String>).payload
+                    val text = (msg as WebSocketMessage.Text).payload
 
                     val writeMark = TimeSource.Monotonic.markNow()
                     ws.send(WebSocketMessage.Text(text))

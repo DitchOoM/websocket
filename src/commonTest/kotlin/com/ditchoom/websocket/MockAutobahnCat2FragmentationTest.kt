@@ -4,7 +4,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -23,7 +22,7 @@ class MockAutobahnCat2FragmentationTest {
         chunkSize: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
         val frames = MockAutobahnHelpers.buildFragmentedTextFrames(text, chunkSize)
         for (frame in frames) transport.enqueueRead(frame)
@@ -33,7 +32,7 @@ class MockAutobahnCat2FragmentationTest {
             withTimeout(5.seconds) {
                 connection.receive().first()
             }
-        assertIs<WebSocketMessage.Text<String>>(msg)
+        assertIs<WebSocketMessage.Text>(msg)
         assertEquals(text, msg.payload)
         connection.close()
     }
@@ -81,7 +80,7 @@ class MockAutobahnCat2FragmentationTest {
     fun emptyIntermediateFragments() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Text(FIN=0, "He") + Cont(FIN=0, "") + Cont(FIN=0, "ll") + Cont(FIN=1, "o")
             val he = BufferFactory.Default.allocate(2)
@@ -102,7 +101,7 @@ class MockAutobahnCat2FragmentationTest {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello", msg.payload)
             connection.close()
         }
@@ -111,7 +110,7 @@ class MockAutobahnCat2FragmentationTest {
     fun pingBetweenFragments() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Text(FIN=0, "Hel") + Ping + Cont(FIN=1, "lo")
             val hel = BufferFactory.Default.allocate(3)
@@ -126,9 +125,9 @@ class MockAutobahnCat2FragmentationTest {
 
             val msg =
                 withTimeout(5.seconds) {
-                    connection.receive().first { it is WebSocketMessage.Text<*> }
+                    connection.receive().first { it is WebSocketMessage.Text }
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals("Hello", msg.payload)
             connection.close()
         }

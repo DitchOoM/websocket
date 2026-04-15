@@ -15,19 +15,19 @@ internal actual val supportsDeflateContextTakeover: Boolean = true
 internal val isNodeJs: Boolean =
     js("typeof process !== 'undefined' && typeof process.versions !== 'undefined' && typeof process.versions.node !== 'undefined'") as Boolean
 
-actual suspend fun <P> connectNativeWebSocket(
+actual suspend fun <B> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: Codec<P>,
+    binaryCodec: Codec<B>,
     parentScope: CoroutineScope?,
-): Connection<WebSocketMessage<P>> =
+): Connection<WebSocketMessage<B>> =
     if (isNodeJs) {
         throw UnsupportedOperationException(
-            "Node.js: Use connectWebSocket(transport, options, payloadCodec) with a pre-connected ByteStream",
+            "Node.js: Use connectWebSocket(transport, options, binaryCodec) with a pre-connected ByteStream",
         )
     } else {
         val bufferFactory = connectionOptions.bufferFactory
         val useSharedMemory = bufferFactory == BufferFactory.shared()
-        val controller = BrowserWebSocketController(connectionOptions, payloadCodec, bufferFactory, parentScope, useSharedMemory)
+        val controller = BrowserWebSocketController(connectionOptions, binaryCodec, bufferFactory, parentScope, useSharedMemory)
         controller.connect()
         controller
     }

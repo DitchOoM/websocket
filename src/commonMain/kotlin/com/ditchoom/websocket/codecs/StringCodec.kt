@@ -19,7 +19,7 @@ import com.ditchoom.buffer.codec.EncodeContext
  * This is the right choice for most text-based WebSocket protocols (chat, JSON over
  * text frames, human-readable telemetry).
  */
-object StringCodec : Codec<String> {
+internal object StringCodec : Codec<String> {
     override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
         buffer.readString(buffer.remaining(), Charset.UTF8)
 

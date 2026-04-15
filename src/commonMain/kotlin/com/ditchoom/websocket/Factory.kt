@@ -15,6 +15,7 @@ import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
 import com.ditchoom.buffer.stream.builder
+import com.ditchoom.websocket.codecs.EmptyCodec
 import com.ditchoom.websocket.handshake.HandshakeException
 import com.ditchoom.websocket.handshake.HandshakeRequest
 import com.ditchoom.websocket.handshake.HandshakeResponseParser
@@ -27,15 +28,19 @@ import kotlinx.coroutines.CoroutineScope
  * [Connection]. The connection is guaranteed to be established when this returns —
  * impossible to send on an unconnected client.
  *
+ * Text frames always surface as [WebSocketMessage.Text] with a [String] payload
+ * (UTF-8 per RFC 6455 §5.6). Binary frames are decoded via [binaryCodec], whose
+ * output type [B] parameterizes [WebSocketMessage.Binary].
+ *
  * Performs the HTTP upgrade handshake, negotiates permessage-deflate compression,
  * and assembles a [WebSocketCodec] from composable components.
  */
-suspend fun <P> connectWebSocket(
+suspend fun <B> connectWebSocket(
     transport: ByteStream,
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: Codec<P>,
+    binaryCodec: Codec<B>,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<P>> {
+): Connection<WebSocketMessage<B>> {
     val bufferFactory = connectionOptions.bufferFactory
     try {
         // Build handshake request
@@ -109,7 +114,7 @@ suspend fun <P> connectWebSocket(
                         stream = autoFillingStream,
                         compression = compression,
                         bufferFactory = bufferFactory,
-                        payloadCodec = payloadCodec,
+                        binaryCodec = binaryCodec,
                         readTimeout = connectionOptions.readTimeout,
                         writeTimeout = connectionOptions.writeTimeout,
                         parentScope = parentScope,
@@ -224,10 +229,30 @@ internal fun wrapException(e: Exception): Exception =
     }
 
 /**
+ * Convenience overload for connections that only consume text and control frames.
+ * Any received binary frames are silently discarded (payload = [Unit]). Use the
+ * [binaryCodec] overload to materialize binary payloads, or supply
+ * [com.ditchoom.websocket.codecs.RejectingCodec] to fail loudly on unexpected binary.
+ */
+suspend fun connectWebSocket(
+    transport: ByteStream,
+    connectionOptions: WebSocketConnectionOptions,
+    parentScope: CoroutineScope? = null,
+): Connection<WebSocketMessage<Unit>> =
+    connectWebSocket(transport, connectionOptions, EmptyCodec, parentScope)
+
+/**
  * Create a platform-native WebSocket connection.
  */
-expect suspend fun <P> connectNativeWebSocket(
+expect suspend fun <B> connectNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: Codec<P>,
+    binaryCodec: Codec<B>,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<P>>
+): Connection<WebSocketMessage<B>>
+
+/** No-binary overload — see [connectWebSocket] variant for semantics. */
+suspend fun connectNativeWebSocket(
+    connectionOptions: WebSocketConnectionOptions,
+    parentScope: CoroutineScope? = null,
+): Connection<WebSocketMessage<Unit>> =
+    connectNativeWebSocket(connectionOptions, EmptyCodec, parentScope)

@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -25,7 +24,7 @@ class MockAutobahnCat7CloseTest {
     private fun testValidClose(code: UShort) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(code))
 
@@ -72,7 +71,7 @@ class MockAutobahnCat7CloseTest {
     fun closeEmptyPayload() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Close frame with no payload (no status code)
             val empty = BufferFactory.Default.allocate(0); empty.resetForRead()
@@ -90,7 +89,7 @@ class MockAutobahnCat7CloseTest {
     fun closeWithReasonString() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u, "normal closure"))
 
@@ -107,7 +106,7 @@ class MockAutobahnCat7CloseTest {
     fun close125BytePayload() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // 2 bytes code + 123 bytes reason = 125 bytes total (max for control frame)
             val reason = "A".repeat(123)
@@ -130,7 +129,7 @@ class MockAutobahnCat7CloseTest {
     fun close1BytePayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // 1-byte close payload is invalid (code requires 2 bytes)
             val payload = BufferFactory.Default.allocate(1)
@@ -148,7 +147,7 @@ class MockAutobahnCat7CloseTest {
     fun close126BytePayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Close with 126 bytes payload (exceeds 125 max for control frames)
             val payload = BufferFactory.Default.allocate(126)
@@ -167,7 +166,7 @@ class MockAutobahnCat7CloseTest {
     fun closeInvalidUtf8ReasonIsError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Close frame with code 1000 + invalid UTF-8 in reason
             val payload = BufferFactory.Default.allocate(4)
@@ -191,7 +190,7 @@ class MockAutobahnCat7CloseTest {
     private fun testInvalidCloseCode(code: UShort) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(code))
 

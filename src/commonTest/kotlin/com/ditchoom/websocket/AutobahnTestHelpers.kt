@@ -14,7 +14,6 @@ import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.SocketOptions
 import com.ditchoom.socket.transport.TcpTransport
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -37,10 +36,10 @@ import kotlin.time.TimeSource
  * allocations use the same allocator — see
  * `socket/CONNECTION_OPTIONS_BUFFER_FACTORY_BYPASS.md` for why this matters.
  */
-internal suspend fun <P> connectForTest(
+internal suspend fun <B> connectForTest(
     connectionOptions: WebSocketConnectionOptions,
-    payloadCodec: Codec<P>,
-): Connection<WebSocketMessage<P>> {
+    binaryCodec: Codec<B>,
+): Connection<WebSocketMessage<B>> {
     val socketOptions =
         if (connectionOptions.tls) {
             SocketOptions.tlsDefault()
@@ -62,14 +61,20 @@ internal suspend fun <P> connectForTest(
     return connectWebSocket(
         transport = transport,
         connectionOptions = connectionOptions,
-        payloadCodec = payloadCodec,
+        binaryCodec = binaryCodec,
     )
 }
 
+/** Text-only overload — binary frames surface as `Binary(Unit)` and are typically ignored. */
+internal suspend fun connectForTest(
+    connectionOptions: WebSocketConnectionOptions,
+): Connection<WebSocketMessage<Unit>> =
+    connectForTest(connectionOptions, com.ditchoom.websocket.codecs.EmptyCodec)
+
 /**
  * Prepares a connection for an autobahn case and optionally waits for the server to close.
- * Uses [StringCodec] since prepareConnection is only used for protocol-conformance tests
- * where the payload itself is not examined.
+ * Protocol-conformance cases don't examine binary payloads, so we connect without a binary
+ * codec (binary frames surface as `Binary(Unit)` and are ignored).
  */
 internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
@@ -77,7 +82,7 @@ internal suspend fun CoroutineScope.prepareConnection(
     awaitClose: Boolean = true,
     bufferFactory: BufferFactory = BufferFactory.Default,
     agentSuffix: String = "",
-): Connection<WebSocketMessage<String>> {
+): Connection<WebSocketMessage<Unit>> {
     val connectionOptions =
         WebSocketConnectionOptions(
             name = autobahnHost(),
@@ -86,7 +91,7 @@ internal suspend fun CoroutineScope.prepareConnection(
             requestCompression = requestCompression,
             bufferFactory = bufferFactory,
         )
-    val websocket = connectForTest(connectionOptions, StringCodec)
+    val websocket = connectForTest(connectionOptions)
 
     if (awaitClose) {
         // Wait for the receive flow to complete (server closes the connection)
@@ -125,15 +130,14 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
             bufferFactory = bufferFactory,
         )
     val mark = TimeSource.Monotonic.markNow()
-    val ws = connectForTest(connectionOptions, StringCodec)
+    val ws = connectForTest(connectionOptions)
     val connectTime = mark.elapsedNow()
     try {
         var msgIdx = 0
         val perMsgMark = TimeSource.Monotonic.markNow()
-        ws.receive().filter { it is WebSocketMessage.Text<*> }.take(count).collect {
+        ws.receive().filter { it is WebSocketMessage.Text }.take(count).collect {
             val recvTime = perMsgMark.elapsedNow()
-            @Suppress("UNCHECKED_CAST")
-            val m = it as WebSocketMessage.Text<String>
+            val m = it as WebSocketMessage.Text
             ws.send(WebSocketMessage.Text(m.payload))
             val writeTime = perMsgMark.elapsedNow()
             if (count > 100 && (msgIdx < 5 || msgIdx % 100 == 0 || msgIdx == count - 1)) {
@@ -223,10 +227,9 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
             requestCompression = requestCompression,
             bufferFactory = bufferFactory,
         )
-    val ws = connectForTest(connectionOptions, StringCodec)
+    val ws = connectForTest(connectionOptions)
     try {
-        @Suppress("UNCHECKED_CAST")
-        val msg = ws.receive().first { it is WebSocketMessage.Text<*> } as WebSocketMessage.Text<String>
+        val msg = ws.receive().first { it is WebSocketMessage.Text } as WebSocketMessage.Text
         ws.send(WebSocketMessage.Text(msg.payload))
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
@@ -239,7 +242,7 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     }
 }
 
-internal suspend fun <P> closeConnection(websocket: Connection<WebSocketMessage<P>>) {
+internal suspend fun <B> closeConnection(websocket: Connection<WebSocketMessage<B>>) {
     kotlinx.coroutines.delay(100)
     try {
         websocket.close()
@@ -248,8 +251,8 @@ internal suspend fun <P> closeConnection(websocket: Connection<WebSocketMessage<
     }
 }
 
-internal suspend fun sendMessageWithPayloadLengthOf(
-    websocket: Connection<WebSocketMessage<String>>,
+internal suspend fun <B> sendMessageWithPayloadLengthOf(
+    websocket: Connection<WebSocketMessage<B>>,
     length: Int,
 ) {
     val string =

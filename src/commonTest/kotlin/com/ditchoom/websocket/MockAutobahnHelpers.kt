@@ -54,16 +54,16 @@ internal object MockAutobahnHelpers {
     // Connection creation (uses connectWebSocket directly — no DefaultWebSocketClient)
     // ========================================================================
 
-    suspend fun <P> connectWithHandshake(
+    suspend fun <B> connectWithHandshake(
         transport: MockWebSocketTransport,
-        payloadCodec: Codec<P>,
+        binaryCodec: Codec<B>,
         options: WebSocketConnectionOptions = defaultOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage<P>> = coroutineScope {
+    ): Connection<WebSocketMessage<B>> = coroutineScope {
         val resolved = options.copy(bufferFactory = bufferFactory)
         val connectJob =
             async {
-                connectWebSocket(transport, resolved, payloadCodec)
+                connectWebSocket(transport, resolved, binaryCodec)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
@@ -71,22 +71,38 @@ internal object MockAutobahnHelpers {
         withTimeout(5.seconds) { connectJob.await() }
     }
 
-    suspend fun <P> connectWithCompressionHandshake(
+    /** Text-only overload — binary frames surface as `Binary(Unit)`. */
+    suspend fun connectWithHandshake(
         transport: MockWebSocketTransport,
-        payloadCodec: Codec<P>,
+        options: WebSocketConnectionOptions = defaultOptions,
+        bufferFactory: BufferFactory = BufferFactory.managed(),
+    ): Connection<WebSocketMessage<Unit>> =
+        connectWithHandshake(transport, com.ditchoom.websocket.codecs.EmptyCodec, options, bufferFactory)
+
+    suspend fun <B> connectWithCompressionHandshake(
+        transport: MockWebSocketTransport,
+        binaryCodec: Codec<B>,
         options: WebSocketConnectionOptions = compressionOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage<P>> = coroutineScope {
+    ): Connection<WebSocketMessage<B>> = coroutineScope {
         val resolved = options.copy(bufferFactory = bufferFactory)
         val connectJob =
             async {
-                connectWebSocket(transport, resolved, payloadCodec)
+                connectWebSocket(transport, resolved, binaryCodec)
             }
         waitForWrite(transport)
         val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
         transport.enqueueRead(buildCompressionHandshakeResponse(clientKey))
         withTimeout(5.seconds) { connectJob.await() }
     }
+
+    /** Text-only overload — binary frames surface as `Binary(Unit)`. */
+    suspend fun connectWithCompressionHandshake(
+        transport: MockWebSocketTransport,
+        options: WebSocketConnectionOptions = compressionOptions,
+        bufferFactory: BufferFactory = BufferFactory.managed(),
+    ): Connection<WebSocketMessage<Unit>> =
+        connectWithCompressionHandshake(transport, com.ditchoom.websocket.codecs.EmptyCodec, options, bufferFactory)
 
     suspend fun waitForWrite(
         transport: MockWebSocketTransport,

@@ -9,7 +9,6 @@ import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -27,7 +26,6 @@ class CompressionEchoTest {
         val transport = MockWebSocketTransport()
         val connection = MockAutobahnHelpers.connectWithCompressionHandshake(
             transport,
-            StringCodec,
             bufferFactory = BufferFactory.managed(),
         )
 
@@ -44,7 +42,7 @@ class CompressionEchoTest {
         compressor.close()
 
         val msg = withTimeout(10.seconds) { connection.receive().first() }
-        assertIs<WebSocketMessage.Text<String>>(msg)
+        assertIs<WebSocketMessage.Text>(msg)
         assertEquals(size, msg.payload.length, "Text echo failed at $size bytes: got ${msg.payload.length}")
         connection.close()
     }

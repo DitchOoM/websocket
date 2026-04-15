@@ -6,7 +6,6 @@ import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.shared
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -56,7 +55,7 @@ abstract class AbstractAllocatorLeakTest {
                 factory = backingFactory,
             )
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec, bufferFactory = pool)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = pool)
 
         val text = "A".repeat(payloadSize)
         repeat(frameCount) {
@@ -67,7 +66,7 @@ abstract class AbstractAllocatorLeakTest {
         withTimeout(20.seconds) {
             repeat(frameCount) {
                 val msg = connection.receive().first()
-                assertIs<WebSocketMessage.Text<String>>(msg, "frame $it not Text on $variantName")
+                assertIs<WebSocketMessage.Text>(msg, "frame $it not Text on $variantName")
             }
         }
         connection.close()
@@ -114,7 +113,7 @@ abstract class AbstractAllocatorLeakTest {
                 factory = backingFactory,
             )
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec, bufferFactory = pool)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = pool)
 
         val frameCount = 50
         val text = "A".repeat(512)

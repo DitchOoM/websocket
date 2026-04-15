@@ -1,6 +1,5 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -16,7 +15,7 @@ class MockAutobahnCat4ReservedOpcodeTest {
     private fun testReservedOpcode(opcodeValue: Int) =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // FIN=1 | opcode, payload length=0
             transport.enqueueReadBytes((0x80 or opcodeValue).toByte(), 0x00)

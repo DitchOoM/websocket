@@ -6,7 +6,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.shared
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -19,10 +18,10 @@ import kotlin.time.Duration.Companion.seconds
  * End-to-end tests against the local echo server.
  *
  * v2 note: each connection is parameterized by a single PayloadCodec, so tests are
- * split by payload type. Text-only tests use StringCodec; binary-only tests use
- * BinaryPassThroughCodec. The previous `allTypesWork` test which mixed text + binary
- * on a single connection is split into textOnly, binaryOnly, and pingPongOnly —
- * same behaviour coverage, just one codec per connection.
+ * split by payload type. Text-only tests use the text-only connect overload;
+ * binary-only tests use BinaryPassThroughCodec. The previous `allTypesWork` test
+ * which mixed text + binary on a single connection is split into textOnly, binaryOnly,
+ * and pingPongOnly — same behaviour coverage, just one codec per connection.
  */
 class WebSocketTests {
     @Test
@@ -34,14 +33,14 @@ class WebSocketTests {
                 websocketEndpoint = "/echo",
                 bufferFactory = BufferFactory.shared(),
             )
-            val websocket = connectForTest(connectionOptions, StringCodec)
+            val websocket = connectForTest(connectionOptions)
             val string1 = "test"
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string1)) }
-            val dataRead = websocket.receive().first() as WebSocketMessage.Text<String>
+            val dataRead = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string1, dataRead.payload)
             val string2 = "yolo"
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string2)) }
-            val dataRead2 = websocket.receive().first() as WebSocketMessage.Text<String>
+            val dataRead2 = websocket.receive().first() as WebSocketMessage.Text
             assertEquals(string2, dataRead2.payload)
             websocket.close()
         }
@@ -74,7 +73,7 @@ class WebSocketTests {
                 websocketEndpoint = "/echo",
                 bufferFactory = BufferFactory.shared(),
             )
-            val websocket = connectForTest(connectionOptions, StringCodec)
+            val websocket = connectForTest(connectionOptions)
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping("ping-data")) }
             val pong =
                 withTimeout(10.seconds) {
@@ -106,7 +105,7 @@ class WebSocketTests {
             // Note: on BinaryPassThroughCodec, sending Text sends a *binary* frame containing
             // the encoded string bytes — the echo server will reflect it back as binary too.
             // That's correct for BinaryPassThroughCodec's contract. Protocol-level text
-            // framing requires a String-carrying codec (StringCodec).
+            // framing requires the text-only connect overload.
             val binaryPayload = BufferFactory.Default.allocate(16)
             binaryPayload.writeString("yolo", Charset.UTF8)
             binaryPayload.resetForRead()

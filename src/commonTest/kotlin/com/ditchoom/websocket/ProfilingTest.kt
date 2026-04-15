@@ -6,7 +6,6 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
@@ -91,7 +90,7 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = connectForTest(connectionOptions, StringCodec)
+                val ws = connectForTest(connectionOptions)
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
             }
@@ -231,10 +230,7 @@ class ProfilingTest {
                 buf.position(0)
                 ws.send(WebSocketMessage.Binary(buf))
             } else {
-                val buf = factory.allocate(payloadSize)
-                buf.writeString(textPayload)
-                buf.resetForRead()
-                ws.send(WebSocketMessage.Text(buf))
+                ws.send(WebSocketMessage.Text(textPayload))
             }
             writeTimes.add(wMark.elapsedNow().inWholeMicroseconds)
 

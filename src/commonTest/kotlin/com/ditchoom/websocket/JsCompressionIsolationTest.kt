@@ -9,7 +9,6 @@ import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -30,7 +29,7 @@ class JsCompressionIsolationTest {
     @Test
     fun singleCompressedMessage32KB() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "A".repeat(32768)
@@ -41,9 +40,9 @@ class JsCompressionIsolationTest {
         transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
         compressor.close()
 
-        val msg = withTimeout(5.seconds) { connection.receive().filter { it is WebSocketMessage.Text<*> }.take(1).toList() }
+        val msg = withTimeout(5.seconds) { connection.receive().filter { it is WebSocketMessage.Text }.take(1).toList() }
         assertEquals(1, msg.size)
-        assertEquals(32768, (msg[0] as WebSocketMessage.Text<String>).payload.length)
+        assertEquals(32768, (msg[0] as WebSocketMessage.Text).payload.length)
         connection.close()
     }
 
@@ -52,7 +51,7 @@ class JsCompressionIsolationTest {
     @Test
     fun tenCompressedMessages32KB() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "A".repeat(32768)
@@ -66,10 +65,10 @@ class JsCompressionIsolationTest {
         transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
         compressor.close()
 
-        val msgs = withTimeout(10.seconds) { connection.receive().filter { it is WebSocketMessage.Text<*> }.take(10).toList() }
+        val msgs = withTimeout(10.seconds) { connection.receive().filter { it is WebSocketMessage.Text }.take(10).toList() }
         assertEquals(10, msgs.size)
         msgs.forEachIndexed { i, msg ->
-            assertEquals(32768, (msg as WebSocketMessage.Text<String>).payload.length, "Message $i wrong length")
+            assertEquals(32768, (msg as WebSocketMessage.Text).payload.length, "Message $i wrong length")
         }
         connection.close()
     }
@@ -79,7 +78,7 @@ class JsCompressionIsolationTest {
     @Test
     fun hundredCompressedMessages32KB() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "A".repeat(32768)
@@ -93,10 +92,10 @@ class JsCompressionIsolationTest {
         transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
         compressor.close()
 
-        val msgs = withTimeout(30.seconds) { connection.receive().filter { it is WebSocketMessage.Text<*> }.take(100).toList() }
+        val msgs = withTimeout(30.seconds) { connection.receive().filter { it is WebSocketMessage.Text }.take(100).toList() }
         assertEquals(100, msgs.size)
         msgs.forEachIndexed { i, msg ->
-            assertEquals(32768, (msg as WebSocketMessage.Text<String>).payload.length, "Message $i wrong length")
+            assertEquals(32768, (msg as WebSocketMessage.Text).payload.length, "Message $i wrong length")
         }
         connection.close()
     }
@@ -106,7 +105,7 @@ class JsCompressionIsolationTest {
     @Test
     fun tenCompressedMessages32KB_nonRepetitive() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         repeat(10) { i ->
@@ -122,10 +121,10 @@ class JsCompressionIsolationTest {
         transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
         compressor.close()
 
-        val msgs = withTimeout(10.seconds) { connection.receive().filter { it is WebSocketMessage.Text<*> }.take(10).toList() }
+        val msgs = withTimeout(10.seconds) { connection.receive().filter { it is WebSocketMessage.Text }.take(10).toList() }
         assertEquals(10, msgs.size)
         msgs.forEachIndexed { i, msg ->
-            assertEquals(32768, (msg as WebSocketMessage.Text<String>).payload.length, "Message $i wrong length")
+            assertEquals(32768, (msg as WebSocketMessage.Text).payload.length, "Message $i wrong length")
         }
         connection.close()
     }
@@ -153,7 +152,7 @@ class JsCompressionIsolationTest {
     @Test
     fun echoCompressedMessage32KB() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "A".repeat(32768)
@@ -166,10 +165,10 @@ class JsCompressionIsolationTest {
 
         // Receive
         val msg = withTimeout(5.seconds) {
-            connection.receive().filter { it is WebSocketMessage.Text<*> }.take(1).toList()
+            connection.receive().filter { it is WebSocketMessage.Text }.take(1).toList()
         }
-        assertIs<WebSocketMessage.Text<String>>(msg[0])
-        val received = msg[0] as WebSocketMessage.Text<String>
+        assertIs<WebSocketMessage.Text>(msg[0])
+        val received = msg[0] as WebSocketMessage.Text
         assertEquals(32768, received.payload.length)
 
         // Echo back while still connected
@@ -188,7 +187,7 @@ class JsCompressionIsolationTest {
     @Test
     fun tenEchoRoundTrips32KB() = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
         val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw)
         val text = "A".repeat(32768)
@@ -203,11 +202,11 @@ class JsCompressionIsolationTest {
 
         // Receive all 10, echo each
         val msgs = withTimeout(10.seconds) {
-            connection.receive().filter { it is WebSocketMessage.Text<*> }.take(10).toList()
+            connection.receive().filter { it is WebSocketMessage.Text }.take(10).toList()
         }
         assertEquals(10, msgs.size)
         msgs.forEachIndexed { i, msg ->
-            val t = (msg as WebSocketMessage.Text<String>).payload
+            val t = (msg as WebSocketMessage.Text).payload
             assertEquals(32768, t.length, "Message $i wrong length: ${t.length}")
             connection.send(WebSocketMessage.Text(t))
         }

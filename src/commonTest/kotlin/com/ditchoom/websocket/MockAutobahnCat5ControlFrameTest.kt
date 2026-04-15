@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -25,7 +24,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun fragmentedPingIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Ping with FIN=0 (0x09 instead of 0x89), length=0
             transport.enqueueReadBytes(0x09.toByte(), 0x00)
@@ -40,7 +39,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun fragmentedCloseIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Close with FIN=0 (0x08 instead of 0x88), length=0
             transport.enqueueReadBytes(0x08.toByte(), 0x00)
@@ -55,7 +54,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun oversizedPingPayloadIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Ping with 126-byte payload (exceeds 125 limit for control frames)
             val payload = BufferFactory.Default.allocate(126)
@@ -75,7 +74,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun pingPayload125BytesIsValid() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val payload = BufferFactory.Default.allocate(125)
             for (i in 0 until 125) payload.writeByte(0x41)
@@ -97,7 +96,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun continuationWithoutStartIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Continuation frame without a preceding start frame
             val payload = BufferFactory.Default.allocate(5)
@@ -117,7 +116,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun newTextDuringFragmentationIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Start a fragmented text message, then send a new text frame
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("start", fin = false))
@@ -133,7 +132,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun newBinaryDuringTextFragmentationIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val binPayload = BufferFactory.Default.allocate(3)
             binPayload.writeByte(1); binPayload.writeByte(2); binPayload.writeByte(3)
@@ -152,7 +151,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun rsv2SetWithoutExtensionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -176,7 +175,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun rsv3SetWithoutExtensionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -200,7 +199,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun rsv1WithoutCompressionIsProtocolError() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val payload = BufferFactory.Default.allocate(5)
             for (i in 0 until 5) payload.writeByte(0x41)
@@ -224,7 +223,7 @@ class MockAutobahnCat5ControlFrameTest {
     fun pingInterleavedPreservesFragmentation() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Text(FIN=0, "AB") + Ping + Cont(FIN=0, "CD") + Ping + Cont(FIN=1, "EF")
             val ab = BufferFactory.Default.allocate(2)
@@ -243,9 +242,9 @@ class MockAutobahnCat5ControlFrameTest {
 
             val msg =
                 withTimeout(5.seconds) {
-                    connection.receive().first { it is WebSocketMessage.Text<*> }
+                    connection.receive().first { it is WebSocketMessage.Text }
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals("ABCDEF", msg.payload)
             connection.close()
         }

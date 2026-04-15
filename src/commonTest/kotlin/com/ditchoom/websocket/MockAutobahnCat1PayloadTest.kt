@@ -3,7 +3,6 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
@@ -30,7 +29,7 @@ class MockAutobahnCat1PayloadTest {
         size: Int,
     ) = runStrictTest {
         val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+        val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
         val text = "A".repeat(size)
         transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
@@ -40,7 +39,7 @@ class MockAutobahnCat1PayloadTest {
             withTimeout(5.seconds) {
                 connection.receive().first()
             }
-        assertIs<WebSocketMessage.Text<String>>(msg)
+        assertIs<WebSocketMessage.Text>(msg)
         assertEquals(size, msg.payload.length)
         if (size <= 1024) assertEquals(text, msg.payload)
         connection.close()

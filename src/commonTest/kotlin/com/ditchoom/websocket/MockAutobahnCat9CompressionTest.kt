@@ -5,7 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -26,7 +25,7 @@ class MockAutobahnCat9CompressionTest {
     fun compressedTextSmall() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
             val text = "Hello, compressed WebSocket!"
             val compressor = MockAutobahnHelpers.createCompressor()
@@ -42,7 +41,7 @@ class MockAutobahnCat9CompressionTest {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals(text, msg.payload)
             compressor.close()
             connection.close()
@@ -52,7 +51,7 @@ class MockAutobahnCat9CompressionTest {
     fun compressedTextMedium() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
             val text = "A".repeat(4096)
             val compressor = MockAutobahnHelpers.createCompressor()
@@ -68,7 +67,7 @@ class MockAutobahnCat9CompressionTest {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals(text, msg.payload)
             compressor.close()
             connection.close()
@@ -106,7 +105,7 @@ class MockAutobahnCat9CompressionTest {
     fun uncompressedFrameWorksWithCompressionNegotiated() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
             // RSV1=0 frame should still work even though compression is negotiated
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("not compressed"))
@@ -116,7 +115,7 @@ class MockAutobahnCat9CompressionTest {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             assertEquals("not compressed", msg.payload)
             connection.close()
         }
@@ -125,7 +124,7 @@ class MockAutobahnCat9CompressionTest {
     fun multipleCompressedMessages() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithCompressionHandshake(transport)
 
             val messages = listOf("first message", "second message", "third message")
 
@@ -146,11 +145,10 @@ class MockAutobahnCat9CompressionTest {
                 withTimeout(5.seconds) {
                     connection.receive().toList()
                 }
-            val textMessages = received.filter { it is WebSocketMessage.Text<*> }
+            val textMessages = received.filter { it is WebSocketMessage.Text }
             assertEquals(3, textMessages.size)
             for (i in messages.indices) {
-                @Suppress("UNCHECKED_CAST")
-                val txt = textMessages[i] as WebSocketMessage.Text<String>
+                val txt = textMessages[i] as WebSocketMessage.Text
                 assertEquals(messages[i], txt.payload)
             }
             connection.close()

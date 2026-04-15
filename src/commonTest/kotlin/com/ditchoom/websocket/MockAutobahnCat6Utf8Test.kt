@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.websocket.codecs.StringCodec
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -102,7 +101,7 @@ class MockAutobahnCat6Utf8Test {
     fun invalidUtf8InFragmentedText() =
         runStrictTest {
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Valid first fragment, invalid continuation
             val validPart = BufferFactory.Default.allocate(3)
@@ -133,7 +132,7 @@ class MockAutobahnCat6Utf8Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
@@ -144,7 +143,7 @@ class MockAutobahnCat6Utf8Test {
                 withTimeout(5.seconds) {
                     connection.receive().first()
                 }
-            assertIs<WebSocketMessage.Text<String>>(msg)
+            assertIs<WebSocketMessage.Text>(msg)
             connection.close()
         }
 
@@ -154,7 +153,7 @@ class MockAutobahnCat6Utf8Test {
             val (_, payload) = vectors.first { it.first == name }
 
             val transport = MockWebSocketTransport()
-            val connection = MockAutobahnHelpers.connectWithHandshake(transport, StringCodec)
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             transport.enqueueRead(
                 MockAutobahnHelpers.buildServerFrame(Opcode.Text, payload),
