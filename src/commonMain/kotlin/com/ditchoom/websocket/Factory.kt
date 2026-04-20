@@ -241,18 +241,3 @@ suspend fun connectWebSocket(
 ): Connection<WebSocketMessage<Unit>> =
     connectWebSocket(transport, connectionOptions, EmptyCodec, parentScope)
 
-/**
- * Create a platform-native WebSocket connection.
- */
-expect suspend fun <B> connectNativeWebSocket(
-    connectionOptions: WebSocketConnectionOptions,
-    binaryCodec: Codec<B>,
-    parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<B>>
-
-/** No-binary overload — see [connectWebSocket] variant for semantics. */
-suspend fun connectNativeWebSocket(
-    connectionOptions: WebSocketConnectionOptions,
-    parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectNativeWebSocket(connectionOptions, EmptyCodec, parentScope)

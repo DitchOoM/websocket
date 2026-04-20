@@ -10,7 +10,9 @@ import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.socket.ConnectionOptions
+import com.ditchoom.socket.NetworkCapabilities.FULL_SOCKET_ACCESS
 import com.ditchoom.socket.SocketOptions
+import com.ditchoom.socket.getNetworkCapabilities
 import com.ditchoom.socket.transport.TcpTransport
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import kotlinx.coroutines.CoroutineScope
@@ -24,43 +26,46 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 /**
- * Creates and connects a WebSocket backed by a real TCP socket.
- *
- * Uses [TcpTransport] from the socket library (test dependency) to open
- * a TCP connection, then performs the HTTP upgrade handshake via the
- * production [connectWebSocket] factory with the supplied [payloadCodec].
- *
- * The caller's `connectionOptions.bufferFactory` is propagated into the
- * socket transport's [ConnectionOptions] so both transport reads and codec
- * allocations use the same allocator — see
- * `socket/CONNECTION_OPTIONS_BUFFER_FACTORY_BYPASS.md` for why this matters.
+ * Connects a WebSocket the way a consumer of the library would on the current
+ * platform: on targets with raw socket access (JVM, Android, iOS/macOS/tvOS/watchOS,
+ * Linux, Node.js) this opens a [TcpTransport] and drives the full [connectWebSocket]
+ * framing/handshake/compression path; on browser JS it resolves to
+ * [connectBrowserWebSocket][connectBrowserPath] → [BrowserWebSocketController]
+ * and hits the platform's native `WebSocket` API. Writing tests against this
+ * helper means the autobahn suite runs end-to-end on every target.
  */
 internal suspend fun <B> connectForTest(
     connectionOptions: WebSocketConnectionOptions,
     binaryCodec: Codec<B>,
-): Connection<WebSocketMessage<B>> {
-    val socketOptions =
-        if (connectionOptions.tls) {
-            SocketOptions.tlsDefault()
-        } else {
-            SocketOptions.LOW_LATENCY
-        }
-    val transport =
-        TcpTransport().connect(
-            hostname = connectionOptions.name,
-            port = connectionOptions.port,
-            options = ConnectionOptions(
-                socketOptions = socketOptions,
-                connectionTimeout = connectionOptions.connectionTimeout,
-                bufferFactory = connectionOptions.bufferFactory,
-            ),
+): Connection<WebSocketMessage<B>> =
+    if (getNetworkCapabilities() == FULL_SOCKET_ACCESS) {
+        val socketOptions =
+            if (connectionOptions.tls) {
+                SocketOptions.tlsDefault()
+            } else {
+                SocketOptions.LOW_LATENCY
+            }
+        val transport =
+            TcpTransport().connect(
+                hostname = connectionOptions.name,
+                port = connectionOptions.port,
+                options = ConnectionOptions(
+                    socketOptions = socketOptions,
+                    connectionTimeout = connectionOptions.connectionTimeout,
+                    bufferFactory = connectionOptions.bufferFactory,
+                ),
+            )
+        connectWebSocket(
+            transport = transport,
+            connectionOptions = connectionOptions,
+            binaryCodec = binaryCodec,
         )
-    return connectWebSocket(
-        transport = transport,
-        connectionOptions = connectionOptions,
-        binaryCodec = binaryCodec,
-    )
-}
+    } else {
+        connectBrowserPath(
+            connectionOptions = connectionOptions,
+            binaryCodec = binaryCodec,
+        )
+    }
 
 /** Text-only overload — binary frames surface as `Binary(Unit)` and are typically ignored. */
 internal suspend fun connectForTest(

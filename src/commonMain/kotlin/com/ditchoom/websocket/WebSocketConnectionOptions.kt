@@ -54,7 +54,7 @@ data class WebSocketConnectionOptions(
      */
     val bufferFactory: BufferFactory = BufferFactory.deterministic(),
 ) {
-    internal fun buildUrl(): String {
+    fun buildUrl(): String {
         val prefix =
             if (tls) {
                 "wss://"

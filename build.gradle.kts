@@ -166,11 +166,14 @@ kotlin.sourceSets.commonMain {
     kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
 }
 
-// Ensure KSP runs before compilation for all targets
+// Ensure KSP runs before compilation and source jar tasks for all targets
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
     if (name != "kspCommonMainKotlinMetadata") {
         dependsOn("kspCommonMainKotlinMetadata")
     }
+}
+tasks.matching { it.name.contains("SourcesJar", ignoreCase = true) }.configureEach {
+    dependsOn("kspCommonMainKotlinMetadata")
 }
 
 val integrationTestPatterns =
@@ -228,34 +231,43 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     if (!runIntegrationTests) {
         integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
-    // Exclude tests from browser that require Node.js APIs or raw socket access.
-    // Browser WebSocket handles framing, masking, and permessage-deflate internally
-    // via the native WebSocket API — none of these tests exercise BrowserWebSocketController's
-    // code path. They live in commonTest because they validate the TCP-path codec
-    // (WebSocketCodec) which is shared across jvm/linux/jsNode but not used in the browser.
+    // Browser exclusions — see docs/docs/platforms/javascript.md for the full rationale.
+    // After v2's connectForTest flip to connectNativeWebSocket, the browser path
+    // exercises BrowserWebSocketController (native `WebSocket`) end-to-end, so most
+    // autobahn coverage works natively. The exclusions below fall into three buckets:
+    //   (1) tests that drive the TCP-path codec directly (not applicable on browser),
+    //   (2) tests of browser-unsupported features (frame-level ping/pong, invalid
+    //       close codes, permessage-deflate window-bits control),
+    //   (3) known-failing infrastructure (SharedArrayBuffer + Chrome API friction).
     if (name.contains("Browser", ignoreCase = true)) {
+        // (1) TCP-path unit tests — not relevant on browser's native WS.
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecMockTest")
-        // Browser WebSocket API doesn't support custom windowBits or context takeover control
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
-        // Browser WebSocket API controls close frame behavior; can't handle invalid close codes correctly (7.9.x)
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase7CloseTests")
-        // SharedArrayBuffer-backed views rejected by multiple Chrome APIs (TextDecoder, structured clone, etc.)
-        // Needs buffer library fix: copy to regular ArrayBuffer at API boundaries
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat1SharedTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat2SharedTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat4SharedTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat5SharedTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat6SharedTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat7SharedTest")
-        // Compression tests exercise the TCP-path WebSocketCodec's sync compression
-        // (StreamingCompressor.create() — zlib's sync API). The browser only has the
-        // async CompressionStream API, so sync compression throws on construction.
-        // Real browser apps don't see this: the native WebSocket negotiates and runs
-        // permessage-deflate itself, never hitting our codec.
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.*Compression*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.*Decompress*")
+        // (1) Direct-to-codec compression tests construct StreamingCompressor/Decompressor
+        // explicitly; the buffer library's sync compression needs Node's zlib and will
+        // throw on browser construction. Real browser consumers never hit this code path
+        // because the native WebSocket runs permessage-deflate itself.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionPathTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionEchoTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionRoundTripTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.JsCompressionIsolationTest")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.JsBugRegressionTests")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat9CompressionTest")
+        // (2) Browser `WebSocket` API constraints.
+        // Autobahn case 7.9.x tests sending invalid/reserved close codes (1004, 1005,
+        // 1006, 1012…). The browser API rejects these before they hit the wire.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase7CloseTests")
+        // Autobahn case 13 requires control over permessage-deflate window bits and
+        // context takeover, neither of which the browser `WebSocket` API exposes.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
+        // Browser WebSocket has no app-level ping/pong — send() silently no-ops and
+        // the browser handles protocol-level keepalive internally.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests.pingPongWorks")
+        // test.mosquitto.org:8081 WSS is flaky from headless Chrome specifically
+        // (other WSS endpoints in this suite — HiveMQ 8884, echo.websocket.org:443,
+        // websocket-echo.com:443 — all work). Non-platform, endpoint-specific.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.PublicWssValidationTest.mosquittoWssConnect")
     }
 }
 

@@ -8,6 +8,8 @@ pluginManagement {
 
 rootProject.name = "websocket"
 include(":benchmark")
+include(":websocket-tcp")
+include(":websocket-apple")
 
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"

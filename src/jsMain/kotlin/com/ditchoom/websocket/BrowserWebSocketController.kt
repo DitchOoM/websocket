@@ -35,6 +35,26 @@ import org.w3c.dom.WebSocket
  * Binary frames arrive as `ArrayBuffer` and flow through [binaryCodec] via a
  * zero-copy slice on decode; on send, the codec writes into a `GrowableWriteBuffer`
  * that we hand to the native API as an `ArrayBuffer`.
+ *
+ * ### Browser `WebSocket` API limitations
+ *
+ * The following [WebSocketMessage] and [WebSocketConnectionOptions] features are
+ * unreachable on this target. Consumer code that compiles on JVM / Node / Native
+ * will compile here too, but these operations become no-ops or are ignored:
+ *  - [WebSocketMessage.Ping] / [WebSocketMessage.Pong] sends do nothing — the
+ *    browser manages protocol keep-alive internally and no API surfaces it to
+ *    page JavaScript.
+ *  - [WebSocketConnectionOptions.compressionOptions] (window bits, context
+ *    takeover) is ignored; the browser negotiates permessage-deflate itself.
+ *  - Close codes outside 1000 and 3000–4999 are rejected by the browser before
+ *    they hit the wire. [send] of a [WebSocketMessage.Close] only issues
+ *    `webSocket.close()` with the default code.
+ *  - Custom HTTP upgrade headers other than `Sec-WebSocket-Protocol` cannot be
+ *    set because no spec-level browser API exists.
+ *  - TLS configuration, client certificates, and local/remote port introspection
+ *    are all handled by the browser and are not available to this class.
+ *
+ * See `docs/docs/platforms/javascript.md` for the full feature matrix.
  */
 class BrowserWebSocketController<B>(
     private val connectionOptions: WebSocketConnectionOptions,
