@@ -1,5 +1,10 @@
 package com.ditchoom.websocket.handshake
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Sha1
+import com.ditchoom.buffer.managed
+import com.ditchoom.buffer.utf8ByteCount
+import com.ditchoom.buffer.writeSha1Of
 import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
@@ -41,70 +46,17 @@ fun generateWebSocketKey(): String = platformGenerateKey()
 @OptIn(ExperimentalEncodingApi::class)
 fun computeAcceptKey(clientKey: String): String {
     val concatenated = clientKey + WEBSOCKET_GUID
-    val hash = sha1(concatenated.encodeToByteArray())
-    return Base64.encode(hash)
-}
+    val input = BufferFactory.managed().allocate(concatenated.utf8ByteCount())
+    input.writeString(concatenated)
+    input.resetForRead()
 
-// =============================================================================
-// Pure-Kotlin SHA-1 (RFC 3174). Used only for the WebSocket accept key —
-// no platform crypto dependency needed for this single fixed algorithm.
-// =============================================================================
+    val digest = BufferFactory.managed().allocate(Sha1.DIGEST_SIZE)
+    digest.writeSha1Of(input)
+    digest.resetForRead()
 
-private fun sha1(input: ByteArray): ByteArray {
-    var h0 = 0x67452301
-    var h1 = 0xEFCDAB89.toInt()
-    var h2 = 0x98BADCFE.toInt()
-    var h3 = 0x10325476
-    var h4 = 0xC3D2E1F0.toInt()
-
-    val bitLen = input.size.toLong() * 8
-    // Padding: append 1 bit, zeros, then 64-bit length
-    val padded = input.size + 1 + (63 - (input.size + 8) % 64) + 8
-    val msg = ByteArray(padded)
-    input.copyInto(msg)
-    msg[input.size] = 0x80.toByte()
-    for (i in 0 until 8) {
-        msg[msg.size - 1 - i] = (bitLen ushr (i * 8)).toByte()
-    }
-
-    val w = IntArray(80)
-
-    for (offset in msg.indices step 64) {
-        for (i in 0 until 16) {
-            w[i] =
-                ((msg[offset + i * 4].toInt() and 0xFF) shl 24) or
-                    ((msg[offset + i * 4 + 1].toInt() and 0xFF) shl 16) or
-                    ((msg[offset + i * 4 + 2].toInt() and 0xFF) shl 8) or
-                    (msg[offset + i * 4 + 3].toInt() and 0xFF)
-        }
-        for (i in 16 until 80) {
-            w[i] = (w[i - 3] xor w[i - 8] xor w[i - 14] xor w[i - 16]).rotateLeft(1)
-        }
-
-        var a = h0; var b = h1; var c = h2; var d = h3; var e = h4
-
-        for (i in 0 until 80) {
-            val (f, k) =
-                when {
-                    i < 20 -> ((b and c) or (b.inv() and d)) to 0x5A827999
-                    i < 40 -> (b xor c xor d) to 0x6ED9EBA1
-                    i < 60 -> ((b and c) or (b and d) or (c and d)) to 0x8F1BBCDC.toInt()
-                    else -> (b xor c xor d) to 0xCA62C1D6.toInt()
-                }
-            val temp = a.rotateLeft(5) + f + e + k + w[i]
-            e = d; d = c; c = b.rotateLeft(30); b = a; a = temp
-        }
-
-        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e
-    }
-
-    val result = ByteArray(20)
-    for (i in 0 until 4) {
-        result[i] = (h0 ushr (24 - i * 8)).toByte()
-        result[i + 4] = (h1 ushr (24 - i * 8)).toByte()
-        result[i + 8] = (h2 ushr (24 - i * 8)).toByte()
-        result[i + 12] = (h3 ushr (24 - i * 8)).toByte()
-        result[i + 16] = (h4 ushr (24 - i * 8)).toByte()
-    }
-    return result
+    // kotlin.io.encoding.Base64 takes ByteArray — one unavoidable boundary
+    // copy at the stdlib API. This path runs once per WebSocket handshake.
+    @Suppress("NoByteArrayInProd") // Kotlin stdlib Base64.encode takes ByteArray
+    val digestBytes = digest.readByteArray(Sha1.DIGEST_SIZE)
+    return Base64.encode(digestBytes)
 }
