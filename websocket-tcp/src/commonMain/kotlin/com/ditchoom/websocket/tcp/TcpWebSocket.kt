@@ -58,5 +58,4 @@ suspend fun <B> connectTcpWebSocket(
 suspend fun connectTcpWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectTcpWebSocket(connectionOptions, EmptyCodec, parentScope)
+): Connection<WebSocketMessage<Unit>> = connectTcpWebSocket(connectionOptions, EmptyCodec, parentScope)

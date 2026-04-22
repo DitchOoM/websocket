@@ -310,10 +310,11 @@ android {
                 "com.ditchoom.websocket.WebSocketTests",
                 "com.ditchoom.websocket.PublicWssValidationTest",
             )
-        val notClasses = buildList {
-            addAll(profilingClasses)
-            if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
-        }
+        val notClasses =
+            buildList {
+                addAll(profilingClasses)
+                if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
+            }
         if (notClasses.isNotEmpty()) {
             testInstrumentationRunnerArguments["notClass"] = notClasses.joinToString(",")
         }

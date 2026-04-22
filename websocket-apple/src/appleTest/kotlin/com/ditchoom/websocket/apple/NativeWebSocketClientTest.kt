@@ -40,7 +40,8 @@ class NativeWebSocketClientTest {
                     ws.send(WebSocketMessage.Text(textMsg))
                     val textEcho =
                         withTimeout(10.seconds) {
-                            ws.receive()
+                            ws
+                                .receive()
                                 .filterIsInstance<WebSocketMessage.Text>()
                                 .map { it.payload }
                                 .first { it == textMsg }
@@ -53,7 +54,11 @@ class NativeWebSocketClientTest {
                     }
                     val binaryEcho =
                         withTimeout(10.seconds) {
-                            ws.receive().filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>().map { it.payload }.first()
+                            ws
+                                .receive()
+                                .filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>()
+                                .map { it.payload }
+                                .first()
                         }
                     val received = binaryEcho.readByteArray(binaryEcho.remaining())
                     assertTrue(binaryPayload.contentEquals(received), "Binary echo mismatch")
@@ -65,7 +70,8 @@ class NativeWebSocketClientTest {
                     val seqEchoes =
                         withTimeout(10.seconds) {
                             val collected = mutableListOf<String>()
-                            ws.receive()
+                            ws
+                                .receive()
                                 .filterIsInstance<WebSocketMessage.Text>()
                                 .map { it.payload }
                                 .takeWhile { text ->

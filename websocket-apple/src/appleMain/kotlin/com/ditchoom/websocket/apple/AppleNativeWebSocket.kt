@@ -37,5 +37,4 @@ suspend fun <B> connectAppleNativeWebSocket(
 suspend fun connectAppleNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope)
+): Connection<WebSocketMessage<Unit>> = connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope)
