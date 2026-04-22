@@ -34,9 +34,10 @@ kotlin {
         tvosArm64()
         tvosSimulatorArm64()
         tvosX64()
-        watchosArm64()
-        watchosSimulatorArm64()
-        watchosX64()
+        // watchOS intentionally excluded: watchosArm64 uses ILP32 ABI so
+        // NSInteger/NSUInteger differ in width from LP64 (iOS/macOS/tvOS), and
+        // NSURLSessionWebSocketDelegate overrides require bit-width-variant
+        // types that can't be reconciled in the shared appleMain metadata.
     }
 
     applyDefaultHierarchyTemplate()
