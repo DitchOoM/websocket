@@ -4,6 +4,14 @@
 
 This is a Kotlin Multiplatform WebSocket library providing RFC 6455 compliant WebSocket client functionality across JVM, Android, iOS, macOS, Linux, and JavaScript platforms.
 
+## No ByteArray in Production Code
+
+Production source sets (`*Main/`) must not allocate or accept `kotlin.ByteArray`. WebSocket frame paths run per-message at high volume; any `ByteArray` allocation compounds quickly. Use `ReadBuffer` / `WriteBuffer` / `PlatformBuffer` from the `com.ditchoom:buffer` dependency, or the buffer-native primitives shipped with it (`String.utf8ByteCount()`, `WriteBuffer.writeRandomBytes`, `WriteBuffer.writeSha1Of`, `ReadBuffer.toNativeData()`).
+
+**Platform boundaries** (`kotlin.io.encoding.Base64`, `NSURLSessionWebSocketMessage`, Node `socket.write` fallback, JDBC persistence, Android AIDL) sometimes genuinely require a `ByteArray` at the edge. For those, annotate the allocation with `@Suppress("NoByteArrayInProd")` and a one-line inline comment naming the specific driver / API surface — this keeps intentional boundary copies visible during review and prevents the suppression from propagating inward.
+
+Tests (`*Test/`) may use `ByteArray` freely.
+
 ## Core Components
 
 ### DefaultWebSocketClient
