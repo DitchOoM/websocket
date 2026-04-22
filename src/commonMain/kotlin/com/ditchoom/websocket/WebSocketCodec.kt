@@ -11,6 +11,7 @@ import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.utf8ByteCount
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.PeekResult
@@ -271,7 +272,7 @@ internal class WebSocketCodec<B>(
             // than the original wire payload (payloadLength - 2 bytes for status code).
             @Suppress("USELESS_IS_CHECK")
             if (frame is WsFrame.Close && frame.body != null && frame.header.payloadLength > 2) {
-                val reasonByteCount = frame.body.reason.encodeToByteArray().size
+                val reasonByteCount = frame.body.reason.utf8ByteCount()
                 val expectedByteCount = frame.header.payloadLength.toInt() - 2
                 if (reasonByteCount != expectedByteCount) {
                     sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8 in close reason")
@@ -540,15 +541,14 @@ internal class WebSocketCodec<B>(
     ): ReadBuffer {
         val body = if (statusCode != null) {
             val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
-            // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code)
+            // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code).
             val reasonStr = truncated ?: ""
-            val reasonBytes = reasonStr.encodeToByteArray()
-            val cappedReason = if (reasonBytes.size > 123) reasonStr.substring(0, 123) else reasonStr
+            val cappedReason = if (reasonStr.utf8ByteCount() > 123) reasonStr.substring(0, 123) else reasonStr
             WsCloseBody(CloseCode(statusCode), cappedReason)
         } else {
             null
         }
-        val payloadSize = if (body != null) 2 + body.reason.encodeToByteArray().size else 0
+        val payloadSize = if (body != null) 2 + body.reason.utf8ByteCount() else 0
         return encodeWsFrame(
             WsFrame.Close(
                 header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Close, payloadSize),
