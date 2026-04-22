@@ -124,8 +124,15 @@ internal fun compressSync(
     pool: BufferPool? = null,
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
-    compressor.compressUnsafe(buffer) { chunks.add(it) }
-    compressor.flushUnsafe { chunks.add(it) }
+    try {
+        compressor.compressUnsafe(buffer) { chunks.add(it) }
+        compressor.flushUnsafe { chunks.add(it) }
+    } catch (t: Throwable) {
+        // Any chunks produced before the deflate/flush threw are orphaned —
+        // release them before re-throwing so we don't leak direct memory.
+        chunks.freeAll()
+        throw t
+    }
 
     if (chunks.isEmpty()) return emptyList()
 
@@ -148,7 +155,13 @@ internal fun compressSync(
     }
 
     // Marker spans multiple chunks or doesn't match - need to combine and strip
-    val combined = combineChunks(chunks, factory, pool)
+    val combined =
+        try {
+            combineChunks(chunks, factory, pool)
+        } catch (t: Throwable) {
+            chunks.freeAll()
+            throw t
+        }
     chunks.freeAll()
     return listOf(stripSyncFlushMarkerInPlace(combined))
 }
@@ -195,11 +208,16 @@ internal fun decompressToBufferSync(
         chunks.add(chunk)
     }
 
-    decompressor.decompressUnsafe(buffer) { chunk -> addChunk(chunk) }
+    try {
+        decompressor.decompressUnsafe(buffer) { chunk -> addChunk(chunk) }
 
-    SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompressUnsafe(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-    decompressor.flushUnsafe { chunk -> addChunk(chunk) }
+        SYNC_FLUSH_MARKER_BUFFER.position(0)
+        decompressor.decompressUnsafe(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+        decompressor.flushUnsafe { chunk -> addChunk(chunk) }
+    } catch (t: Throwable) {
+        chunks.freeAll()
+        throw t
+    }
 
     // Single chunk optimization - no copy needed
     if (chunks.size == 1) {
@@ -211,11 +229,25 @@ internal fun decompressToBufferSync(
         return ReadBuffer.EMPTY_BUFFER
     }
 
-    // Combine chunks into final output
-    val output = pool?.acquire(totalSize) ?: factory.allocate(totalSize)
-    for (chunk in chunks) {
-        chunk.position(0)
-        output.write(chunk)
+    // Combine chunks into final output. Allocation can throw (e.g. OOM) —
+    // release the staged chunks before propagating so the leak doesn't
+    // compound on the exception path.
+    val output =
+        try {
+            pool?.acquire(totalSize) ?: factory.allocate(totalSize)
+        } catch (t: Throwable) {
+            chunks.freeAll()
+            throw t
+        }
+    try {
+        for (chunk in chunks) {
+            chunk.position(0)
+            output.write(chunk)
+        }
+    } catch (t: Throwable) {
+        output.freeIfNeeded()
+        chunks.freeAll()
+        throw t
     }
     chunks.freeAll()
     output.resetForRead()

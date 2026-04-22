@@ -616,21 +616,25 @@ internal class WebSocketCodec<B>(
         if (shouldCompress && compressor != null) {
             val originalSize = payload.remaining()
             val chunks = compressSync(payload, compressor)
-            val compressedSize = totalRemaining(chunks)
+            try {
+                val compressedSize = totalRemaining(chunks)
 
-            // With context takeover (!resetCompressorPerMessage), always send compressed
-            // even if larger. Falling back to uncompressed would desync the LZ77 windows.
-            if (compressedSize < originalSize || !resetCompressorPerMessage) {
-                if (resetCompressorPerMessage) compressor.reset()
-                val combined = combineChunks(chunks, bufferFactory)
-                chunks.freeAll()
-                val frame = buildDataWsFrame(opcode, fin, rsv1 = true, combined)
-                val encoded = encodeWsFrame(frame)
-                combined.freeIfNeeded()
-                return encoded
-            } else {
-                payload.resetForRead()
-                compressor.reset()
+                // With context takeover (!resetCompressorPerMessage), always send compressed
+                // even if larger. Falling back to uncompressed would desync the LZ77 windows.
+                if (compressedSize < originalSize || !resetCompressorPerMessage) {
+                    if (resetCompressorPerMessage) compressor.reset()
+                    val combined = combineChunks(chunks, bufferFactory)
+                    try {
+                        val frame = buildDataWsFrame(opcode, fin, rsv1 = true, combined)
+                        return encodeWsFrame(frame)
+                    } finally {
+                        combined.freeIfNeeded()
+                    }
+                } else {
+                    payload.resetForRead()
+                    compressor.reset()
+                }
+            } finally {
                 chunks.freeAll()
             }
         }
