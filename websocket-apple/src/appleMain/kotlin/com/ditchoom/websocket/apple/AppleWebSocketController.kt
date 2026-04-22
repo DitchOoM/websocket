@@ -7,14 +7,14 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.toNativeData
 import com.ditchoom.buffer.wrapReadOnly
 import com.ditchoom.websocket.WebSocketConnectionOptions
 import com.ditchoom.websocket.WebSocketMessage
-import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
-import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -170,18 +170,21 @@ class AppleWebSocketController<B>(
                 sendNsMessage(nsMessage)
             }
             is WebSocketMessage.Binary -> {
-                val scratch = bufferFactory.allocate(256)
-                binaryCodec.encode(scratch, message.payload, EncodeContext.Empty)
-                val size = scratch.position()
-                scratch.resetForRead()
-                val bytes = ByteArray(size)
-                for (i in 0 until size) {
-                    bytes[i] = scratch.readByte()
+                // encodeToBuffer uses buffer-codec's GrowableWriteBuffer
+                // (2x doubling) so the pre-v2 fixed 256-byte scratch —
+                // which would have thrown BufferOverflowException on any
+                // payload > 256 bytes — is gone. toNativeData().nsData
+                // bridges to NSURLSessionWebSocketMessage zero-copy (or at
+                // worst one subdataWithRange memcpy) against the scratch's
+                // NSMutableData.
+                val encoded = binaryCodec.encodeToBuffer(message.payload, bufferFactory)
+                try {
+                    val nsData = encoded.toNativeData().nsData
+                    val nsMessage = NSURLSessionWebSocketMessage(nsData)
+                    sendNsMessage(nsMessage)
+                } finally {
+                    encoded.freeIfNeeded()
                 }
-                scratch.freeIfNeeded()
-                val nsData = bytes.toNSData()
-                val nsMessage = NSURLSessionWebSocketMessage(nsData)
-                sendNsMessage(nsMessage)
             }
             is WebSocketMessage.Ping -> {
                 task.sendPingWithPongReceiveHandler { error ->
@@ -221,11 +224,6 @@ class AppleWebSocketController<B>(
         }
     }
 }
-
-private fun ByteArray.toNSData(): NSData =
-    usePinned { pinned ->
-        NSData.create(bytes = pinned.addressOf(0), length = size.convert())
-    }
 
 private class WebSocketSessionDelegate(
     private val connectDeferred: CompletableDeferred<Unit>,
