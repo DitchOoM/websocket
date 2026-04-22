@@ -28,10 +28,12 @@ import kotlinx.coroutines.plus
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import platform.Foundation.NSData
+import platform.Foundation.NSError
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
 import platform.Foundation.NSURLSession
 import platform.Foundation.NSURLSessionConfiguration
+import platform.Foundation.NSURLSessionTask
 import platform.Foundation.NSURLSessionWebSocketCloseCode
 import platform.Foundation.NSURLSessionWebSocketDelegateProtocol
 import platform.Foundation.NSURLSessionWebSocketMessage
@@ -92,11 +94,25 @@ class AppleWebSocketController<B>(
             },
         )
 
+    // Dedicated serial delegate queue per session. Using
+    // NSOperationQueue.mainQueue would make every NSURLSession delegate
+    // callback (didOpenWithProtocol, didCloseWithCode, didCompleteWithError)
+    // require a pumping main runloop — which UI apps have but Kotlin/Native
+    // unit tests, command-line tools, and background services don't. The
+    // pre-v2 code tied us to mainQueue, which is exactly why the
+    // NativeWebSocketClientTest times out after 15s on the macOS/iOS
+    // simulator test binaries: the handshake completes at the TCP/TLS
+    // layer but `didOpenWithProtocol` never fires because nothing is
+    // draining the main queue. A fresh NSOperationQueue is serviced by a
+    // Foundation-managed background thread and fires delegate callbacks
+    // regardless of whether the hosting environment has a main runloop.
+    private val delegateQueue = NSOperationQueue()
+
     private val session: NSURLSession =
         NSURLSession.sessionWithConfiguration(
             NSURLSessionConfiguration.defaultSessionConfiguration,
             sessionDelegate,
-            NSOperationQueue.mainQueue,
+            delegateQueue,
         )
 
     private val url = NSURL(string = connectionOptions.buildUrl())
@@ -245,5 +261,33 @@ private class WebSocketSessionDelegate(
         reason: NSData?,
     ) {
         onClose()
+    }
+
+    /**
+     * Fires when the task ends — cleanly or with an error. Without this
+     * delegate method, a network failure during handshake (DNS, TLS
+     * failure, connection refused, etc.) surfaces as a 15s timeout on
+     * [connectDeferred.await] rather than a catchable exception, because
+     * neither `didOpenWithProtocol` nor `didCloseWithCode` fires for
+     * pre-upgrade failures. Completing the deferred exceptionally here
+     * turns those into the failure the caller actually wanted.
+     */
+    override fun URLSession(
+        session: NSURLSession,
+        task: NSURLSessionTask,
+        didCompleteWithError: NSError?,
+    ) {
+        if (didCompleteWithError != null) {
+            if (!connectDeferred.isCompleted) {
+                connectDeferred.completeExceptionally(
+                    RuntimeException(
+                        "WebSocket connect failed: " +
+                            "${didCompleteWithError.localizedDescription} " +
+                            "(code=${didCompleteWithError.code})",
+                    ),
+                )
+            }
+            onClose()
+        }
     }
 }
