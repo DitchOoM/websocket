@@ -3,6 +3,7 @@ package com.ditchoom.websocket.handshake
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.utf8ByteCount
 
 /**
  * Builder for WebSocket client handshake requests.
@@ -94,9 +95,11 @@ class HandshakeRequest private constructor(
                 append("\r\n")
             }
 
-        val bytes = request.encodeToByteArray()
-        val buffer = BufferFactory.Default.allocate(bytes.size)
-        buffer.writeBytes(bytes)
+        // Size up-front via utf8ByteCount (no intermediate ByteArray) and
+        // write the string directly — BufferFactory's writeString encodes
+        // UTF-8 straight into the buffer's memory.
+        val buffer = BufferFactory.Default.allocate(request.utf8ByteCount())
+        buffer.writeString(request)
         buffer.resetForRead()
         return buffer
     }
