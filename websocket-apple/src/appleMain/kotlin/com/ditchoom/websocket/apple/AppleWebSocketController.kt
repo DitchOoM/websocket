@@ -1,14 +1,20 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package com.ditchoom.websocket.apple
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Charset
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.wrapReadOnly
 import com.ditchoom.websocket.WebSocketConnectionOptions
 import com.ditchoom.websocket.WebSocketMessage
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.convert
+import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +29,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import platform.Foundation.NSData
 import platform.Foundation.NSOperationQueue
+import platform.Foundation.NSURL
 import platform.Foundation.NSURLSession
 import platform.Foundation.NSURLSessionConfiguration
 import platform.Foundation.NSURLSessionWebSocketCloseCode
@@ -31,7 +38,6 @@ import platform.Foundation.NSURLSessionWebSocketMessage
 import platform.Foundation.NSURLSessionWebSocketMessageTypeData
 import platform.Foundation.NSURLSessionWebSocketMessageTypeString
 import platform.Foundation.NSURLSessionWebSocketTask
-import platform.Foundation.NSURL
 import platform.Foundation.create
 import platform.darwin.NSObject
 import kotlin.coroutines.resume
@@ -61,7 +67,6 @@ class AppleWebSocketController<B>(
     private val bufferFactory: BufferFactory,
     parentScope: CoroutineScope?,
 ) : Connection<WebSocketMessage<B>> {
-
     override val id: Long = 0L
     private var closed = false
     private val connectDeferred = CompletableDeferred<Unit>()
@@ -151,22 +156,8 @@ class AppleWebSocketController<B>(
                 WebSocketMessage.Text(nsMessage.string!!)
             }
             NSURLSessionWebSocketMessageTypeData -> {
-                val nsData = nsMessage.data!!
-                val length = nsData.length.toInt()
-                val buffer = bufferFactory.allocate(length)
-                if (length > 0) {
-                    val bytes = nsData.bytes
-                    if (bytes != null) {
-                        for (i in 0 until length) {
-                            buffer.writeByte(
-                                (bytes as kotlinx.cinterop.CPointer<kotlinx.cinterop.ByteVar>)[i],
-                            )
-                        }
-                    }
-                }
-                buffer.resetForRead()
+                val buffer = PlatformBuffer.wrapReadOnly(nsMessage.data!!)
                 val payload = binaryCodec.decode(buffer, DecodeContext.Empty)
-                buffer.freeIfNeeded()
                 WebSocketMessage.Binary(payload)
             }
             else -> throw IllegalStateException("Unknown NSURLSessionWebSocketMessage type: ${nsMessage.type}")
@@ -224,19 +215,17 @@ class AppleWebSocketController<B>(
     override suspend fun close() {
         if (!closed) {
             closed = true
-            task.cancelWithCloseCode(1000L, null)
+            task.cancelWithCloseCode(1000.convert(), null)
             incomingMessageChannel.close()
             session.invalidateAndCancel()
         }
     }
 }
 
-@Suppress("CAST_NEVER_SUCCEEDS")
 private fun ByteArray.toNSData(): NSData =
-    NSData.create(
-        bytes = kotlinx.cinterop.allocArrayOf(this),
-        length = this.size.toULong(),
-    )
+    usePinned { pinned ->
+        NSData.create(bytes = pinned.addressOf(0), length = size.convert())
+    }
 
 private class WebSocketSessionDelegate(
     private val connectDeferred: CompletableDeferred<Unit>,
