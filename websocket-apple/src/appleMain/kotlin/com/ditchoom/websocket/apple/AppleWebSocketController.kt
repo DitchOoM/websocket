@@ -13,6 +13,7 @@ import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.toNativeData
 import com.ditchoom.buffer.wrapReadOnly
 import com.ditchoom.websocket.WebSocketConnectionOptions
+import com.ditchoom.websocket.WebSocketException
 import com.ditchoom.websocket.WebSocketMessage
 import kotlinx.cinterop.convert
 import kotlinx.coroutines.CompletableDeferred
@@ -270,7 +271,9 @@ private class WebSocketSessionDelegate(
      * [connectDeferred.await] rather than a catchable exception, because
      * neither `didOpenWithProtocol` nor `didCloseWithCode` fires for
      * pre-upgrade failures. Completing the deferred exceptionally here
-     * turns those into the failure the caller actually wanted.
+     * turns those into a [WebSocketException.TransportFailed] the caller
+     * can pattern-match on — matching the shape that [BrowserWebSocketController]
+     * produces from its own `onerror` platform hook.
      */
     override fun URLSession(
         session: NSURLSession,
@@ -279,11 +282,17 @@ private class WebSocketSessionDelegate(
     ) {
         if (didCompleteWithError != null) {
             if (!connectDeferred.isCompleted) {
+                // NSError is a Foundation object, not a Kotlin Throwable, so
+                // wrap it as a plain Exception with its localizedDescription
+                // + domain + code. This mirrors how BrowserWebSocketController
+                // wraps the JS `Event` object it receives from `onerror`.
+                val nsMessage = didCompleteWithError.localizedDescription
+                val nsDomain = didCompleteWithError.domain
+                val nsCode = didCompleteWithError.code
                 connectDeferred.completeExceptionally(
-                    RuntimeException(
-                        "WebSocket connect failed: " +
-                            "${didCompleteWithError.localizedDescription} " +
-                            "(code=${didCompleteWithError.code})",
+                    WebSocketException.TransportFailed(
+                        message = "WebSocket connect failed: $nsMessage (domain=$nsDomain, code=$nsCode)",
+                        cause = Exception("NSError $nsDomain:$nsCode — $nsMessage"),
                     ),
                 )
             }
