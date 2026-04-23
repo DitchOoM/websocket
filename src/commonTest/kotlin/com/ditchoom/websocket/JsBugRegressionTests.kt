@@ -71,10 +71,15 @@ class JsBugRegressionTests {
             val combined1 = combineChunks(compressed1, factory)
             val result1 = decompressToStringSync(combined1, decompressor, decoder)
 
-            assertEquals(msg1.length, result1.length,
-                "msg1 length must be ${msg1.length}, not ${msg0.length + msg1.length} (accumulated)")
-            assertFalse(result1.startsWith(msg0),
-                "msg1 must NOT start with msg0 — flush() leaked previous output")
+            assertEquals(
+                msg1.length,
+                result1.length,
+                "msg1 length must be ${msg1.length}, not ${msg0.length + msg1.length} (accumulated)",
+            )
+            assertFalse(
+                result1.startsWith(msg0),
+                "msg1 must NOT start with msg0 — flush() leaked previous output",
+            )
             assertEquals(msg1, result1, "msg1 content")
         } finally {
             compressor.close()
@@ -106,8 +111,11 @@ class JsBugRegressionTests {
             val combined1 = combineChunks(compressed1, factory)
             val buf1 = decompressToBufferSync(combined1, decompressor, factory)
 
-            assertEquals(msg1.length, buf1.remaining(),
-                "msg1 buffer length must be ${msg1.length}, not ${msg0.length + msg1.length} (accumulated)")
+            assertEquals(
+                msg1.length,
+                buf1.remaining(),
+                "msg1 buffer length must be ${msg1.length}, not ${msg0.length + msg1.length} (accumulated)",
+            )
             val result1 = buf1.readString(buf1.remaining(), Charset.UTF8)
             assertEquals(msg1, result1, "msg1 buffer content")
         } finally {
@@ -135,9 +143,12 @@ class JsBugRegressionTests {
                 val combined = combineChunks(compressed, factory)
                 val result = decompressToStringSync(combined, decompressor, decoder)
 
-                assertEquals(msg.length, result.length,
+                assertEquals(
+                    msg.length,
+                    result.length,
                     "Message $i: expected ${msg.length}, got ${result.length}. " +
-                        "If $accumulatedLength, flush() is accumulating all prior messages.")
+                        "If $accumulatedLength, flush() is accumulating all prior messages.",
+                )
                 assertEquals(msg, result, "Message $i content")
             }
         } finally {
@@ -160,10 +171,13 @@ class JsBugRegressionTests {
     @Test
     fun windowBits9_websocketHelpers_roundTrip() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
-            windowBits = 9,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                bufferFactory,
+                windowBits = 9,
+            )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         val decoder = StreamingStringDecoder()
 
@@ -186,10 +200,13 @@ class JsBugRegressionTests {
     @Test
     fun negativeWindowBits9_websocketHelpers_roundTrip() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
-            windowBits = -9,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                bufferFactory,
+                windowBits = -9,
+            )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         val decoder = StreamingStringDecoder()
 
@@ -212,10 +229,13 @@ class JsBugRegressionTests {
     @Test
     fun windowBits9_contextTakeover_noAccumulation() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(
-            CompressionAlgorithm.Raw, CompressionLevel.Default, bufferFactory,
-            windowBits = -9,
-        )
+        val compressor =
+            StreamingCompressor.create(
+                CompressionAlgorithm.Raw,
+                CompressionLevel.Default,
+                bufferFactory,
+                windowBits = -9,
+            )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory)
         val decoder = StreamingStringDecoder()
 
@@ -233,9 +253,12 @@ class JsBugRegressionTests {
             val result1 = decompressToStringSync(combined1, decompressor, decoder)
 
             // Combined failure: result1 could be "HelloHello" (10 bytes) not "Hello" (5 bytes)
-            assertEquals(msg1.length, result1.length,
+            assertEquals(
+                msg1.length,
+                result1.length,
                 "windowBits=9 msg1: expected ${msg1.length}, got ${result1.length}. " +
-                    "If ${msg0.length + msg1.length}, both bugs present.")
+                    "If ${msg0.length + msg1.length}, both bugs present.",
+            )
             assertEquals(msg1, result1, "windowBits=9 msg1 content")
         } finally {
             compressor.close()

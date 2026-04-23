@@ -105,38 +105,39 @@ abstract class AbstractAllocatorLeakTest {
      * fails fast with a concrete assertion so the failure message names the bug.
      */
     @Test
-    fun readFramePathReturnsBufferToPool() = runStrictTest(timeout = 30.seconds) {
-        val pool =
-            BufferPool(
-                maxPoolSize = 4, // tight pool amplifies leak detection — every few leaks = ceiling exceeded
-                defaultBufferSize = 8192,
-                factory = backingFactory,
-            )
-        val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = pool)
+    fun readFramePathReturnsBufferToPool() =
+        runStrictTest(timeout = 30.seconds) {
+            val pool =
+                BufferPool(
+                    maxPoolSize = 4, // tight pool amplifies leak detection — every few leaks = ceiling exceeded
+                    defaultBufferSize = 8192,
+                    factory = backingFactory,
+                )
+            val transport = MockWebSocketTransport()
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, bufferFactory = pool)
 
-        val frameCount = 50
-        val text = "A".repeat(512)
-        repeat(frameCount) {
-            transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
-        }
-        transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
+            val frameCount = 50
+            val text = "A".repeat(512)
+            repeat(frameCount) {
+                transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
+            }
+            transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
 
-        withTimeout(20.seconds) {
-            repeat(frameCount) { connection.receive().first() }
-        }
-        connection.close()
+            withTimeout(20.seconds) {
+                repeat(frameCount) { connection.receive().first() }
+            }
+            connection.close()
 
-        val stats = pool.stats()
-        val leaked = stats.poolMisses
-        if (leaked > 16) { // generous — handshake + a few control-frame allocations
-            fail(
-                "[$variantName] frame buffer leak regression: $leaked pool misses over $frameCount frames. " +
-                    "WebSocketCodec.readFrame must free the buffer returned by stream.readBuffer(). " +
-                    "See the try/finally block around WsFrameCodec.decode.",
-            )
+            val stats = pool.stats()
+            val leaked = stats.poolMisses
+            if (leaked > 16) { // generous — handshake + a few control-frame allocations
+                fail(
+                    "[$variantName] frame buffer leak regression: $leaked pool misses over $frameCount frames. " +
+                        "WebSocketCodec.readFrame must free the buffer returned by stream.readBuffer(). " +
+                        "See the try/finally block around WsFrameCodec.decode.",
+                )
+            }
         }
-    }
 }
 
 class AllocatorLeakDefaultTest : AbstractAllocatorLeakTest() {

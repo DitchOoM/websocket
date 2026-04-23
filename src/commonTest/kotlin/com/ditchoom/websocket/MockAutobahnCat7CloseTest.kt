@@ -74,7 +74,8 @@ class MockAutobahnCat7CloseTest {
             val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             // Close frame with no payload (no status code)
-            val empty = BufferFactory.Default.allocate(0); empty.resetForRead()
+            val empty = BufferFactory.Default.allocate(0)
+            empty.resetForRead()
             transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrameRaw(empty))
 
             val msg =

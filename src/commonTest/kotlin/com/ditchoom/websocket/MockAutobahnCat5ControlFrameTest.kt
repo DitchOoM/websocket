@@ -135,7 +135,9 @@ class MockAutobahnCat5ControlFrameTest {
             val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
             val binPayload = BufferFactory.Default.allocate(3)
-            binPayload.writeByte(1); binPayload.writeByte(2); binPayload.writeByte(3)
+            binPayload.writeByte(1)
+            binPayload.writeByte(2)
+            binPayload.writeByte(3)
             binPayload.resetForRead()
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame("start", fin = false))
@@ -227,11 +229,17 @@ class MockAutobahnCat5ControlFrameTest {
 
             // Text(FIN=0, "AB") + Ping + Cont(FIN=0, "CD") + Ping + Cont(FIN=1, "EF")
             val ab = BufferFactory.Default.allocate(2)
-            ab.writeByte(0x41); ab.writeByte(0x42); ab.resetForRead()
+            ab.writeByte(0x41)
+            ab.writeByte(0x42)
+            ab.resetForRead()
             val cd = BufferFactory.Default.allocate(2)
-            cd.writeByte(0x43); cd.writeByte(0x44); cd.resetForRead()
+            cd.writeByte(0x43)
+            cd.writeByte(0x44)
+            cd.resetForRead()
             val ef = BufferFactory.Default.allocate(2)
-            ef.writeByte(0x45); ef.writeByte(0x46); ef.resetForRead()
+            ef.writeByte(0x45)
+            ef.writeByte(0x46)
+            ef.resetForRead()
 
             transport.enqueueRead(MockAutobahnHelpers.buildServerFrame(Opcode.Text, ab, fin = false))
             transport.enqueueRead(MockHandshakeHelper.buildServerPingFrame())

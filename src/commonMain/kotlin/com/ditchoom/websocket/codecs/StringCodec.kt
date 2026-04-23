@@ -20,10 +20,16 @@ import com.ditchoom.buffer.codec.EncodeContext
  * text frames, human-readable telemetry).
  */
 internal object StringCodec : Codec<String> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): String =
-        buffer.readString(buffer.remaining(), Charset.UTF8)
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): String = buffer.readString(buffer.remaining(), Charset.UTF8)
 
-    override fun encode(buffer: WriteBuffer, value: String, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: String,
+        context: EncodeContext,
+    ) {
         buffer.writeString(value)
     }
 }

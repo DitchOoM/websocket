@@ -14,14 +14,21 @@ import com.ditchoom.buffer.codec.EncodeContext
  * Encode writes nothing; the library still emits a zero-length data frame if called.
  */
 object EmptyCodec : Codec<Unit> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext) {
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ) {
         val remaining = buffer.remaining()
         if (remaining > 0) {
             buffer.position(buffer.position() + remaining)
         }
     }
 
-    override fun encode(buffer: WriteBuffer, value: Unit, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Unit,
+        context: EncodeContext,
+    ) {
         // Nothing to write — the frame will have a zero-length payload.
     }
 }

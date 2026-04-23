@@ -44,10 +44,11 @@ internal object MockAutobahnHelpers {
             tls = false,
             websocketEndpoint = "/ws",
             requestCompression = true,
-            compressionOptions = CompressionOptions(
-                clientNoContextTakeover = true,
-                serverNoContextTakeover = true,
-            ),
+            compressionOptions =
+                CompressionOptions(
+                    clientNoContextTakeover = true,
+                    serverNoContextTakeover = true,
+                ),
         )
 
     // ========================================================================
@@ -59,17 +60,18 @@ internal object MockAutobahnHelpers {
         binaryCodec: Codec<B>,
         options: WebSocketConnectionOptions = defaultOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage<B>> = coroutineScope {
-        val resolved = options.copy(bufferFactory = bufferFactory)
-        val connectJob =
-            async {
-                connectWebSocket(transport, resolved, binaryCodec)
-            }
-        waitForWrite(transport)
-        val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
-        transport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
-        withTimeout(5.seconds) { connectJob.await() }
-    }
+    ): Connection<WebSocketMessage<B>> =
+        coroutineScope {
+            val resolved = options.copy(bufferFactory = bufferFactory)
+            val connectJob =
+                async {
+                    connectWebSocket(transport, resolved, binaryCodec)
+                }
+            waitForWrite(transport)
+            val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
+            transport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
+            withTimeout(5.seconds) { connectJob.await() }
+        }
 
     /** Text-only overload — binary frames surface as `Binary(Unit)`. */
     suspend fun connectWithHandshake(
@@ -84,17 +86,18 @@ internal object MockAutobahnHelpers {
         binaryCodec: Codec<B>,
         options: WebSocketConnectionOptions = compressionOptions,
         bufferFactory: BufferFactory = BufferFactory.managed(),
-    ): Connection<WebSocketMessage<B>> = coroutineScope {
-        val resolved = options.copy(bufferFactory = bufferFactory)
-        val connectJob =
-            async {
-                connectWebSocket(transport, resolved, binaryCodec)
-            }
-        waitForWrite(transport)
-        val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
-        transport.enqueueRead(buildCompressionHandshakeResponse(clientKey))
-        withTimeout(5.seconds) { connectJob.await() }
-    }
+    ): Connection<WebSocketMessage<B>> =
+        coroutineScope {
+            val resolved = options.copy(bufferFactory = bufferFactory)
+            val connectJob =
+                async {
+                    connectWebSocket(transport, resolved, binaryCodec)
+                }
+            waitForWrite(transport)
+            val clientKey = MockHandshakeHelper.extractClientKey(transport.writtenBuffers[0])
+            transport.enqueueRead(buildCompressionHandshakeResponse(clientKey))
+            withTimeout(5.seconds) { connectJob.await() }
+        }
 
     /** Text-only overload — binary frames surface as `Binary(Unit)`. */
     suspend fun connectWithCompressionHandshake(
@@ -212,8 +215,7 @@ internal object MockAutobahnHelpers {
     /**
      * Builds a server close frame from a raw payload buffer (for testing invalid close payloads).
      */
-    fun buildServerCloseFrameRaw(payload: ReadBuffer): ReadBuffer =
-        buildServerFrame(Opcode.Close, payload)
+    fun buildServerCloseFrameRaw(payload: ReadBuffer): ReadBuffer = buildServerFrame(Opcode.Close, payload)
 
     /**
      * Splits text into a fragmented frame sequence.

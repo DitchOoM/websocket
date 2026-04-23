@@ -12,9 +12,7 @@ import com.ditchoom.buffer.flow.Connection
  * }
  * ```
  */
-suspend inline fun <B, R> Connection<WebSocketMessage<B>>.use(
-    block: (Connection<WebSocketMessage<B>>) -> R,
-): R {
+suspend inline fun <B, R> Connection<WebSocketMessage<B>>.use(block: (Connection<WebSocketMessage<B>>) -> R): R {
     try {
         return block(this)
     } finally {

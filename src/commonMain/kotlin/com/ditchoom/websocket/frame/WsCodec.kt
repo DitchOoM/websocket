@@ -158,9 +158,10 @@ data class WsFrameHeader(
 
     /** Header wire size in bytes: byte1(1) + byte2(1) + extLen(0|2|8) + mask(0|4) */
     val wireSize: Int
-        get() = 2 + (if (extendedLength16 != null) 2 else 0) +
-            (if (extendedLength64 != null) 8 else 0) +
-            (if (maskingKey != null) 4 else 0)
+        get() =
+            2 + (if (extendedLength16 != null) 2 else 0) +
+                (if (extendedLength64 != null) 8 else 0) +
+                (if (maskingKey != null) 4 else 0)
 
     /** Opcode as Int for sealed dispatch matching via @DispatchOn */
     @DispatchValue

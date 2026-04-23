@@ -101,7 +101,11 @@ class PublicWssValidationTest {
                 ws.send(WebSocketMessage.Text(message))
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().filterIsInstance<WebSocketMessage.Text>().map { it.payload }.first { it == message }
+                        ws
+                            .receive()
+                            .filterIsInstance<WebSocketMessage.Text>()
+                            .map { it.payload }
+                            .first { it == message }
                     }
                 assertEquals(message, echo)
             } finally {
@@ -128,7 +132,11 @@ class PublicWssValidationTest {
                 launch(Dispatchers.Default) { ws.send(WebSocketMessage.Binary(BufferFactory.Default.wrap(payload))) }
                 val echo =
                     withTimeout(10.seconds) {
-                        ws.receive().filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>().map { it.payload }.first()
+                        ws
+                            .receive()
+                            .filterIsInstance<WebSocketMessage.Binary<ReadBuffer>>()
+                            .map { it.payload }
+                            .first()
                     }
                 val received = echo.readByteArray(echo.remaining())
                 assertTrue(payload.contentEquals(received), "Binary echo mismatch")
@@ -193,7 +201,8 @@ class PublicWssValidationTest {
                 // Collect echoes (skip any server welcome messages)
                 val echoes =
                     withTimeout(15.seconds) {
-                        ws.receive()
+                        ws
+                            .receive()
                             .filterIsInstance<WebSocketMessage.Text>()
                             .map { it.payload }
                             .filter { it.startsWith("ditchoom-multi-") }
@@ -238,7 +247,8 @@ class PublicWssValidationTest {
                 var gotText = false
                 var gotBinary = false
                 withTimeout(10.seconds) {
-                    ws.receive()
+                    ws
+                        .receive()
                         .takeWhile {
                             when (it) {
                                 is WebSocketMessage.Text -> {

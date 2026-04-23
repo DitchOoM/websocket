@@ -5,9 +5,9 @@ import com.ditchoom.buffer.Sha1
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.utf8ByteCount
 import com.ditchoom.buffer.writeSha1Of
-import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
 
 // WebSocket key generation and validation utilities.
 // Per RFC 6455 Section 4.1 and 4.2.2.

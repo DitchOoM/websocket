@@ -78,11 +78,12 @@ class WsCodecTest {
 
     @Test
     fun headerCodecUnmaskedTextFrame() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            payloadSize = 5,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
+                payloadSize = 5,
+                masked = false,
+            )
         val buf = allocate(2)
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
@@ -104,12 +105,13 @@ class WsCodecTest {
     @Test
     fun headerCodecMaskedFrame() {
         val maskKey = WsMaskingKey(0xDEADBEEFu)
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
-            payloadSize = 10,
-            masked = true,
-            maskingKey = maskKey,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
+                payloadSize = 10,
+                masked = true,
+                maskingKey = maskKey,
+            )
         val buf = allocate(6) // byte1 + byte2 + 4-byte mask
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
@@ -124,11 +126,12 @@ class WsCodecTest {
 
     @Test
     fun headerCodec16bitLength() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            payloadSize = 300,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
+                payloadSize = 300,
+                masked = false,
+            )
         val buf = allocate(4) // byte1 + byte2(126) + 2-byte length
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
@@ -139,11 +142,12 @@ class WsCodecTest {
 
     @Test
     fun headerCodec64bitLength() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
-            payloadSize = 70000,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Binary),
+                payloadSize = 70000,
+                masked = false,
+            )
         val buf = allocate(10) // byte1 + byte2(127) + 8-byte length
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
@@ -154,11 +158,12 @@ class WsCodecTest {
 
     @Test
     fun headerCodecRsv1Compression() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = true, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
-            payloadSize = 0,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = true, rsv2 = false, rsv3 = false, com.ditchoom.websocket.Opcode.Text),
+                payloadSize = 0,
+                masked = false,
+            )
         val buf = allocate(2)
         WsFrameHeaderCodec.encode(buf, header)
         buf.resetForRead()
@@ -174,11 +179,12 @@ class WsCodecTest {
     @Test
     fun headerCodecRoundTripAllOpcodes() {
         for (opcode in com.ditchoom.websocket.Opcode.entries) {
-            val header = WsFrameHeader.build(
-                byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, opcode),
-                payloadSize = 0,
-                masked = false,
-            )
+            val header =
+                WsFrameHeader.build(
+                    byte1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, opcode),
+                    payloadSize = 0,
+                    masked = false,
+                )
             val buf = allocate(2)
             WsFrameHeaderCodec.encode(buf, header)
             buf.resetForRead()

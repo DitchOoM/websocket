@@ -172,9 +172,16 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().con
         dependsOn("kspCommonMainKotlinMetadata")
     }
 }
-tasks.matching { it.name.contains("SourcesJar", ignoreCase = true) }.configureEach {
-    dependsOn("kspCommonMainKotlinMetadata")
-}
+// Gradle 8.14 strict mode flags tasks that read build/generated/ksp/metadata/commonMain/kotlin
+// without an explicit dependency on the KSP task that produces it. Cover the downstream tasks
+// that consume commonMain sources: source JARs + ktlint check/format variants on commonMain/commonTest.
+tasks
+    .matching {
+        it.name.contains("SourcesJar", ignoreCase = true) ||
+            (it.name.startsWith("runKtlint") && it.name.contains("Common"))
+    }.configureEach {
+        dependsOn("kspCommonMainKotlinMetadata")
+    }
 
 val integrationTestPatterns =
     listOf(

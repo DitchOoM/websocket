@@ -6,7 +6,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
@@ -41,7 +40,6 @@ import platform.Foundation.NSURLSessionWebSocketMessage
 import platform.Foundation.NSURLSessionWebSocketMessageTypeData
 import platform.Foundation.NSURLSessionWebSocketMessageTypeString
 import platform.Foundation.NSURLSessionWebSocketTask
-import platform.Foundation.create
 import platform.darwin.NSObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException

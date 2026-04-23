@@ -3,8 +3,8 @@ package com.ditchoom.websocket
 import agentName
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.WsFrameHeader
@@ -12,7 +12,6 @@ import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsMaskingKey
 import kotlinx.coroutines.flow.first
 import kotlin.test.Test
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 // Memory measurement helpers - platform-specific implementations
@@ -163,12 +162,13 @@ class ProfilingTest {
 
         fun encodeFrame() {
             val mask = WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt())
-            val header = WsFrameHeader.build(
-                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
-                payloadSize = payload.remaining().toLong(),
-                masked = true,
-                maskingKey = mask,
-            )
+            val header =
+                WsFrameHeader.build(
+                    byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
+                    payloadSize = payload.remaining().toLong(),
+                    masked = true,
+                    maskingKey = mask,
+                )
             val buf = BufferFactory.Default.allocate(header.wireSize + payload.remaining()) as PlatformBuffer
             WsFrameHeaderCodec.encode(buf, header)
             buf.xorMaskCopy(payload, mask.raw.toInt())

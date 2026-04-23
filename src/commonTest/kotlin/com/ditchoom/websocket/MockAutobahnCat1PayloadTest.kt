@@ -25,48 +25,46 @@ import kotlin.time.Duration.Companion.seconds
  * that existed in v1 retired — factory-matrix coverage lives in [AllocatorLeakTests] now.
  */
 class MockAutobahnCat1PayloadTest {
-    private fun testTextPayload(
-        size: Int,
-    ) = runStrictTest {
-        val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport)
+    private fun testTextPayload(size: Int) =
+        runStrictTest {
+            val transport = MockWebSocketTransport()
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport)
 
-        val text = "A".repeat(size)
-        transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
-        transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
+            val text = "A".repeat(size)
+            transport.enqueueRead(MockAutobahnHelpers.buildServerTextFrame(text))
+            transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
 
-        val msg =
-            withTimeout(5.seconds) {
-                connection.receive().first()
-            }
-        assertIs<WebSocketMessage.Text>(msg)
-        assertEquals(size, msg.payload.length)
-        if (size <= 1024) assertEquals(text, msg.payload)
-        connection.close()
-    }
+            val msg =
+                withTimeout(5.seconds) {
+                    connection.receive().first()
+                }
+            assertIs<WebSocketMessage.Text>(msg)
+            assertEquals(size, msg.payload.length)
+            if (size <= 1024) assertEquals(text, msg.payload)
+            connection.close()
+        }
 
-    private fun testBinaryPayload(
-        size: Int,
-    ) = runStrictTest {
-        val transport = MockWebSocketTransport()
-        val connection = MockAutobahnHelpers.connectWithHandshake(transport, BinaryPassThroughCodec)
+    private fun testBinaryPayload(size: Int) =
+        runStrictTest {
+            val transport = MockWebSocketTransport()
+            val connection = MockAutobahnHelpers.connectWithHandshake(transport, BinaryPassThroughCodec)
 
-        val payload = BufferFactory.Default.allocate(size)
-        for (i in 0 until size) payload.writeByte((i % 256).toByte())
-        payload.resetForRead()
-        transport.enqueueRead(MockAutobahnHelpers.buildServerFrame(Opcode.Binary, payload))
-        transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
+            val payload = BufferFactory.Default.allocate(size)
+            for (i in 0 until size) payload.writeByte((i % 256).toByte())
+            payload.resetForRead()
+            transport.enqueueRead(MockAutobahnHelpers.buildServerFrame(Opcode.Binary, payload))
+            transport.enqueueRead(MockAutobahnHelpers.buildServerCloseFrame(1000u))
 
-        val msg =
-            withTimeout(5.seconds) {
-                connection.receive().first()
-            }
-        assertIs<WebSocketMessage.Binary<*>>(msg)
-        @Suppress("UNCHECKED_CAST")
-        val binary = msg as WebSocketMessage.Binary<com.ditchoom.buffer.ReadBuffer>
-        assertEquals(size, binary.payload.remaining())
-        connection.close()
-    }
+            val msg =
+                withTimeout(5.seconds) {
+                    connection.receive().first()
+                }
+            assertIs<WebSocketMessage.Binary<*>>(msg)
+            @Suppress("UNCHECKED_CAST")
+            val binary = msg as WebSocketMessage.Binary<com.ditchoom.buffer.ReadBuffer>
+            assertEquals(size, binary.payload.remaining())
+            connection.close()
+        }
 
     // Text payloads at encoding boundaries
     @Test fun textEmpty() = testTextPayload(0)

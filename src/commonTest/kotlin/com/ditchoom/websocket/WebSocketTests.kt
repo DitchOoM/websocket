@@ -27,12 +27,13 @@ class WebSocketTests {
     @Test
     fun clientEchoString() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(
-                name = "127.0.0.1",
-                port = 8081,
-                websocketEndpoint = "/echo",
-                bufferFactory = BufferFactory.shared(),
-            )
+            val connectionOptions =
+                WebSocketConnectionOptions(
+                    name = "127.0.0.1",
+                    port = 8081,
+                    websocketEndpoint = "/echo",
+                    bufferFactory = BufferFactory.shared(),
+                )
             val websocket = connectForTest(connectionOptions)
             val string1 = "test"
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Text(string1)) }
@@ -48,12 +49,13 @@ class WebSocketTests {
     @Test
     fun clientEchoReadBuffer() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(
-                name = "127.0.0.1",
-                port = 8081,
-                websocketEndpoint = "/echo",
-                bufferFactory = BufferFactory.shared(),
-            )
+            val connectionOptions =
+                WebSocketConnectionOptions(
+                    name = "127.0.0.1",
+                    port = 8081,
+                    websocketEndpoint = "/echo",
+                    bufferFactory = BufferFactory.shared(),
+                )
             val websocket = connectForTest(connectionOptions, BinaryPassThroughCodec)
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }
             val firstBuffer = websocket.receive().first() as WebSocketMessage.Binary<ReadBuffer>
@@ -67,12 +69,13 @@ class WebSocketTests {
     @Test
     fun pingPongWorks() =
         runTestNoTimeSkipping {
-            val connectionOptions = WebSocketConnectionOptions(
-                name = "127.0.0.1",
-                port = 8081,
-                websocketEndpoint = "/echo",
-                bufferFactory = BufferFactory.shared(),
-            )
+            val connectionOptions =
+                WebSocketConnectionOptions(
+                    name = "127.0.0.1",
+                    port = 8081,
+                    websocketEndpoint = "/echo",
+                    bufferFactory = BufferFactory.shared(),
+                )
             val websocket = connectForTest(connectionOptions)
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Ping("ping-data")) }
             val pong =
@@ -90,12 +93,13 @@ class WebSocketTests {
             // escape hatch. Text is sent by encoding the String to UTF-8 bytes; on echo back
             // we decode to verify the round-trip. This preserves the original intent
             // (connection handles mixed traffic correctly) while matching the v2 contract.
-            val connectionOptions = WebSocketConnectionOptions(
-                name = "127.0.0.1",
-                port = 8081,
-                websocketEndpoint = "/echo",
-                bufferFactory = BufferFactory.shared(),
-            )
+            val connectionOptions =
+                WebSocketConnectionOptions(
+                    name = "127.0.0.1",
+                    port = 8081,
+                    websocketEndpoint = "/echo",
+                    bufferFactory = BufferFactory.shared(),
+                )
             val websocket = connectForTest(connectionOptions, BinaryPassThroughCodec)
 
             launch(Dispatchers.Default) { websocket.send(WebSocketMessage.Binary(createPayload())) }

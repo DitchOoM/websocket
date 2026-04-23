@@ -2,7 +2,6 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import kotlinx.coroutines.async
@@ -56,14 +55,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val connectJob = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val connectJob =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.simulateDisconnect()
+                    job
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.simulateDisconnect()
-                job
-            }
 
             val result = withTimeout(5.seconds) { connectJob.await() }
             assertTrue(result.isFailure)
@@ -377,14 +378,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val result = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val result =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(200, "OK"))
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(200, "OK"))
-                withTimeout(5.seconds) { job.await() }
-            }
 
             assertTrue(result.isFailure)
         }
@@ -394,14 +397,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val result = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val result =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildMissingAcceptResponse())
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.enqueueRead(MockHandshakeHelper.buildMissingAcceptResponse())
-                withTimeout(5.seconds) { job.await() }
-            }
 
             assertTrue(result.isFailure)
         }
@@ -411,14 +416,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val result = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val result =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
-                withTimeout(5.seconds) { job.await() }
-            }
 
             assertTrue(result.isFailure)
         }
@@ -432,14 +439,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val result = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val result =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.enqueueRead(MockHandshakeHelper.buildErrorResponse(403, "Forbidden"))
-                withTimeout(5.seconds) { job.await() }
-            }
 
             assertTrue(result.isFailure)
             assertIs<WebSocketException.HandshakeRejected>(result.exceptionOrNull())
@@ -450,14 +459,16 @@ class WebSocketCodecMockTest {
         runStrictTest {
             val mockTransport = MockWebSocketTransport()
 
-            val result = coroutineScope {
-                val job = async {
-                    runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+            val result =
+                coroutineScope {
+                    val job =
+                        async {
+                            runCatching { connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed())) }
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                mockTransport.enqueueRead(MockHandshakeHelper.buildWrongAcceptResponse())
-                withTimeout(5.seconds) { job.await() }
-            }
 
             assertTrue(result.isFailure)
             assertIs<WebSocketException.HandshakeRejected>(result.exceptionOrNull())
@@ -703,11 +714,12 @@ class WebSocketCodecMockTest {
                 connection.receive().toList()
             }
 
-            val closeSent = mockTransport.writtenBuffers.drop(1).any { buf ->
-                buf.position(0)
-                val b1 = buf.readByte().toInt() and 0xFF
-                (b1 and 0x0F) == 0x08
-            }
+            val closeSent =
+                mockTransport.writtenBuffers.drop(1).any { buf ->
+                    buf.position(0)
+                    val b1 = buf.readByte().toInt() and 0xFF
+                    (b1 and 0x0F) == 0x08
+                }
             assertTrue(closeSent, "Client should send a close frame on invalid UTF-8")
             connection.close()
         }
@@ -742,15 +754,21 @@ class WebSocketCodecMockTest {
             val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
 
             val mockTransport = MockWebSocketTransport()
-            val connection = coroutineScope {
-                val job = async {
-                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), parentScope = parentScope)
+            val connection =
+                coroutineScope {
+                    val job =
+                        async {
+                            connectWebSocket(
+                                mockTransport,
+                                defaultOptions.copy(bufferFactory = BufferFactory.managed()),
+                                parentScope = parentScope,
+                            )
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
-                mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
-                withTimeout(5.seconds) { job.await() }
-            }
 
             // Cancel the PARENT scope — structured concurrency should propagate
             parentJob.cancel()
@@ -769,15 +787,21 @@ class WebSocketCodecMockTest {
             val parentScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + parentJob)
 
             val mockTransport = MockWebSocketTransport()
-            val connection = coroutineScope {
-                val job = async {
-                    connectWebSocket(mockTransport, defaultOptions.copy(bufferFactory = BufferFactory.managed()), parentScope = parentScope)
+            val connection =
+                coroutineScope {
+                    val job =
+                        async {
+                            connectWebSocket(
+                                mockTransport,
+                                defaultOptions.copy(bufferFactory = BufferFactory.managed()),
+                                parentScope = parentScope,
+                            )
+                        }
+                    MockAutobahnHelpers.waitForWrite(mockTransport)
+                    val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
+                    mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
+                    withTimeout(5.seconds) { job.await() }
                 }
-                MockAutobahnHelpers.waitForWrite(mockTransport)
-                val clientKey = MockHandshakeHelper.extractClientKey(mockTransport.writtenBuffers[0])
-                mockTransport.enqueueRead(MockHandshakeHelper.buildHandshakeResponse(clientKey))
-                withTimeout(5.seconds) { job.await() }
-            }
 
             connection.close()
 

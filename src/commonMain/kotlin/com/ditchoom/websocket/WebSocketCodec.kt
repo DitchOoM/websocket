@@ -6,21 +6,20 @@ import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.StreamingStringDecoder
+import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.buffer.utf8ByteCount
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.PeekResult
-import com.ditchoom.buffer.codec.Codec
-import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.utf8ByteCount
 import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.AssembledMessage
-import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import com.ditchoom.websocket.frame.AssemblyResult
 import com.ditchoom.websocket.frame.CloseCode
 import com.ditchoom.websocket.frame.FrameHeaderByte1
@@ -32,9 +31,7 @@ import com.ditchoom.websocket.frame.WsFrameCodec
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsMaskingKey
-import kotlin.concurrent.Volatile
-import kotlin.coroutines.coroutineContext
-import kotlin.time.Duration
+import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +42,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.concurrent.Volatile
+import kotlin.coroutines.coroutineContext
+import kotlin.time.Duration
 
 /**
  * Couples a decoded [WebSocketMessage] with the library-owned raw payload buffer
@@ -107,7 +107,8 @@ internal class WebSocketCodec<B>(
      * as soon as the collector's lambda returns. Copy bytes out if you need them later.
      */
     override fun receive(): Flow<WebSocketMessage<B>> =
-        incomingMessageChannel.receiveAsFlow()
+        incomingMessageChannel
+            .receiveAsFlow()
             .transform { env ->
                 try {
                     emit(env.message)
@@ -209,63 +210,64 @@ internal class WebSocketCodec<B>(
             // at payload end). Ownership moves out via the returned frame.
             val buffer = stream.readBuffer(totalFrameSize)
             var owned = true
-            val frame = try {
-                val header = WsFrameHeaderCodec.decode(buffer)
-                // buffer.position() is now at payload start; buffer.limit() is at frame end.
-                val payloadStart = buffer.position()
-                val payloadEnd = payloadStart + header.payloadLength.toInt()
-                buffer.setLimit(payloadEnd)
+            val frame =
+                try {
+                    val header = WsFrameHeaderCodec.decode(buffer)
+                    // buffer.position() is now at payload start; buffer.limit() is at frame end.
+                    val payloadStart = buffer.position()
+                    val payloadEnd = payloadStart + header.payloadLength.toInt()
+                    buffer.setLimit(payloadEnd)
 
-                when (val op = header.byte1.opcode) {
-                    Opcode.Text -> {
-                        owned = false
-                        WsFrame.Text(header, buffer)
+                    when (val op = header.byte1.opcode) {
+                        Opcode.Text -> {
+                            owned = false
+                            WsFrame.Text(header, buffer)
+                        }
+                        Opcode.Binary -> {
+                            owned = false
+                            WsFrame.Binary(header, buffer)
+                        }
+                        Opcode.Continuation -> {
+                            owned = false
+                            WsFrame.Continuation(header, buffer)
+                        }
+                        Opcode.Ping -> {
+                            owned = false
+                            WsFrame.Ping(header, buffer)
+                        }
+                        Opcode.Pong -> {
+                            owned = false
+                            WsFrame.Pong(header, buffer)
+                        }
+                        Opcode.Close -> {
+                            val body =
+                                if (buffer.remaining() >= 2) {
+                                    WsCloseBodyCodec.decode(buffer, DecodeContext.Empty)
+                                } else {
+                                    null
+                                }
+                            // Close body was fully read; buffer can be freed in the finally.
+                            WsFrame.Close(header, body)
+                        }
+                        else -> throw IllegalArgumentException("Reserved opcode: $op")
                     }
-                    Opcode.Binary -> {
-                        owned = false
-                        WsFrame.Binary(header, buffer)
-                    }
-                    Opcode.Continuation -> {
-                        owned = false
-                        WsFrame.Continuation(header, buffer)
-                    }
-                    Opcode.Ping -> {
-                        owned = false
-                        WsFrame.Ping(header, buffer)
-                    }
-                    Opcode.Pong -> {
-                        owned = false
-                        WsFrame.Pong(header, buffer)
-                    }
-                    Opcode.Close -> {
-                        val body =
-                            if (buffer.remaining() >= 2) {
-                                WsCloseBodyCodec.decode(buffer, DecodeContext.Empty)
-                            } else {
-                                null
-                            }
-                        // Close body was fully read; buffer can be freed in the finally.
-                        WsFrame.Close(header, body)
-                    }
-                    else -> throw IllegalArgumentException("Reserved opcode: $op")
+                } catch (_: IllegalArgumentException) {
+                    // Reserved opcode — protocol error
+                    sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
+                    closed = true
+                    return null
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") _: Throwable,
+                ) {
+                    // Decode error (e.g., invalid UTF-8 in close reason — JS throws non-Exception errors)
+                    sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
+                    closed = true
+                    return null
+                } finally {
+                    if (owned) buffer.freeIfNeeded()
                 }
-            } catch (_: IllegalArgumentException) {
-                // Reserved opcode — protocol error
-                sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
-                closed = true
-                return null
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (
-                @Suppress("TooGenericExceptionCaught") _: Throwable,
-            ) {
-                // Decode error (e.g., invalid UTF-8 in close reason — JS throws non-Exception errors)
-                sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
-                closed = true
-                return null
-            } finally {
-                if (owned) buffer.freeIfNeeded()
-            }
 
             // Post-decode validation: close frame reason must be valid UTF-8.
             // If readString replaced invalid bytes, re-encoding produces different bytes
@@ -302,7 +304,8 @@ internal class WebSocketCodec<B>(
                 }
                 val len64 = stream.peekLong(2)
                 if (len64 > Int.MAX_VALUE || len64 < 0) {
-                    throw com.ditchoom.websocket.frame.FrameParseException("Payload length out of range: $len64")
+                    throw com.ditchoom.websocket.frame
+                        .FrameParseException("Payload length out of range: $len64")
                 }
                 len64.toInt()
             }
@@ -425,14 +428,16 @@ internal class WebSocketCodec<B>(
             if (config.serverNoContextTakeover) {
                 try {
                     config.decompressor.reset()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
     }
 
     private fun decompressPayloadToString(payload: ReadBuffer): String {
-        val config = compression as? CompressionConfig.Enabled
-            ?: return payload.readString(payload.remaining(), Charset.UTF8)
+        val config =
+            compression as? CompressionConfig.Enabled
+                ?: return payload.readString(payload.remaining(), Charset.UTF8)
         return try {
             decompressToStringSync(payload, config.decompressor, stringDecoder)
         } catch (e: Throwable) {
@@ -441,7 +446,8 @@ internal class WebSocketCodec<B>(
             if (config.serverNoContextTakeover) {
                 try {
                     config.decompressor.reset()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
     }
@@ -539,15 +545,16 @@ internal class WebSocketCodec<B>(
         statusCode: UShort? = null,
         reason: String? = null,
     ): ReadBuffer {
-        val body = if (statusCode != null) {
-            val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
-            // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code).
-            val reasonStr = truncated ?: ""
-            val cappedReason = if (reasonStr.utf8ByteCount() > 123) reasonStr.substring(0, 123) else reasonStr
-            WsCloseBody(CloseCode(statusCode), cappedReason)
-        } else {
-            null
-        }
+        val body =
+            if (statusCode != null) {
+                val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
+                // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code).
+                val reasonStr = truncated ?: ""
+                val cappedReason = if (reasonStr.utf8ByteCount() > 123) reasonStr.substring(0, 123) else reasonStr
+                WsCloseBody(CloseCode(statusCode), cappedReason)
+            } else {
+                null
+            }
         val payloadSize = if (body != null) 2 + body.reason.utf8ByteCount() else 0
         return encodeWsFrame(
             WsFrame.Close(
@@ -642,7 +649,12 @@ internal class WebSocketCodec<B>(
         return encodeWsFrame(buildDataWsFrame(opcode, fin, rsv1 = false, payload))
     }
 
-    private fun buildDataWsFrame(opcode: Opcode, fin: Boolean, rsv1: Boolean, payload: ReadBuffer): WsFrame =
+    private fun buildDataWsFrame(
+        opcode: Opcode,
+        fin: Boolean,
+        rsv1: Boolean,
+        payload: ReadBuffer,
+    ): WsFrame =
         when (opcode) {
             Opcode.Text -> WsFrame.Text(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
             Opcode.Binary -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
@@ -650,7 +662,12 @@ internal class WebSocketCodec<B>(
             else -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
         }
 
-    private fun buildMaskedHeader(fin: Boolean, rsv1: Boolean, opcode: Opcode, payloadSize: Int): WsFrameHeader =
+    private fun buildMaskedHeader(
+        fin: Boolean,
+        rsv1: Boolean,
+        opcode: Opcode,
+        payloadSize: Int,
+    ): WsFrameHeader =
         WsFrameHeader.build(
             byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, opcode),
             payloadSize = payloadSize.toLong(),
@@ -673,7 +690,8 @@ internal class WebSocketCodec<B>(
         }
 
         WsFrameCodec.encode(
-            buffer, frame,
+            buffer,
+            frame,
             encodeBinaryPayload = writePayload,
             encodeContinuationPayload = writePayload,
             encodePingPayload = writePayload,
@@ -728,7 +746,8 @@ internal class WebSocketCodec<B>(
         if (!serverInitiatedClose) {
             try {
                 sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
         incomingMessageChannel.close()
         // Clean up compression resources
@@ -738,10 +757,12 @@ internal class WebSocketCodec<B>(
         // Close transport first to break pending I/O, then cancelAndJoin.
         try {
             transport.close()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
         try {
             codecJob.cancelAndJoin()
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
         (bufferFactory as? com.ditchoom.buffer.pool.BufferPool)?.clear()
     }
 

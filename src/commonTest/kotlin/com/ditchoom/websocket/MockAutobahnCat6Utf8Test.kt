@@ -105,10 +105,13 @@ class MockAutobahnCat6Utf8Test {
 
             // Valid first fragment, invalid continuation
             val validPart = BufferFactory.Default.allocate(3)
-            validPart.writeByte(0x48); validPart.writeByte(0x65); validPart.writeByte(0x6C)
+            validPart.writeByte(0x48)
+            validPart.writeByte(0x65)
+            validPart.writeByte(0x6C)
             validPart.resetForRead()
             val invalidPart = BufferFactory.Default.allocate(2)
-            invalidPart.writeByte(0xC0.toByte()); invalidPart.writeByte(0xAF.toByte())
+            invalidPart.writeByte(0xC0.toByte())
+            invalidPart.writeByte(0xAF.toByte())
             invalidPart.resetForRead()
 
             transport.enqueueRead(

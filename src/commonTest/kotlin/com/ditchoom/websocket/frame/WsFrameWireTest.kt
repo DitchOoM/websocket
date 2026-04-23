@@ -2,11 +2,9 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ByteOrder
-import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.websocket.MaskingKey
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -105,10 +103,19 @@ class WsFrameWireTest {
     @Test
     fun decode64BitExtendedLength70000() {
         val payload = ByteArray(70000) { 0x43 }
-        val header = byteArrayOf(
-            0x82.toByte(), 0x7F,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x11, 0x70,
-        )
+        val header =
+            byteArrayOf(
+                0x82.toByte(),
+                0x7F,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x01,
+                0x11,
+                0x70,
+            )
         val buffer = buf(header + payload)
         val frame = decodeSkipPayload(buffer)
 
@@ -243,11 +250,12 @@ class WsFrameWireTest {
 
     @Test
     fun encodeUnmaskedTextHiWireBytes() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
-            payloadSize = 2,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
+                payloadSize = 2,
+                masked = false,
+            )
         val buffer = allocEncode(header, 2)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.writeBytes("Hi".encodeToByteArray())
@@ -261,11 +269,12 @@ class WsFrameWireTest {
 
     @Test
     fun encodeCloseFrame1000WireBytes() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Close),
-            payloadSize = 2,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Close),
+                payloadSize = 2,
+                masked = false,
+            )
         val buffer = allocEncode(header, 2)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.writeShort(1000.toShort())
@@ -279,11 +288,12 @@ class WsFrameWireTest {
 
     @Test
     fun encodeRSV1SetProduces0xC1() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, rsv1 = true, false, false, Opcode.Text),
-            payloadSize = 0,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, rsv1 = true, false, false, Opcode.Text),
+                payloadSize = 0,
+                masked = false,
+            )
         val buffer = allocEncode(header, 0)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.resetForRead()
@@ -294,12 +304,13 @@ class WsFrameWireTest {
     @Test
     fun encodeMaskedFrameHasMASKBitAnd4ByteKey() {
         val mask = WsMaskingKey(0xDEADBEEFu)
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
-            payloadSize = 2,
-            masked = true,
-            maskingKey = mask,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
+                payloadSize = 2,
+                masked = true,
+                maskingKey = mask,
+            )
         val buffer = allocEncode(header, 2)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.writeBytes("Hi".encodeToByteArray())
@@ -318,11 +329,12 @@ class WsFrameWireTest {
 
     @Test
     fun encode16BitExtendedLengthWireFormat() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
-            payloadSize = 256,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
+                payloadSize = 256,
+                masked = false,
+            )
         val buffer = allocEncode(header, 0) // don't write payload, just header
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.resetForRead()
@@ -335,11 +347,12 @@ class WsFrameWireTest {
 
     @Test
     fun encode64BitExtendedLengthWireFormat() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
-            payloadSize = 70000,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
+                payloadSize = 70000,
+                masked = false,
+            )
         val buffer = allocEncode(header, 0)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.resetForRead()
@@ -359,11 +372,12 @@ class WsFrameWireTest {
 
     @Test
     fun encodeFIN0FragmentWireFormat() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(fin = false, false, false, false, Opcode.Text),
-            payloadSize = 0,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(fin = false, false, false, false, Opcode.Text),
+                payloadSize = 0,
+                masked = false,
+            )
         val buffer = allocEncode(header, 0)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.resetForRead()
@@ -377,11 +391,12 @@ class WsFrameWireTest {
 
     @Test
     fun roundTripUnmaskedTextFrame() {
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
-            payloadSize = 5,
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Text),
+                payloadSize = 5,
+                masked = false,
+            )
         val buffer = allocEncode(header, 5)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.writeBytes("Hello".encodeToByteArray())
@@ -397,11 +412,12 @@ class WsFrameWireTest {
         val reason = "goodbye"
         val reasonBytes = reason.encodeToByteArray()
         val payloadSize = 2 + reasonBytes.size
-        val header = WsFrameHeader.build(
-            byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Close),
-            payloadSize = payloadSize.toLong(),
-            masked = false,
-        )
+        val header =
+            WsFrameHeader.build(
+                byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Close),
+                payloadSize = payloadSize.toLong(),
+                masked = false,
+            )
         val buffer = allocEncode(header, payloadSize)
         WsFrameHeaderCodec.encode(buffer, header)
         buffer.writeShort(1001.toShort())
@@ -433,6 +449,8 @@ class WsFrameWireTest {
         return b
     }
 
-    private fun allocEncode(header: WsFrameHeader, payloadSize: Int): PlatformBuffer =
-        BufferFactory.Default.allocate(header.wireSize + payloadSize, ByteOrder.BIG_ENDIAN) as PlatformBuffer
+    private fun allocEncode(
+        header: WsFrameHeader,
+        payloadSize: Int,
+    ): PlatformBuffer = BufferFactory.Default.allocate(header.wireSize + payloadSize, ByteOrder.BIG_ENDIAN) as PlatformBuffer
 }

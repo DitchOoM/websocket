@@ -15,9 +15,14 @@ import com.ditchoom.buffer.codec.EncodeContext
  * treated as a bug in the protocol.
  */
 object RejectingCodec : Codec<Nothing> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): Nothing =
-        error("RejectingCodec: received unexpected binary frame; configure a binary codec to accept it")
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): Nothing = error("RejectingCodec: received unexpected binary frame; configure a binary codec to accept it")
 
-    override fun encode(buffer: WriteBuffer, value: Nothing, context: EncodeContext): Nothing =
-        error("RejectingCodec: cannot encode — no binary codec configured")
+    override fun encode(
+        buffer: WriteBuffer,
+        value: Nothing,
+        context: EncodeContext,
+    ): Nothing = error("RejectingCodec: cannot encode — no binary codec configured")
 }

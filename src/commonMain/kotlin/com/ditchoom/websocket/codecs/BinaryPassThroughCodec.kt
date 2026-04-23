@@ -22,9 +22,16 @@ import com.ditchoom.buffer.codec.EncodeContext
  * WebSocket header based on how many bytes were written.
  */
 object BinaryPassThroughCodec : Codec<ReadBuffer> {
-    override fun decode(buffer: ReadBuffer, context: DecodeContext): ReadBuffer = buffer
+    override fun decode(
+        buffer: ReadBuffer,
+        context: DecodeContext,
+    ): ReadBuffer = buffer
 
-    override fun encode(buffer: WriteBuffer, value: ReadBuffer, context: EncodeContext) {
+    override fun encode(
+        buffer: WriteBuffer,
+        value: ReadBuffer,
+        context: EncodeContext,
+    ) {
         buffer.write(value)
     }
 }

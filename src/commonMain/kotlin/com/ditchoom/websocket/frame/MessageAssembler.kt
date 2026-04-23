@@ -146,11 +146,12 @@ class MessageAssembler(
 
     private fun handleFirstFragment(frame: WsFrame): AssemblyResult {
         val h = frame.header
-        val payload = when (frame) {
-            is WsFrame.Text<*> -> frame.payload as ReadBuffer
-            is WsFrame.Binary<*> -> frame.payload as ReadBuffer
-            else -> return AssemblyResult.Error(CloseCode.PROTOCOL_ERROR, "Unexpected frame type")
-        }
+        val payload =
+            when (frame) {
+                is WsFrame.Text<*> -> frame.payload as ReadBuffer
+                is WsFrame.Binary<*> -> frame.payload as ReadBuffer
+                else -> return AssemblyResult.Error(CloseCode.PROTOCOL_ERROR, "Unexpected frame type")
+            }
         val payloadLen = h.payloadLength.toInt()
 
         // RFC 6455 Section 5.4: Cannot start new message while one is in progress

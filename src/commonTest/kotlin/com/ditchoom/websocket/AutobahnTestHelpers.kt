@@ -8,7 +8,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.socket.ConnectionOptions
 import com.ditchoom.socket.NetworkCapabilities.FULL_SOCKET_ACCESS
 import com.ditchoom.socket.SocketOptions
@@ -49,11 +48,12 @@ internal suspend fun <B> connectForTest(
             TcpTransport().connect(
                 hostname = connectionOptions.name,
                 port = connectionOptions.port,
-                options = ConnectionOptions(
-                    socketOptions = socketOptions,
-                    connectionTimeout = connectionOptions.connectionTimeout,
-                    bufferFactory = connectionOptions.bufferFactory,
-                ),
+                options =
+                    ConnectionOptions(
+                        socketOptions = socketOptions,
+                        connectionTimeout = connectionOptions.connectionTimeout,
+                        bufferFactory = connectionOptions.bufferFactory,
+                    ),
             )
         connectWebSocket(
             transport = transport,
@@ -68,9 +68,7 @@ internal suspend fun <B> connectForTest(
     }
 
 /** Text-only overload — binary frames surface as `Binary(Unit)` and are typically ignored. */
-internal suspend fun connectForTest(
-    connectionOptions: WebSocketConnectionOptions,
-): Connection<WebSocketMessage<Unit>> =
+internal suspend fun connectForTest(connectionOptions: WebSocketConnectionOptions): Connection<WebSocketMessage<Unit>> =
     connectForTest(connectionOptions, com.ditchoom.websocket.codecs.EmptyCodec)
 
 /**

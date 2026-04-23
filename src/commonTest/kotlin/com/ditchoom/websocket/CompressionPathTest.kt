@@ -3,14 +3,13 @@ package com.ditchoom.websocket
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
-import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
-import com.ditchoom.buffer.StreamingStringDecoder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -40,7 +39,11 @@ class CompressionPathTest {
         val decompressed = decompressToBufferSync(compressedBuf, decompressor, BufferFactory.Default)
         compressedBuf.freeIfNeeded()
 
-        assertEquals(size, decompressed.remaining(), "Round-trip failed at size $size: compressed=$compressedSize, decompressed=${decompressed.remaining()}")
+        assertEquals(
+            size,
+            decompressed.remaining(),
+            "Round-trip failed at size $size: compressed=$compressedSize, decompressed=${decompressed.remaining()}",
+        )
 
         // Verify content
         payload.position(0)
@@ -79,15 +82,22 @@ class CompressionPathTest {
 
     // Size sweep to find truncation boundary
     @Test fun roundTrip1KB() = roundTrip(1024)
+
     @Test fun roundTrip4KB() = roundTrip(4096)
+
     @Test fun roundTrip8KB() = roundTrip(8192)
+
     @Test fun roundTrip16KB() = roundTrip(16384)
+
     @Test fun roundTrip32KB() = roundTrip(32768)
+
     @Test fun roundTrip64KB() = roundTrip(65536)
+
     @Test fun roundTrip128KB() = roundTrip(131072)
 
     // String path (used for text messages)
     @Test fun stringRoundTrip32KB() = stringRoundTrip(32768)
+
     @Test fun stringRoundTrip64KB() = stringRoundTrip(65536)
 
     // Echo simulation: decompress then re-compress (like Autobahn cat-12)

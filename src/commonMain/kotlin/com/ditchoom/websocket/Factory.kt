@@ -7,7 +7,6 @@ import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
-import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadResult
@@ -74,7 +73,8 @@ suspend fun <B> connectWebSocket(
         // Build auto-filling stream processor
         val pool =
             bufferFactory as? com.ditchoom.buffer.pool.BufferPool
-                ?: com.ditchoom.buffer.pool.BufferPool(factory = bufferFactory)
+                ?: com.ditchoom.buffer.pool
+                    .BufferPool(factory = bufferFactory)
         val autoFillingStream =
             StreamProcessor
                 .builder(pool)
@@ -238,6 +238,4 @@ suspend fun connectWebSocket(
     transport: ByteStream,
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectWebSocket(transport, connectionOptions, EmptyCodec, parentScope)
-
+): Connection<WebSocketMessage<Unit>> = connectWebSocket(transport, connectionOptions, EmptyCodec, parentScope)
