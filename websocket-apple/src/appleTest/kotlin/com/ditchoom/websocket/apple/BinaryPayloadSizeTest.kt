@@ -49,6 +49,7 @@ class BinaryPayloadSizeTest {
                             connectionTimeout = 15.seconds,
                         ),
                         BinaryPassThroughCodec,
+                        authChallengeHandler = acceptServerPresentedTrust(),
                     )
                 try {
                     for (size in payloadSizes) {

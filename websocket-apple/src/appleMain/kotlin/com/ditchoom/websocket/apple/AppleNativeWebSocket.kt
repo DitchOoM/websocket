@@ -6,6 +6,8 @@ import com.ditchoom.websocket.WebSocketConnectionOptions
 import com.ditchoom.websocket.WebSocketMessage
 import com.ditchoom.websocket.codecs.EmptyCodec
 import kotlinx.coroutines.CoroutineScope
+import platform.Foundation.NSURLAuthenticationChallenge
+import platform.Foundation.NSURLCredential
 
 /**
  * Create an Apple-native WebSocket connection via `NSURLSessionWebSocketTask`.
@@ -16,11 +18,14 @@ import kotlinx.coroutines.CoroutineScope
  *
  * For full RFC 6455 control (custom window bits, context takeover, zero-copy
  * framing), use `connectTcpWebSocket` from `com.ditchoom:websocket-tcp` instead.
+ *
+ * @param authChallengeHandler See [AppleWebSocketController].
  */
 suspend fun <B> connectAppleNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     binaryCodec: Codec<B>,
     parentScope: CoroutineScope? = null,
+    authChallengeHandler: ((NSURLAuthenticationChallenge) -> NSURLCredential?)? = null,
 ): Connection<WebSocketMessage<B>> {
     val controller =
         AppleWebSocketController(
@@ -28,6 +33,7 @@ suspend fun <B> connectAppleNativeWebSocket(
             binaryCodec = binaryCodec,
             bufferFactory = connectionOptions.bufferFactory,
             parentScope = parentScope,
+            authChallengeHandler = authChallengeHandler,
         )
     controller.connect()
     return controller
@@ -37,4 +43,6 @@ suspend fun <B> connectAppleNativeWebSocket(
 suspend fun connectAppleNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> = connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope)
+    authChallengeHandler: ((NSURLAuthenticationChallenge) -> NSURLCredential?)? = null,
+): Connection<WebSocketMessage<Unit>> =
+    connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope, authChallengeHandler)

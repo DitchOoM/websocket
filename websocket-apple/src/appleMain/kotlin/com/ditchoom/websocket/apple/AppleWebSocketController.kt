@@ -31,7 +31,12 @@ import platform.Foundation.NSData
 import platform.Foundation.NSError
 import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSURL
+import platform.Foundation.NSURLAuthenticationChallenge
+import platform.Foundation.NSURLCredential
 import platform.Foundation.NSURLSession
+import platform.Foundation.NSURLSessionAuthChallengeDisposition
+import platform.Foundation.NSURLSessionAuthChallengePerformDefaultHandling
+import platform.Foundation.NSURLSessionAuthChallengeUseCredential
 import platform.Foundation.NSURLSessionConfiguration
 import platform.Foundation.NSURLSessionTask
 import platform.Foundation.NSURLSessionWebSocketCloseCode
@@ -59,14 +64,22 @@ import kotlin.coroutines.resumeWithException
  *    automatically.
  *  - `compressionOptions` on [WebSocketConnectionOptions] is ignored; the
  *    system negotiates permessage-deflate itself.
- *  - TLS configuration uses the system trust store; custom certificates
- *    require an `NSURLSessionDelegate` with `didReceiveChallenge`.
+ *  - TLS configuration uses the system trust store unless [authChallengeHandler]
+ *    is set. The handler receives every URLSession auth challenge (server trust,
+ *    client cert, basic auth, etc.); a non-null returned [NSURLCredential] is
+ *    applied with `useCredential`, null falls through to `performDefaultHandling`.
+ *    Primary use case: K/N test binaries spawned via `xcrun simctl spawn` on
+ *    iOS / tvOS / watchOS simulators get -1202 from default handling for any
+ *    public TLS endpoint (Safari trusts the same cert fine — the spawn
+ *    environment lacks app-level trust eval entitlements). Tests pin
+ *    server trust explicitly via this hook.
  */
 class AppleWebSocketController<B>(
     private val connectionOptions: WebSocketConnectionOptions,
     private val binaryCodec: Codec<B>,
     private val bufferFactory: BufferFactory,
     parentScope: CoroutineScope?,
+    private val authChallengeHandler: ((NSURLAuthenticationChallenge) -> NSURLCredential?)? = null,
 ) : Connection<WebSocketMessage<B>> {
     override val id: Long = 0L
     private var closed = false
@@ -91,6 +104,7 @@ class AppleWebSocketController<B>(
                 closed = true
                 incomingMessageChannel.close()
             },
+            authChallengeHandler = authChallengeHandler,
         )
 
     // Dedicated serial delegate queue per session. Using
@@ -243,6 +257,7 @@ class AppleWebSocketController<B>(
 private class WebSocketSessionDelegate(
     private val connectDeferred: CompletableDeferred<Unit>,
     private val onClose: () -> Unit,
+    private val authChallengeHandler: ((NSURLAuthenticationChallenge) -> NSURLCredential?)? = null,
 ) : NSObject(),
     NSURLSessionWebSocketDelegateProtocol {
     override fun URLSession(
@@ -295,6 +310,33 @@ private class WebSocketSessionDelegate(
                 )
             }
             onClose()
+        }
+    }
+
+    /**
+     * Per-task auth challenge dispatch. Only installed when the controller was
+     * built with a handler — without one, NSURLSession does its standard default
+     * handling. With one, the handler decides per challenge: a non-null
+     * NSURLCredential applies via `useCredential`, null falls through to
+     * `performDefaultHandling` (so the handler can opt-out per challenge type
+     * — e.g. accept server trust but defer client-cert challenges to the system).
+     */
+    override fun URLSession(
+        session: NSURLSession,
+        task: NSURLSessionTask,
+        didReceiveChallenge: NSURLAuthenticationChallenge,
+        completionHandler: (NSURLSessionAuthChallengeDisposition, NSURLCredential?) -> Unit,
+    ) {
+        val handler = authChallengeHandler
+        if (handler == null) {
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, null)
+            return
+        }
+        val credential = handler(didReceiveChallenge)
+        if (credential != null) {
+            completionHandler(NSURLSessionAuthChallengeUseCredential, credential)
+        } else {
+            completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, null)
         }
     }
 }

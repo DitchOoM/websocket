@@ -34,6 +34,7 @@ class NativeWebSocketClientTest {
                             connectionTimeout = 15.seconds,
                         ),
                         BinaryPassThroughCodec,
+                        authChallengeHandler = acceptServerPresentedTrust(),
                     )
                 try {
                     val textMsg = "ditchoom-native-text"
@@ -101,6 +102,7 @@ class NativeWebSocketClientTest {
                             tls = true,
                             connectionTimeout = 15.seconds,
                         ),
+                        authChallengeHandler = acceptServerPresentedTrust(),
                     )
                 try {
                     val message = "ditchoom-native-echo-test"
