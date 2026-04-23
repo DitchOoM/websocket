@@ -1,11 +1,23 @@
 package com.ditchoom.websocket
 
 import kotlin.test.Test
+import kotlin.time.Duration.Companion.seconds
+
+// Autobahn 6.4.x ("invalid UTF-8 with fragmentation") and 6.2.x ("valid UTF-8 with
+// fragmentation") send fragmented frames with deliberate ~1 s delays between fragments so
+// the server-side harness can exercise stream-wise UTF-8 validation. A prior buggy write
+// path (NWSocketWrapper / toNSData ignored position/limit) caused the server to reject our
+// frames immediately with a protocol error; that masked the real per-case duration, so the
+// 10-second default `testTimeout` happened to fit. With the correct write path the client
+// completes the full case handshake — 4 cases × ~2 s + ~70 fast cases — so the suite needs
+// more headroom. 60 s leaves room for Kotlin/Native connection overhead without hiding
+// actual hangs.
+private val autobahnCase6Timeout = 60.seconds
 
 class AutobahnCase6PingPongTests {
     @Test
     fun category6_valid_utf8() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = autobahnCase6Timeout) {
             // 6.1: Empty/zero-length fragments
             for (case in 65..67) echoMessageAndClose(case)
             // 6.2: Valid UTF-8 with fragmentation boundaries
@@ -32,7 +44,7 @@ class AutobahnCase6PingPongTests {
 
     @Test
     fun category6_invalid_utf8() =
-        runTestNoTimeSkipping {
+        runTestNoTimeSkipping(timeout = autobahnCase6Timeout) {
             // 6.3: Invalid unfragmented
             for (case in 72..73) prepareConnection(case)
             // 6.4: Invalid with fragmentation
