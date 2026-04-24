@@ -44,5 +44,4 @@ suspend fun connectAppleNativeWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
     authChallengeHandler: ((NSURLAuthenticationChallenge) -> NSURLCredential?)? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope, authChallengeHandler)
+): Connection<WebSocketMessage<Unit>> = connectAppleNativeWebSocket(connectionOptions, EmptyCodec, parentScope, authChallengeHandler)

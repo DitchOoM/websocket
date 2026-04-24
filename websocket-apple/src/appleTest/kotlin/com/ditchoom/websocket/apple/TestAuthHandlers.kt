@@ -22,15 +22,16 @@ import platform.Foundation.serverTrust
  *
  * Test-only — never use in production code.
  */
-internal fun acceptServerPresentedTrust(): (NSURLAuthenticationChallenge) -> NSURLCredential? = { challenge ->
-    if (challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust) {
-        val trust = challenge.protectionSpace.serverTrust
-        if (trust != null) {
-            NSURLCredential.credentialForTrust(trust)
+internal fun acceptServerPresentedTrust(): (NSURLAuthenticationChallenge) -> NSURLCredential? =
+    { challenge ->
+        if (challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust) {
+            val trust = challenge.protectionSpace.serverTrust
+            if (trust != null) {
+                NSURLCredential.credentialForTrust(trust)
+            } else {
+                null
+            }
         } else {
             null
         }
-    } else {
-        null
     }
-}
