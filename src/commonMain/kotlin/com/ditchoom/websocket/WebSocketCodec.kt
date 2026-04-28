@@ -30,6 +30,7 @@ import com.ditchoom.websocket.frame.WsFrame
 import com.ditchoom.websocket.frame.WsFrameCodec
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
+import com.ditchoom.websocket.frame.WsFraming
 import com.ditchoom.websocket.frame.WsMaskingKey
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import kotlinx.coroutines.CoroutineName
@@ -166,8 +167,11 @@ internal class WebSocketCodec<B>(
     /**
      * Reads the next complete frame from the stream.
      *
-     * Manual peekFrameSize: determines header size via [WsFrameHeaderCodec.peekFrameSize],
-     * peeks payload length from byte2, waits for all bytes, then parses.
+     * Frame size is peeked via [WsFraming.peekFrameSize], which itself delegates to
+     * [WsFrameHeaderCodec.peekFrameSize] for the variable-length header and adds the
+     * payload length encoded in byte 2 (or its 16/64-bit extension). Once the full
+     * frame is buffered, the header is decoded and the variant constructed directly
+     * with the buffer slice as zero-copy payload.
      *
      * **Ownership:** for data / ping / pong frames, the returned frame's `payload` is the
      * raw frame buffer itself, positioned at payload start with `limit()` set to payload
@@ -177,15 +181,13 @@ internal class WebSocketCodec<B>(
      */
     private suspend fun readNextFrame(): WsFrame? {
         while (coroutineContext.isActive) {
-            // Ensure at least 2 bytes (minimum header)
             if (stream.available() < 2) {
                 stream.peekByte(stream.available())
                 continue
             }
 
-            // Determine header size
-            val headerSize =
-                when (val peek = WsFrameHeaderCodec.peekFrameSize(stream, 0)) {
+            val totalFrameSize =
+                when (val peek = WsFraming.peekFrameSize(stream, 0)) {
                     is PeekResult.NeedsMoreData -> {
                         stream.peekByte(stream.available())
                         continue
@@ -193,27 +195,16 @@ internal class WebSocketCodec<B>(
                     is PeekResult.Size -> peek.bytes
                 }
 
-            // Peek payload length from byte2
-            val byte2 = stream.peekByte(1).toInt() and 0xFF
-            val len7 = byte2 and 0x7F
-            val payloadLength = peekPayloadLength(len7) ?: continue
-            val totalFrameSize = headerSize + payloadLength
-
-            // Wait for complete frame
             if (stream.available() < totalFrameSize) {
                 stream.peekByte(stream.available())
                 continue
             }
 
-            // Zero-copy receive: decode the header, then construct the WsFrame with the
-            // raw frame buffer itself as the payload (position at payload start, limit
-            // at payload end). Ownership moves out via the returned frame.
             val buffer = stream.readBuffer(totalFrameSize)
             var owned = true
             val frame =
                 try {
-                    val header = WsFrameHeaderCodec.decode(buffer)
-                    // buffer.position() is now at payload start; buffer.limit() is at frame end.
+                    val header = WsFrameHeaderCodec.decode(buffer, DecodeContext.Empty)
                     val payloadStart = buffer.position()
                     val payloadEnd = payloadStart + header.payloadLength.toInt()
                     buffer.setLimit(payloadEnd)
@@ -246,13 +237,11 @@ internal class WebSocketCodec<B>(
                                 } else {
                                     null
                                 }
-                            // Close body was fully read; buffer can be freed in the finally.
                             WsFrame.Close(header, body)
                         }
                         else -> throw IllegalArgumentException("Reserved opcode: $op")
                     }
                 } catch (_: IllegalArgumentException) {
-                    // Reserved opcode — protocol error
                     sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
                     closed = true
                     return null
@@ -261,7 +250,6 @@ internal class WebSocketCodec<B>(
                 } catch (
                     @Suppress("TooGenericExceptionCaught") _: Throwable,
                 ) {
-                    // Decode error (e.g., invalid UTF-8 in close reason — JS throws non-Exception errors)
                     sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
                     closed = true
                     return null
@@ -269,9 +257,6 @@ internal class WebSocketCodec<B>(
                     if (owned) buffer.freeIfNeeded()
                 }
 
-            // Post-decode validation: close frame reason must be valid UTF-8.
-            // If readString replaced invalid bytes, re-encoding produces different bytes
-            // than the original wire payload (payloadLength - 2 bytes for status code).
             @Suppress("USELESS_IS_CHECK")
             if (frame is WsFrame.Close && frame.body != null && frame.header.payloadLength > 2) {
                 val reasonByteCount = frame.body.reason.utf8ByteCount()
@@ -287,30 +272,6 @@ internal class WebSocketCodec<B>(
         }
         return null
     }
-
-    private suspend fun peekPayloadLength(len7: Int): Int? =
-        when (len7) {
-            126 -> {
-                if (stream.available() < 4) {
-                    stream.peekByte(stream.available())
-                    return null
-                }
-                stream.peekShort(2).toInt() and 0xFFFF
-            }
-            127 -> {
-                if (stream.available() < 10) {
-                    stream.peekByte(stream.available())
-                    return null
-                }
-                val len64 = stream.peekLong(2)
-                if (len64 > Int.MAX_VALUE || len64 < 0) {
-                    throw com.ditchoom.websocket.frame
-                        .FrameParseException("Payload length out of range: $len64")
-                }
-                len64.toInt()
-            }
-            else -> len7
-        }
 
     private suspend fun handleControlFrame(frame: WsFrame) {
         when (frame) {

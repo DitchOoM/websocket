@@ -2,6 +2,8 @@ package com.ditchoom.websocket.frame
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.codec.DecodeContext
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.stream.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -85,7 +87,7 @@ class WsCodecTest {
                 masked = false,
             )
         val buf = allocate(2)
-        WsFrameHeaderCodec.encode(buf, header)
+        WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
         buf.resetForRead()
 
         // byte1: FIN=1, opcode=0x1 → 0x81
@@ -94,7 +96,7 @@ class WsCodecTest {
         assertEquals(0x05.toByte(), buf.get(1))
 
         buf.position(0)
-        val decoded = WsFrameHeaderCodec.decode(buf)
+        val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
         assertTrue(decoded.byte1.fin)
         assertEquals(com.ditchoom.websocket.Opcode.Text, decoded.byte1.opcode)
         assertEquals(5L, decoded.payloadLength)
@@ -113,10 +115,10 @@ class WsCodecTest {
                 maskingKey = maskKey,
             )
         val buf = allocate(6) // byte1 + byte2 + 4-byte mask
-        WsFrameHeaderCodec.encode(buf, header)
+        WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
         buf.resetForRead()
 
-        val decoded = WsFrameHeaderCodec.decode(buf)
+        val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
         assertEquals(com.ditchoom.websocket.Opcode.Binary, decoded.byte1.opcode)
         assertEquals(10L, decoded.payloadLength)
         assertTrue(decoded.masked)
@@ -133,10 +135,10 @@ class WsCodecTest {
                 masked = false,
             )
         val buf = allocate(4) // byte1 + byte2(126) + 2-byte length
-        WsFrameHeaderCodec.encode(buf, header)
+        WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
         buf.resetForRead()
 
-        val decoded = WsFrameHeaderCodec.decode(buf)
+        val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
         assertEquals(300L, decoded.payloadLength)
     }
 
@@ -149,10 +151,10 @@ class WsCodecTest {
                 masked = false,
             )
         val buf = allocate(10) // byte1 + byte2(127) + 8-byte length
-        WsFrameHeaderCodec.encode(buf, header)
+        WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
         buf.resetForRead()
 
-        val decoded = WsFrameHeaderCodec.decode(buf)
+        val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
         assertEquals(70000L, decoded.payloadLength)
     }
 
@@ -165,14 +167,14 @@ class WsCodecTest {
                 masked = false,
             )
         val buf = allocate(2)
-        WsFrameHeaderCodec.encode(buf, header)
+        WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
         buf.resetForRead()
 
         // byte1: FIN=1, RSV1=1, opcode=0x1 → 0xC1
         assertEquals(0xC1.toByte(), buf.get(0))
 
         buf.position(0)
-        val decoded = WsFrameHeaderCodec.decode(buf)
+        val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
         assertTrue(decoded.byte1.rsv1)
     }
 
@@ -186,9 +188,9 @@ class WsCodecTest {
                     masked = false,
                 )
             val buf = allocate(2)
-            WsFrameHeaderCodec.encode(buf, header)
+            WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
             buf.resetForRead()
-            val decoded = WsFrameHeaderCodec.decode(buf)
+            val decoded = WsFrameHeaderCodec.decode(buf, DecodeContext.Empty)
             assertEquals(opcode, decoded.byte1.opcode, "Opcode $opcode round-trip failed")
         }
     }

@@ -5,6 +5,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -257,7 +258,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 2)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.writeBytes("Hi".encodeToByteArray())
         buffer.resetForRead()
 
@@ -276,7 +277,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 2)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.writeShort(1000.toShort())
         buffer.resetForRead()
 
@@ -295,7 +296,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 0)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.resetForRead()
 
         assertEquals(0xC1.toByte(), buffer.get(0)) // FIN + RSV1 + Text
@@ -312,7 +313,7 @@ class WsFrameWireTest {
                 maskingKey = mask,
             )
         val buffer = allocEncode(header, 2)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.writeBytes("Hi".encodeToByteArray())
         buffer.resetForRead()
 
@@ -336,7 +337,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 0) // don't write payload, just header
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.resetForRead()
 
         assertEquals(0x82.toByte(), buffer.get(0)) // FIN + Binary
@@ -354,7 +355,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 0)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.resetForRead()
 
         assertEquals(0x82.toByte(), buffer.get(0)) // FIN + Binary
@@ -379,7 +380,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 0)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.resetForRead()
 
         assertEquals(0x01.toByte(), buffer.get(0)) // FIN=0, Text
@@ -398,7 +399,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, 5)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.writeBytes("Hello".encodeToByteArray())
         buffer.resetForRead()
 
@@ -419,7 +420,7 @@ class WsFrameWireTest {
                 masked = false,
             )
         val buffer = allocEncode(header, payloadSize)
-        WsFrameHeaderCodec.encode(buffer, header)
+        WsFrameHeaderCodec.encode(buffer, header, EncodeContext.Empty)
         buffer.writeShort(1001.toShort())
         buffer.writeBytes(reasonBytes)
         buffer.resetForRead()

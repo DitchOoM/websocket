@@ -4,6 +4,7 @@ import agentName
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import com.ditchoom.websocket.frame.FrameHeaderByte1
@@ -170,7 +171,7 @@ class ProfilingTest {
                     maskingKey = mask,
                 )
             val buf = BufferFactory.Default.allocate(header.wireSize + payload.remaining()) as PlatformBuffer
-            WsFrameHeaderCodec.encode(buf, header)
+            WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
             buf.xorMaskCopy(payload, mask.raw.toInt())
             payload.position(0)
         }

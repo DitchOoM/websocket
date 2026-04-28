@@ -6,5 +6,4 @@ import com.ditchoom.buffer.flow.Connection
 internal actual suspend fun <B> connectBrowserPath(
     connectionOptions: WebSocketConnectionOptions,
     binaryCodec: Codec<B>,
-): Connection<WebSocketMessage<B>> =
-    throw UnsupportedOperationException("Browser WebSocket not available on Linux")
+): Connection<WebSocketMessage<B>> = throw UnsupportedOperationException("Browser WebSocket not available on Linux")

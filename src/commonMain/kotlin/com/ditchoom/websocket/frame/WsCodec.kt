@@ -6,8 +6,7 @@ import com.ditchoom.buffer.codec.annotations.PacketType
 import com.ditchoom.buffer.codec.annotations.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
-import com.ditchoom.buffer.codec.annotations.WhenRemaining
-import com.ditchoom.buffer.codec.annotations.WhenTrue
+import com.ditchoom.buffer.codec.annotations.When
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
 
@@ -77,7 +76,7 @@ value class FrameHeaderByte1(
  * ```
  *
  * The processor reads this as a single UByte. The boolean properties drive
- * `@WhenTrue` conditionals on the extended length and masking key fields.
+ * `@When` conditionals on the extended length and masking key fields.
  */
 @JvmInline
 value class WsHeaderByte2(
@@ -116,7 +115,7 @@ value class WsHeaderByte2(
 /**
  * WebSocket frame header per RFC 6455 Section 5.2.
  *
- * All fields are fixed-size primitives or `@WhenTrue` conditionals on value class
+ * All fields are fixed-size primitives or `@When` conditionals on value class
  * properties, so the KSP processor can generate `encode`, `decode`, `peekFrameSize`,
  * and `sizeOf` automatically — no custom codec needed.
  *
@@ -145,9 +144,9 @@ value class WsHeaderByte2(
 data class WsFrameHeader(
     val byte1: FrameHeaderByte1,
     val byte2: WsHeaderByte2,
-    @WhenTrue("byte2.extended16") val extendedLength16: UShort? = null,
-    @WhenTrue("byte2.extended64") val extendedLength64: Long? = null,
-    @WhenTrue("byte2.masked") val maskingKey: WsMaskingKey? = null,
+    @When("byte2.extended16") val extendedLength16: UShort? = null,
+    @When("byte2.extended64") val extendedLength64: Long? = null,
+    @When("byte2.masked") val maskingKey: WsMaskingKey? = null,
 ) {
     /** Resolved payload length regardless of encoding */
     val payloadLength: Long
@@ -250,7 +249,7 @@ sealed interface WsFrame {
     @ProtocolMessage
     data class Close(
         override val header: WsFrameHeader,
-        @WhenRemaining(2) val body: WsCloseBody? = null,
+        @When("remaining >= 2") val body: WsCloseBody? = null,
     ) : WsFrame
 
     @PacketType(0x9)

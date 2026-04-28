@@ -14,7 +14,9 @@ internal actual val supportsDeflateContextTakeover: Boolean = true
  * Detect whether we're running in Node.js (vs. browser).
  */
 internal val isNodeJs: Boolean =
-    js("typeof process !== 'undefined' && typeof process.versions !== 'undefined' && typeof process.versions.node !== 'undefined'") as Boolean
+    js(
+        "typeof process !== 'undefined' && typeof process.versions !== 'undefined' && typeof process.versions.node !== 'undefined'",
+    ) as Boolean
 
 /**
  * Create a browser-native WebSocket connection via [BrowserWebSocketController].
@@ -49,5 +51,4 @@ suspend fun <B> connectBrowserWebSocket(
 suspend fun connectBrowserWebSocket(
     connectionOptions: WebSocketConnectionOptions,
     parentScope: CoroutineScope? = null,
-): Connection<WebSocketMessage<Unit>> =
-    connectBrowserWebSocket(connectionOptions, EmptyCodec, parentScope)
+): Connection<WebSocketMessage<Unit>> = connectBrowserWebSocket(connectionOptions, EmptyCodec, parentScope)
