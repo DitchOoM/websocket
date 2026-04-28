@@ -219,7 +219,7 @@ data class WsCloseBody(
  * [Data] is a sealed sub-interface giving typed `.payload` access without
  * casting when the assembler handles data/control frames.
  */
-@DispatchOn(WsFrameHeader::class)
+@DispatchOn(WsFrameHeader::class, framing = WsFraming::class)
 @ProtocolMessage
 sealed interface WsFrame {
     val header: WsFrameHeader
