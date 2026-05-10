@@ -16,8 +16,7 @@ import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
-import com.ditchoom.buffer.stream.PeekResult
-import com.ditchoom.buffer.utf8ByteCount
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.frame.AssemblyResult
@@ -33,6 +32,7 @@ import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsFraming
 import com.ditchoom.websocket.frame.WsMaskingKey
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
+import com.ditchoom.websocket.internal.truncateUtf8
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -192,7 +192,9 @@ internal class WebSocketCodec<B>(
                         stream.peekByte(stream.available())
                         continue
                     }
-                    is PeekResult.Size -> peek.bytes
+                    is PeekResult.Complete -> peek.bytes
+                    PeekResult.NoFraming ->
+                        error("WsFraming.peekFrameSize must not return NoFraming")
                 }
 
             if (stream.available() < totalFrameSize) {
@@ -257,16 +259,11 @@ internal class WebSocketCodec<B>(
                     if (owned) buffer.freeIfNeeded()
                 }
 
-            @Suppress("USELESS_IS_CHECK")
-            if (frame is WsFrame.Close && frame.body != null && frame.header.payloadLength > 2) {
-                val reasonByteCount = frame.body.reason.utf8ByteCount()
-                val expectedByteCount = frame.header.payloadLength.toInt() - 2
-                if (reasonByteCount != expectedByteCount) {
-                    sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid UTF-8 in close reason")
-                    closed = true
-                    return null
-                }
-            }
+            // Malformed UTF-8 in the close reason is rejected at the codec layer
+            // by Charset.UTF8 strict decode — the catch block above turns that
+            // into a CloseCode.INVALID_PAYLOAD frame. No second post-decode
+            // round-trip check is needed (and it would walk the string a third
+            // time, after decode and before re-emit).
 
             return frame
         }
@@ -506,17 +503,19 @@ internal class WebSocketCodec<B>(
         statusCode: UShort? = null,
         reason: String? = null,
     ): ReadBuffer {
+        // RFC 6455 §5.5: control-frame payload ≤ 125 bytes; minus the 2-byte status
+        // code ⇒ ≤ 123 bytes for the reason. truncateUtf8 walks the reason once,
+        // returns a codepoint-aligned prefix that fits in 123 UTF-8 bytes, and
+        // surfaces that prefix's exact byte count — feeding both the WsCloseBody
+        // and the wire-header sizing without a second walk.
+        val truncation = (reason ?: "").truncateUtf8(123)
         val body =
             if (statusCode != null) {
-                val truncated = if (reason != null && reason.length > 123) reason.substring(0, 123) else reason
-                // Cap reason bytes at 123 (RFC 6455: control payload ≤ 125, minus 2 for status code).
-                val reasonStr = truncated ?: ""
-                val cappedReason = if (reasonStr.utf8ByteCount() > 123) reasonStr.substring(0, 123) else reasonStr
-                WsCloseBody(CloseCode(statusCode), cappedReason)
+                WsCloseBody(CloseCode(statusCode), truncation.text)
             } else {
                 null
             }
-        val payloadSize = if (body != null) 2 + body.reason.utf8ByteCount() else 0
+        val payloadSize = if (body != null) 2 + truncation.byteSize else 0
         return encodeWsFrame(
             WsFrame.Close(
                 header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Close, payloadSize),

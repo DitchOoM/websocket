@@ -5,7 +5,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.buffer.stream.PeekResult
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -210,7 +210,7 @@ class WsCodecTest {
         stream.append(buf)
 
         val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
-        assertIs<PeekResult.Size>(result)
+        assertIs<PeekResult.Complete>(result)
         assertEquals(2, result.bytes)
     }
 
@@ -226,7 +226,7 @@ class WsCodecTest {
         stream.append(buf)
 
         val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
-        assertIs<PeekResult.Size>(result)
+        assertIs<PeekResult.Complete>(result)
         assertEquals(6, result.bytes)
     }
 
@@ -242,7 +242,7 @@ class WsCodecTest {
         stream.append(buf)
 
         val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
-        assertIs<PeekResult.Size>(result)
+        assertIs<PeekResult.Complete>(result)
         assertEquals(4, result.bytes)
     }
 
@@ -259,7 +259,7 @@ class WsCodecTest {
         stream.append(buf)
 
         val result = WsFrameHeaderCodec.peekFrameSize(stream, 0)
-        assertIs<PeekResult.Size>(result)
+        assertIs<PeekResult.Complete>(result)
         assertEquals(14, result.bytes)
     }
 

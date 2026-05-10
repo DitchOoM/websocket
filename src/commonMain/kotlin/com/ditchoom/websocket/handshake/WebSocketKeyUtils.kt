@@ -1,10 +1,9 @@
 package com.ditchoom.websocket.handshake
 
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.Sha1
 import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.utf8ByteCount
-import com.ditchoom.buffer.writeSha1Of
+import com.ditchoom.websocket.internal.Sha1
+import com.ditchoom.websocket.internal.writeSha1Of
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
@@ -46,7 +45,9 @@ fun generateWebSocketKey(): String = platformGenerateKey()
 @OptIn(ExperimentalEncodingApi::class)
 fun computeAcceptKey(clientKey: String): String {
     val concatenated = clientKey + WEBSOCKET_GUID
-    val input = BufferFactory.managed().allocate(concatenated.utf8ByteCount())
+    // clientKey is base64 (ASCII) and WEBSOCKET_GUID is ASCII, so character count
+    // equals UTF-8 byte count — no codepoint walk needed.
+    val input = BufferFactory.managed().allocate(concatenated.length)
     input.writeString(concatenated)
     input.resetForRead()
 

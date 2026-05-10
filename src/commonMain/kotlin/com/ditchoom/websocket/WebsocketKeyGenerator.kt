@@ -2,7 +2,7 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.managed
-import com.ditchoom.buffer.writeRandomBytes
+import com.ditchoom.websocket.internal.writeRandomBytes
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 

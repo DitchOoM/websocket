@@ -293,6 +293,7 @@ data class AssembledMessage(
  * This value class provides zero-allocation overhead for close code handling.
  */
 @JvmInline
+@com.ditchoom.buffer.codec.annotations.ProtocolMessage
 value class CloseCode(
     val code: UShort,
 ) {
