@@ -5,6 +5,7 @@ import com.ditchoom.buffer.ByteOrder
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.codec.DecodeException
 import com.ditchoom.buffer.codec.EncodeContext
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
@@ -34,9 +35,9 @@ class WsFrameWireTest {
         val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
-        assertTrue(frame.header.byte1.fin)
-        assertEquals(Opcode.Text, frame.header.byte1.opcode)
-        assertEquals(5, frame.header.payloadLength.toInt())
+        assertTrue(frame.byte1.fin)
+        assertEquals(Opcode.Text, frame.byte1.opcode)
+        assertEquals(5, frame.payloadLength.toInt())
         assertEquals("Hello", (frame as WsFrame.Text<*>).payload.let { (it as TestPayload).text })
     }
 
@@ -46,7 +47,7 @@ class WsFrameWireTest {
         val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
-        assertEquals(0, frame.header.payloadLength.toInt())
+        assertEquals(0, frame.payloadLength.toInt())
         assertEquals("", (frame as WsFrame.Text<*>).payload.let { (it as TestPayload).text })
     }
 
@@ -56,7 +57,7 @@ class WsFrameWireTest {
         val frame = decodeSkipPayload(buffer)
 
         assertTrue(frame is WsFrame.Binary<*>)
-        assertEquals(3, frame.header.payloadLength.toInt())
+        assertEquals(3, frame.payloadLength.toInt())
     }
 
     @Test
@@ -65,7 +66,7 @@ class WsFrameWireTest {
         val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Text<*>)
-        assertEquals(false, frame.header.byte1.fin)
+        assertEquals(false, frame.byte1.fin)
     }
 
     @Test
@@ -74,7 +75,7 @@ class WsFrameWireTest {
         val frame = decodeTestFrame(buffer)
 
         assertTrue(frame is WsFrame.Continuation<*>)
-        assertTrue(frame.header.byte1.fin)
+        assertTrue(frame.byte1.fin)
     }
 
     // ========================================================================
@@ -88,7 +89,7 @@ class WsFrameWireTest {
         val buffer = buf(header + payload)
         val frame = decodeSkipPayload(buffer)
 
-        assertEquals(126, frame.header.payloadLength.toInt())
+        assertEquals(126, frame.payloadLength.toInt())
     }
 
     @Test
@@ -98,7 +99,7 @@ class WsFrameWireTest {
         val buffer = buf(header + payload)
         val frame = decodeSkipPayload(buffer)
 
-        assertEquals(300, frame.header.payloadLength.toInt())
+        assertEquals(300, frame.payloadLength.toInt())
     }
 
     @Test
@@ -120,7 +121,7 @@ class WsFrameWireTest {
         val buffer = buf(header + payload)
         val frame = decodeSkipPayload(buffer)
 
-        assertEquals(70000, frame.header.payloadLength.toInt())
+        assertEquals(70000, frame.payloadLength.toInt())
     }
 
     // ========================================================================
@@ -132,9 +133,9 @@ class WsFrameWireTest {
         val buffer = buf(0xC1, 0x00) // FIN=1, RSV1=1, Text
         val frame = decodeTestFrame(buffer)
 
-        assertTrue(frame.header.byte1.rsv1)
-        assertEquals(false, frame.header.byte1.rsv2)
-        assertEquals(false, frame.header.byte1.rsv3)
+        assertTrue(frame.byte1.rsv1)
+        assertEquals(false, frame.byte1.rsv2)
+        assertEquals(false, frame.byte1.rsv3)
     }
 
     @Test
@@ -142,9 +143,9 @@ class WsFrameWireTest {
         val buffer = buf(0xF1, 0x00) // FIN=1, RSV1=1, RSV2=1, RSV3=1, Text
         val frame = decodeTestFrame(buffer)
 
-        assertTrue(frame.header.byte1.rsv1)
-        assertTrue(frame.header.byte1.rsv2)
-        assertTrue(frame.header.byte1.rsv3)
+        assertTrue(frame.byte1.rsv1)
+        assertTrue(frame.byte1.rsv2)
+        assertTrue(frame.byte1.rsv3)
     }
 
     // ========================================================================
@@ -232,7 +233,7 @@ class WsFrameWireTest {
     @Test
     fun decodeReservedOpcode0x3Throws() {
         val buffer = buf(0x83, 0x00) // FIN=1, opcode=3
-        assertFailsWith<IllegalArgumentException> {
+        assertFailsWith<DecodeException> {
             decodeTestFrame(buffer)
         }
     }
@@ -240,7 +241,7 @@ class WsFrameWireTest {
     @Test
     fun decodeReservedOpcode0xBThrows() {
         val buffer = buf(0x8B, 0x00) // FIN=1, opcode=0xB
-        assertFailsWith<IllegalArgumentException> {
+        assertFailsWith<DecodeException> {
             decodeTestFrame(buffer)
         }
     }

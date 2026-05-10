@@ -2,11 +2,13 @@ package com.ditchoom.websocket
 
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
+import com.ditchoom.buffer.pool.BufferPool
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadResult
@@ -150,12 +152,13 @@ private fun buildCompressionConfig(
     val needsCustomWindowBits = negotiatedClientWindowBits in 8..14
     val outgoingEnabled = !needsCustomWindowBits || supportsCustomDeflateWindowBits
 
+    val allocator = bufferFactory.toCompressionAllocator()
     val compressor =
         if (outgoingEnabled) {
             StreamingCompressor.create(
                 algorithm = CompressionAlgorithm.Raw,
                 level = CompressionLevel.Default,
-                bufferFactory = bufferFactory,
+                allocator = allocator,
                 windowBits = if (negotiatedClientWindowBits in 8..15) -negotiatedClientWindowBits else 0,
             )
         } else {
@@ -163,7 +166,7 @@ private fun buildCompressionConfig(
         }
 
     val decompressor =
-        StreamingDecompressor.create(CompressionAlgorithm.Raw, bufferFactory = bufferFactory)
+        StreamingDecompressor.create(CompressionAlgorithm.Raw, allocator = allocator)
 
     val serverNoContextTakeover = response.compressionParams?.serverNoContextTakeover ?: false
     val clientNoContextTakeover =
@@ -226,6 +229,24 @@ internal fun wrapException(e: Exception): Exception =
         is WebSocketException -> e
         is HandshakeException -> WebSocketException.HandshakeRejected(e.message ?: "Handshake failed", cause = e)
         else -> WebSocketException.TransportFailed(e.message ?: "Transport error", e)
+    }
+
+/**
+ * Best-effort mapping from [BufferFactory] (websocket's general-purpose allocation
+ * strategy) to [BufferAllocator] (compression's allocation strategy):
+ *
+ * - If the user supplied a [BufferPool], reuse it via [BufferAllocator.FromPool] so
+ *   compression output buffers participate in the same pooling discipline as the
+ *   frame buffers.
+ * - Otherwise fall through to [BufferAllocator.Default] (direct memory). The current
+ *   buffer-compression API doesn't expose a generic `BufferFactory`-backed variant,
+ *   and `BufferAllocator` is `sealed` so we can't add one from here without an
+ *   upstream change.
+ */
+private fun BufferFactory.toCompressionAllocator(): BufferAllocator =
+    when (this) {
+        is BufferPool -> BufferAllocator.FromPool(this)
+        else -> BufferAllocator.Default
     }
 
 /**

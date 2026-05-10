@@ -20,17 +20,27 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.frame.AssemblyResult
+import com.ditchoom.websocket.frame.BufferPayload
+import com.ditchoom.websocket.frame.BufferPayloadCodec
 import com.ditchoom.websocket.frame.CloseCode
 import com.ditchoom.websocket.frame.FrameHeaderByte1
 import com.ditchoom.websocket.frame.MessageAssembler
 import com.ditchoom.websocket.frame.WsCloseBody
-import com.ditchoom.websocket.frame.WsCloseBodyCodec
 import com.ditchoom.websocket.frame.WsFrame
 import com.ditchoom.websocket.frame.WsFrameCodec
 import com.ditchoom.websocket.frame.WsFrameHeader
 import com.ditchoom.websocket.frame.WsFrameHeaderCodec
 import com.ditchoom.websocket.frame.WsFraming
 import com.ditchoom.websocket.frame.WsMaskingKey
+import com.ditchoom.websocket.frame.headerWireSize
+import com.ditchoom.websocket.frame.maskingKey
+import com.ditchoom.websocket.frame.payloadLength
+import com.ditchoom.websocket.frame.toBinaryFrame
+import com.ditchoom.websocket.frame.toCloseFrame
+import com.ditchoom.websocket.frame.toContinuationFrame
+import com.ditchoom.websocket.frame.toPingFrame
+import com.ditchoom.websocket.frame.toPongFrame
+import com.ditchoom.websocket.frame.toTextFrame
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import com.ditchoom.websocket.internal.truncateUtf8
 import kotlinx.coroutines.CoroutineName
@@ -98,6 +108,14 @@ internal class WebSocketCodec<B>(
     private var closed = false
     private var serverInitiatedClose = false
     private val stringDecoder = StreamingStringDecoder()
+
+    /**
+     * Per-frame codec parameterized to the wire-side payload type ([BufferPayload]).
+     * The user-supplied [binaryCodec] / [StringCodec] runs *after* fragment reassembly
+     * (in [emitMessage]) — fragments may split mid-codepoint or mid-record, so user
+     * decode happens against the assembled message, not per-frame.
+     */
+    private val frameCodec: WsFrameCodec<BufferPayload> = WsFrameCodec(BufferPayloadCodec)
 
     private val incomingMessageChannel = Channel<MessageEnvelope<B>>(Channel.UNLIMITED)
 
@@ -167,19 +185,21 @@ internal class WebSocketCodec<B>(
     /**
      * Reads the next complete frame from the stream.
      *
-     * Frame size is peeked via [WsFraming.peekFrameSize], which itself delegates to
-     * [WsFrameHeaderCodec.peekFrameSize] for the variable-length header and adds the
-     * payload length encoded in byte 2 (or its 16/64-bit extension). Once the full
-     * frame is buffered, the header is decoded and the variant constructed directly
-     * with the buffer slice as zero-copy payload.
+     * Frame size is peeked via [WsFraming.peekFrameSize], which delegates to the
+     * variable-length header walk and adds the payload length encoded in byte 2 (or its
+     * 16/64-bit extension). Once the full frame is buffered we hand the bounded slice to
+     * [frameCodec] (a `WsFrameCodec(BufferPayloadCodec)`) — the generated codec reads
+     * the header, dispatches on opcode, and aliases the payload window via
+     * [BufferPayloadCodec.decode] for data / ping / pong variants (zero-copy). The
+     * structured close body is decoded by the generated [com.ditchoom.websocket.frame.CloseCodec].
      *
-     * **Ownership:** for data / ping / pong frames, the returned frame's `payload` is the
-     * raw frame buffer itself, positioned at payload start with `limit()` set to payload
-     * end. Ownership transfers to the caller (MessageAssembler or handleControlFrame),
-     * which must eventually free it. On decode failure or close-frame path the buffer is
-     * freed here via the `owned` flag.
+     * **Ownership:** for data / ping / pong frames the returned frame's
+     * `payload.buffer` aliases the raw frame buffer (position = payload start,
+     * limit = payload end). Ownership transfers to the caller (MessageAssembler or
+     * handleControlFrame), which must eventually free it. On decode failure or
+     * close-frame path the buffer is freed here via the `owned` flag.
      */
-    private suspend fun readNextFrame(): WsFrame? {
+    private suspend fun readNextFrame(): WsFrame<BufferPayload>? {
         while (coroutineContext.isActive) {
             if (stream.available() < 2) {
                 stream.peekByte(stream.available())
@@ -206,45 +226,23 @@ internal class WebSocketCodec<B>(
             var owned = true
             val frame =
                 try {
-                    val header = WsFrameHeaderCodec.decode(buffer, DecodeContext.Empty)
-                    val payloadStart = buffer.position()
-                    val payloadEnd = payloadStart + header.payloadLength.toInt()
-                    buffer.setLimit(payloadEnd)
-
-                    when (val op = header.byte1.opcode) {
-                        Opcode.Text -> {
-                            owned = false
-                            WsFrame.Text(header, buffer)
-                        }
-                        Opcode.Binary -> {
-                            owned = false
-                            WsFrame.Binary(header, buffer)
-                        }
-                        Opcode.Continuation -> {
-                            owned = false
-                            WsFrame.Continuation(header, buffer)
-                        }
-                        Opcode.Ping -> {
-                            owned = false
-                            WsFrame.Ping(header, buffer)
-                        }
-                        Opcode.Pong -> {
-                            owned = false
-                            WsFrame.Pong(header, buffer)
-                        }
-                        Opcode.Close -> {
-                            val body =
-                                if (buffer.remaining() >= 2) {
-                                    WsCloseBodyCodec.decode(buffer, DecodeContext.Empty)
-                                } else {
-                                    null
-                                }
-                            WsFrame.Close(header, body)
-                        }
-                        else -> throw IllegalArgumentException("Reserved opcode: $op")
+                    val decoded = frameCodec.decode(buffer, DecodeContext.Empty)
+                    if (decoded !is WsFrame.Close) {
+                        // Data / Ping / Pong: payload aliases the frame buffer; transfer
+                        // ownership downstream so MessageAssembler / handleControlFrame
+                        // can read from it before freeing.
+                        owned = false
                     }
-                } catch (_: IllegalArgumentException) {
-                    sendCloseFrame(CloseCode.PROTOCOL_ERROR.code, "Reserved opcode")
+                    decoded
+                } catch (e: com.ditchoom.buffer.codec.DecodeException) {
+                    val isReservedOpcode = e.fieldPath == "WsFrame.discriminator"
+                    val (code, reason) =
+                        if (isReservedOpcode) {
+                            CloseCode.PROTOCOL_ERROR to "Reserved opcode"
+                        } else {
+                            CloseCode.INVALID_PAYLOAD to "Invalid payload data"
+                        }
+                    sendCloseFrame(code.code, reason)
                     closed = true
                     return null
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -270,20 +268,20 @@ internal class WebSocketCodec<B>(
         return null
     }
 
-    private suspend fun handleControlFrame(frame: WsFrame) {
+    private suspend fun handleControlFrame(frame: WsFrame<BufferPayload>) {
         when (frame) {
-            is WsFrame.Ping<*> -> {
-                val payload = frame.payload as ReadBuffer
+            is WsFrame.Ping<BufferPayload> -> {
+                val payload = frame.payload.buffer
                 val payloadStart = payload.position()
                 // Echo payload bytes back as Pong (RFC 6455 requires identical application data).
-                writePongFrameBytes(if (frame.header.payloadLength > 0) payload else EMPTY_BUFFER)
+                writePongFrameBytes(if (frame.payloadLength > 0) payload else EMPTY_BUFFER)
                 // Decode payload as UTF-8 String for the user-facing Ping message.
                 // RFC 6455 caps control frame app data at 125 bytes; it's usually empty or a small
                 // identifier, so a best-effort UTF-8 decode is fine. If bytes aren't UTF-8, we
                 // still pass through without throwing (readString replaces invalid sequences).
                 payload.position(payloadStart)
                 val appData =
-                    if (frame.header.payloadLength > 0) {
+                    if (frame.payloadLength > 0) {
                         payload.readString(payload.remaining(), Charset.UTF8)
                     } else {
                         ""
@@ -291,10 +289,10 @@ internal class WebSocketCodec<B>(
                 payload.freeIfNeeded()
                 incomingMessageChannel.trySend(MessageEnvelope(WebSocketMessage.Ping(appData)))
             }
-            is WsFrame.Pong<*> -> {
-                val payload = frame.payload as ReadBuffer
+            is WsFrame.Pong<BufferPayload> -> {
+                val payload = frame.payload.buffer
                 val appData =
-                    if (frame.header.payloadLength > 0) {
+                    if (frame.payloadLength > 0) {
                         payload.readString(payload.remaining(), Charset.UTF8)
                     } else {
                         ""
@@ -517,16 +515,14 @@ internal class WebSocketCodec<B>(
             }
         val payloadSize = if (body != null) 2 + truncation.byteSize else 0
         return encodeWsFrame(
-            WsFrame.Close(
-                header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Close, payloadSize),
-                body = body,
-            ),
+            buildMaskedHeader(fin = true, rsv1 = false, Opcode.Close, payloadSize)
+                .toCloseFrame(body),
         )
     }
 
     private fun writePingFrame(appData: String = ""): ReadBuffer =
         encodeControlFrameWithAppData(Opcode.Ping, appData) { header, payload ->
-            WsFrame.Ping(header = header, payload = payload)
+            header.toPingFrame(payload)
         }
 
     /** Echoes raw payload bytes (used by ping handler where the RFC requires identical app data). */
@@ -534,10 +530,8 @@ internal class WebSocketCodec<B>(
         val truncated = if (payloadData.remaining() > 125) payloadData.readBytes(125) else payloadData
         val frame =
             encodeWsFrame(
-                WsFrame.Pong(
-                    header = buildMaskedHeader(fin = true, rsv1 = false, Opcode.Pong, truncated.remaining()),
-                    payload = truncated,
-                ),
+                buildMaskedHeader(fin = true, rsv1 = false, Opcode.Pong, truncated.remaining())
+                    .toPongFrame(BufferPayload(truncated)),
             )
         writeToTransport(frame)
         frame.freeIfNeeded()
@@ -545,17 +539,17 @@ internal class WebSocketCodec<B>(
 
     private fun encodePongFrame(appData: String = ""): ReadBuffer =
         encodeControlFrameWithAppData(Opcode.Pong, appData) { header, payload ->
-            WsFrame.Pong(header = header, payload = payload)
+            header.toPongFrame(payload)
         }
 
     private inline fun encodeControlFrameWithAppData(
         opcode: Opcode,
         appData: String,
-        build: (WsFrameHeader, ReadBuffer) -> WsFrame,
+        build: (WsFrameHeader, BufferPayload) -> WsFrame<BufferPayload>,
     ): ReadBuffer {
         if (appData.isEmpty()) {
             return encodeWsFrame(
-                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, 0), EMPTY_BUFFER),
+                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, 0), BufferPayload(EMPTY_BUFFER)),
             )
         }
         // Pessimistic UTF-8 allocation (3 bytes/char BMP); real size measured after write.
@@ -566,7 +560,7 @@ internal class WebSocketCodec<B>(
         val truncated = if (scratch.remaining() > 125) scratch.readBytes(125) else scratch
         val frame =
             encodeWsFrame(
-                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, truncated.remaining()), truncated),
+                build(buildMaskedHeader(fin = true, rsv1 = false, opcode, truncated.remaining()), BufferPayload(truncated)),
             )
         scratch.freeIfNeeded()
         return frame
@@ -614,13 +608,16 @@ internal class WebSocketCodec<B>(
         fin: Boolean,
         rsv1: Boolean,
         payload: ReadBuffer,
-    ): WsFrame =
-        when (opcode) {
-            Opcode.Text -> WsFrame.Text(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
-            Opcode.Binary -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
-            Opcode.Continuation -> WsFrame.Continuation(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
-            else -> WsFrame.Binary(buildMaskedHeader(fin, rsv1, opcode, payload.remaining()), payload)
+    ): WsFrame<BufferPayload> {
+        val header = buildMaskedHeader(fin, rsv1, opcode, payload.remaining())
+        val wrapped = BufferPayload(payload)
+        return when (opcode) {
+            Opcode.Text -> header.toTextFrame(wrapped)
+            Opcode.Binary -> header.toBinaryFrame(wrapped)
+            Opcode.Continuation -> header.toContinuationFrame(wrapped)
+            else -> header.toBinaryFrame(wrapped)
         }
+    }
 
     private fun buildMaskedHeader(
         fin: Boolean,
@@ -636,36 +633,25 @@ internal class WebSocketCodec<B>(
         )
 
     /**
-     * Unified encode: uses [WsFrameCodec.encode] for all frame types (including Close),
-     * then XOR-masks the payload region in-place.
+     * Unified encode: lets [frameCodec] (`WsFrameCodec(BufferPayloadCodec)`) write
+     * header + payload bytes for all frame types (including Close, whose CloseCodec
+     * doesn't consult the payload codec), then XOR-masks the payload region in-place.
      */
-    @Suppress("UNCHECKED_CAST")
-    private fun encodeWsFrame(frame: WsFrame): ReadBuffer {
-        val header = frame.header
-        val payloadSize = header.payloadLength.toInt()
-        val buffer = bufferFactory.allocate(header.wireSize + payloadSize) as PlatformBuffer
+    private fun encodeWsFrame(frame: WsFrame<BufferPayload>): ReadBuffer {
+        val payloadSize = frame.payloadLength.toInt()
+        val headerSize = frame.headerWireSize
+        val buffer = bufferFactory.allocate(headerSize + payloadSize) as PlatformBuffer
 
-        val writePayload: (com.ditchoom.buffer.WriteBuffer, Any?) -> Unit = { buf, payload ->
-            if (payload is ReadBuffer) buf.write(payload)
-        }
-
-        WsFrameCodec.encode(
-            buffer,
-            frame,
-            encodeBinaryPayload = writePayload,
-            encodeContinuationPayload = writePayload,
-            encodePingPayload = writePayload,
-            encodePongPayload = writePayload,
-            encodeTextPayload = writePayload,
-        )
+        frameCodec.encode(buffer, frame, EncodeContext.Empty)
 
         // resetForRead sets limit = written position, position = 0
         buffer.resetForRead()
 
         // Post-encode: XOR mask the payload region in-place
-        if (header.maskingKey != null && payloadSize > 0) {
-            buffer.position(header.wireSize)
-            buffer.xorMask(header.maskingKey!!.raw.toInt())
+        val maskingKey = frame.maskingKey
+        if (maskingKey != null && payloadSize > 0) {
+            buffer.position(headerSize)
+            buffer.xorMask(maskingKey.raw.toInt())
             buffer.position(0)
         }
 

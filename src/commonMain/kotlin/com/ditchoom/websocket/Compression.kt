@@ -5,8 +5,6 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
-import com.ditchoom.buffer.compression.decompressScoped
-import com.ditchoom.buffer.compression.flushScoped
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
@@ -125,8 +123,8 @@ internal fun compressSync(
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
     try {
-        compressor.compressUnsafe(buffer) { chunks.add(it) }
-        compressor.flushUnsafe { chunks.add(it) }
+        compressor.compress(buffer) { chunks.add(it) }
+        compressor.flush { chunks.add(it) }
     } catch (t: Throwable) {
         // Any chunks produced before the deflate/flush threw are orphaned —
         // release them before re-throwing so we don't leak direct memory.
@@ -179,10 +177,22 @@ internal fun decompressToStringSync(
     decoder: StreamingStringDecoder,
 ): String {
     val sb = StringBuilder()
-    decompressor.decompressScoped(buffer) { decoder.decode(this, sb) }
+    // Each chunk is library-owned; decode it then free immediately to keep peak memory
+    // at one chunk + the StringBuilder. The current buffer-compression API doesn't
+    // auto-release, so we do it inline (former `decompressScoped`/`flushScoped` shape).
+    decompressor.decompress(buffer) { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
     SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompressScoped(SYNC_FLUSH_MARKER_BUFFER) { decoder.decode(this, sb) }
-    decompressor.flushScoped { decoder.decode(this, sb) }
+    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
+    decompressor.flush { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
     decoder.finish(sb)
     decoder.reset()
     return sb.toString()
@@ -209,11 +219,11 @@ internal fun decompressToBufferSync(
     }
 
     try {
-        decompressor.decompressUnsafe(buffer) { chunk -> addChunk(chunk) }
+        decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
 
         SYNC_FLUSH_MARKER_BUFFER.position(0)
-        decompressor.decompressUnsafe(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-        decompressor.flushUnsafe { chunk -> addChunk(chunk) }
+        decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+        decompressor.flush { chunk -> addChunk(chunk) }
     } catch (t: Throwable) {
         chunks.freeAll()
         throw t

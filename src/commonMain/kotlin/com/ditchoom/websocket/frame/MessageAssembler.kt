@@ -25,7 +25,7 @@ import kotlin.jvm.JvmInline
  * @param compressionEnabled Whether permessage-deflate compression is negotiated.
  *                           When true, RSV1 bit is allowed on data frames.
  */
-class MessageAssembler(
+internal class MessageAssembler(
     private val compressionEnabled: Boolean = false,
     private val bufferFactory: BufferFactory = BufferFactory.managed(),
 ) {
@@ -40,8 +40,8 @@ class MessageAssembler(
      * @param frame The decoded frame to add
      * @return The result of adding this frame
      */
-    fun addFrame(frame: WsFrame): AssemblyResult {
-        val h = frame.header.byte1
+    fun addFrame(frame: WsFrame<BufferPayload>): AssemblyResult {
+        val h = frame.byte1
 
         // RFC 6455 Section 5.2: RSV bits MUST be 0 unless an extension is negotiated.
         // RSV2 and RSV3 are never used by any defined extension.
@@ -90,10 +90,11 @@ class MessageAssembler(
     val isFragmentInProgress: Boolean
         get() = firstFrameOpcode != null
 
-    private fun handleControlFrame(frame: WsFrame): AssemblyResult {
-        val h = frame.header
+    private fun handleControlFrame(frame: WsFrame<BufferPayload>): AssemblyResult {
+        val byte1 = frame.byte1
+        val payloadLength = frame.payloadLength
         // RFC 6455 Section 5.5: Control frames MUST have FIN set
-        if (!h.byte1.fin) {
+        if (!byte1.fin) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "Control frame must have FIN set",
@@ -101,7 +102,7 @@ class MessageAssembler(
         }
 
         // RFC 6455 Section 5.5: Control frames MUST have payload <= 125 bytes
-        if (h.payloadLength > 125) {
+        if (payloadLength > 125) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "Control frame payload exceeds 125 bytes",
@@ -111,7 +112,7 @@ class MessageAssembler(
         // RFC 6455 Section 7.4.1: Validate close frame
         if (frame is WsFrame.Close) {
             // Close payload must be 0 or >= 2 bytes (status code is 2 bytes)
-            if (h.payloadLength == 1L) {
+            if (payloadLength == 1L) {
                 return AssemblyResult.Error(
                     CloseCode.PROTOCOL_ERROR,
                     "Invalid close payload length",
@@ -119,7 +120,7 @@ class MessageAssembler(
             }
             val closeCode = frame.body?.statusCode ?: CloseCode.NO_STATUS_RECEIVED
             // Check if the close code is valid per RFC 6455 Section 7.4.1
-            if (h.payloadLength >= 2 && !closeCode.isValidForWire) {
+            if (payloadLength >= 2 && !closeCode.isValidForWire) {
                 return AssemblyResult.Error(
                     CloseCode.PROTOCOL_ERROR,
                     "Invalid close code: ${closeCode.code}",
@@ -130,11 +131,11 @@ class MessageAssembler(
         return AssemblyResult.ControlFrame(frame)
     }
 
-    private fun handleDataFrame(frame: WsFrame): AssemblyResult =
+    private fun handleDataFrame(frame: WsFrame<BufferPayload>): AssemblyResult =
         when (frame) {
-            is WsFrame.Text<*> -> handleFirstFragment(frame)
-            is WsFrame.Binary<*> -> handleFirstFragment(frame)
-            is WsFrame.Continuation<*> -> handleContinuation(frame)
+            is WsFrame.Text<BufferPayload> -> handleFirstFragment(frame, frame.payload.buffer)
+            is WsFrame.Binary<BufferPayload> -> handleFirstFragment(frame, frame.payload.buffer)
+            is WsFrame.Continuation<BufferPayload> -> handleContinuation(frame)
             is WsFrame.Close, is WsFrame.Ping<*>, is WsFrame.Pong<*> -> {
                 // Should not reach here - control frames handled separately
                 AssemblyResult.Error(
@@ -144,15 +145,12 @@ class MessageAssembler(
             }
         }
 
-    private fun handleFirstFragment(frame: WsFrame): AssemblyResult {
-        val h = frame.header
-        val payload =
-            when (frame) {
-                is WsFrame.Text<*> -> frame.payload as ReadBuffer
-                is WsFrame.Binary<*> -> frame.payload as ReadBuffer
-                else -> return AssemblyResult.Error(CloseCode.PROTOCOL_ERROR, "Unexpected frame type")
-            }
-        val payloadLen = h.payloadLength.toInt()
+    private fun handleFirstFragment(
+        frame: WsFrame<BufferPayload>,
+        payload: ReadBuffer,
+    ): AssemblyResult {
+        val byte1 = frame.byte1
+        val payloadLen = frame.payloadLength.toInt()
 
         // RFC 6455 Section 5.4: Cannot start new message while one is in progress
         if (isFragmentInProgress) {
@@ -162,28 +160,27 @@ class MessageAssembler(
             )
         }
 
-        if (h.byte1.fin) {
+        if (byte1.fin) {
             // Complete message in a single frame (common case)
             return AssemblyResult.CompleteMessage(
                 AssembledMessage(
-                    opcode = h.byte1.opcode,
+                    opcode = byte1.opcode,
                     payload = payload,
-                    compressed = h.byte1.rsv1,
+                    compressed = byte1.rsv1,
                 ),
             )
         }
 
         // Start of fragmented message
-        firstFrameOpcode = h.byte1.opcode
-        firstFrameRsv1 = h.byte1.rsv1
+        firstFrameOpcode = byte1.opcode
+        firstFrameRsv1 = byte1.rsv1
         fragmentBuffers.add(payload)
         totalPayloadSize += payloadLen
 
         return AssemblyResult.NeedMoreFrames
     }
 
-    private fun handleContinuation(frame: WsFrame.Continuation<*>): AssemblyResult {
-        val h = frame.header
+    private fun handleContinuation(frame: WsFrame.Continuation<BufferPayload>): AssemblyResult {
         // RFC 6455 Section 5.4: Continuation without a starting fragment is an error
         if (!isFragmentInProgress) {
             return AssemblyResult.Error(
@@ -192,10 +189,10 @@ class MessageAssembler(
             )
         }
 
-        fragmentBuffers.add(frame.payload as ReadBuffer)
-        totalPayloadSize += h.payloadLength.toInt()
+        fragmentBuffers.add(frame.payload.buffer)
+        totalPayloadSize += frame.payloadLength.toInt()
 
-        if (!h.byte1.fin) {
+        if (!frame.byte1.fin) {
             return AssemblyResult.NeedMoreFrames
         }
 
@@ -235,13 +232,13 @@ class MessageAssembler(
 /**
  * Result of adding a frame to the assembler.
  */
-sealed interface AssemblyResult {
+internal sealed interface AssemblyResult {
     /**
      * A control frame was received. Handle it immediately.
      * Control frames can be interspersed between data frame fragments.
      */
     data class ControlFrame(
-        val frame: WsFrame,
+        val frame: WsFrame<BufferPayload>,
     ) : AssemblyResult
 
     /**
@@ -280,7 +277,7 @@ sealed interface AssemblyResult {
  * @property payload The complete message payload
  * @property compressed Whether the message was compressed (RSV1 bit set on first frame)
  */
-data class AssembledMessage(
+internal data class AssembledMessage(
     val opcode: Opcode,
     val payload: ReadBuffer,
     val compressed: Boolean,
