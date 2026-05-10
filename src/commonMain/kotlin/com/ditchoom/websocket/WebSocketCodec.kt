@@ -9,6 +9,7 @@ import com.ditchoom.buffer.StreamingStringDecoder
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
 import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
@@ -16,7 +17,6 @@ import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
-import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.websocket.codecs.StringCodec
 import com.ditchoom.websocket.frame.AssembledMessage
 import com.ditchoom.websocket.frame.AssemblyResult

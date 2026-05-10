@@ -18,4 +18,5 @@ internal fun decodeTestFrame(buffer: ReadBuffer): WsFrame<TestPayload> = WsFrame
  * where the bytes don't matter or are checked directly). Returns a `WsFrame<BufferPayload>`
  * whose `payload.buffer` is positioned at the start of the payload region.
  */
-internal fun decodeSkipPayload(buffer: ReadBuffer): WsFrame<BufferPayload> = WsFrameCodec(BufferPayloadCodec).decode(buffer, DecodeContext.Empty)
+internal fun decodeSkipPayload(buffer: ReadBuffer): WsFrame<BufferPayload> =
+    WsFrameCodec(BufferPayloadCodec).decode(buffer, DecodeContext.Empty)

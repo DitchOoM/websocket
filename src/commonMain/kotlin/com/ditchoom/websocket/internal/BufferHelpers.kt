@@ -21,7 +21,10 @@ import kotlin.random.Random
  * `utf8ByteCount()` would force: the truncation walk already inspects every codepoint
  * to decide whether to include it, so the running byte total is essentially free.
  */
-internal data class Utf8Truncation(val text: String, val byteSize: Int)
+internal data class Utf8Truncation(
+    val text: String,
+    val byteSize: Int,
+)
 
 /**
  * Returns the longest codepoint-aligned prefix of this string whose UTF-8 encoding

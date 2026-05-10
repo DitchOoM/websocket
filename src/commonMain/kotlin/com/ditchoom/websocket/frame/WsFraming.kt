@@ -62,7 +62,12 @@ object WsFraming : FrameDetector {
         val byte2 = stream.peekByte(baseOffset + 1).toInt()
         val masked = (byte2 and 0x80) != 0
         val len7 = byte2 and 0x7F
-        val extLenBytes = when (len7) { 126 -> 2; 127 -> 8; else -> 0 }
+        val extLenBytes =
+            when (len7) {
+                126 -> 2
+                127 -> 8
+                else -> 0
+            }
         val maskBytes = if (masked) 4 else 0
         val headerSize = 2 + extLenBytes + maskBytes
         if (stream.available() < baseOffset + headerSize) return PeekResult.NeedsMoreData

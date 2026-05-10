@@ -1,5 +1,6 @@
 package com.ditchoom.websocket.frame
 
+import com.ditchoom.buffer.codec.Payload
 import com.ditchoom.buffer.codec.annotations.ProtocolMessage
 import com.ditchoom.buffer.codec.annotations.RemainingBytes
 
@@ -14,4 +15,4 @@ import com.ditchoom.buffer.codec.annotations.RemainingBytes
 @ProtocolMessage
 data class TestPayload(
     @RemainingBytes val text: String,
-)
+) : Payload

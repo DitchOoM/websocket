@@ -5,7 +5,6 @@ import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -31,7 +30,6 @@ import kotlin.test.assertTrue
  */
 class JsBugRegressionTests {
     private val factory = BufferFactory.managed()
-    private val allocator = BufferAllocator.Default
 
     private fun stringToBuffer(s: String): ReadBuffer {
         val buf = factory.allocate(s.length * 3)
@@ -53,8 +51,8 @@ class JsBugRegressionTests {
     @Test
     fun contextTakeover_decompressToString_noAccumulation() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferAllocator.Default)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
 
         try {
@@ -94,8 +92,8 @@ class JsBugRegressionTests {
     @Test
     fun contextTakeover_decompressToBuffer_noAccumulation() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferAllocator.Default)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
 
         try {
             val msg0 = """{"msg":"hello"}"""
@@ -131,8 +129,8 @@ class JsBugRegressionTests {
     @Test
     fun contextTakeover_manyMessages_noAccumulation() {
         if (!supportsStatefulFlush) return
-        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferAllocator.Default)
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val compressor = StreamingCompressor.create(CompressionAlgorithm.Raw, CompressionLevel.Default, BufferFactory.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
         var accumulatedLength = 0
 
@@ -176,10 +174,10 @@ class JsBugRegressionTests {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                BufferAllocator.Default,
+                BufferFactory.Default,
                 windowBits = 9,
             )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
 
         try {
@@ -205,10 +203,10 @@ class JsBugRegressionTests {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                BufferAllocator.Default,
+                BufferFactory.Default,
                 windowBits = -9,
             )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
 
         try {
@@ -234,10 +232,10 @@ class JsBugRegressionTests {
             StreamingCompressor.create(
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
-                BufferAllocator.Default,
+                BufferFactory.Default,
                 windowBits = -9,
             )
-        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferAllocator.Default)
+        val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
 
         try {
