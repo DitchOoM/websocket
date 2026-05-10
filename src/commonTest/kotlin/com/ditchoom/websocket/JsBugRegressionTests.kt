@@ -9,6 +9,7 @@ import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
+import com.ditchoom.buffer.compression.WindowBits
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.compression.supportsStatefulFlush
 import com.ditchoom.buffer.managed
@@ -175,7 +176,7 @@ class JsBugRegressionTests {
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
                 BufferFactory.Default,
-                windowBits = 9,
+                windowBits = WindowBits(9),
             )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
@@ -204,7 +205,7 @@ class JsBugRegressionTests {
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
                 BufferFactory.Default,
-                windowBits = -9,
+                windowBits = WindowBits(9),
             )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()
@@ -233,7 +234,7 @@ class JsBugRegressionTests {
                 CompressionAlgorithm.Raw,
                 CompressionLevel.Default,
                 BufferFactory.Default,
-                windowBits = -9,
+                windowBits = WindowBits(9),
             )
         val decompressor = StreamingDecompressor.create(CompressionAlgorithm.Raw, BufferFactory.Default)
         val decoder = StreamingStringDecoder()

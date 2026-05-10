@@ -6,6 +6,7 @@ import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
+import com.ditchoom.buffer.compression.WindowBits
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
@@ -156,7 +157,7 @@ private fun buildCompressionConfig(
                 algorithm = CompressionAlgorithm.Raw,
                 level = CompressionLevel.Default,
                 bufferFactory = bufferFactory,
-                windowBits = if (negotiatedClientWindowBits in 8..15) -negotiatedClientWindowBits else 0,
+                windowBits = if (negotiatedClientWindowBits in 9..15) WindowBits(negotiatedClientWindowBits) else WindowBits.Default,
             )
         } else {
             null
