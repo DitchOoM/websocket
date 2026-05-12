@@ -196,20 +196,33 @@ internal class MessageAssembler(
             return AssemblyResult.NeedMoreFrames
         }
 
-        // Final fragment - assemble the message.
-        val fragments = if (fragmentBuffers.size > 1) fragmentBuffers.toList() else emptyList()
+        // Final fragment — assemble. assembleMessage frees the per-frame source buffers
+        // before returning, so the caller only ever owns `result.message.payload`.
         val message = assembleMessage()
         fragmentBuffers.clear()
         reset()
-        return AssemblyResult.CompleteMessage(message, fragments)
+        return AssemblyResult.CompleteMessage(message)
     }
 
+    /**
+     * Builds the [AssembledMessage]:
+     * - **Single fragment**: the lone wire-buffer view is the payload — ownership transfers
+     *   to the caller (no free here; the caller frees after running the user codec).
+     * - **Multi-fragment**: allocates a combined buffer, copies each fragment in, then
+     *   **frees the source wire buffers** before returning. The caller only sees and owns
+     *   the combined buffer.
+     * - **Zero-length**: returns [EMPTY_BUFFER]; any retained zero-length wire-buffer views
+     *   are freed here for symmetry.
+     */
     private fun assembleMessage(): AssembledMessage {
         val payload =
             when {
                 fragmentBuffers.size == 1 -> fragmentBuffers[0]
-                totalPayloadSize == 0 -> EMPTY_BUFFER
-                else -> combineBuffers()
+                totalPayloadSize == 0 -> {
+                    fragmentBuffers.freeAll()
+                    EMPTY_BUFFER
+                }
+                else -> combineBuffers().also { fragmentBuffers.freeAll() }
             }
 
         return AssembledMessage(
@@ -242,18 +255,13 @@ internal sealed interface AssemblyResult {
     ) : AssemblyResult
 
     /**
-     * A complete message has been assembled.
-     *
-     * @property fragmentsToClose Raw frame buffers the caller must free after processing.
-     *   For multi-fragment messages, [combineBuffers] copies the fragment payloads into
-     *   a new buffer; the original frame buffers (now owned by the assembler via their
-     *   `payload` views) must still be freed explicitly on Linux (no GC for native heap).
-     *   Empty for single-frame messages, where the assembled `message.payload` IS the
-     *   raw frame buffer — the caller frees it once after decode.
+     * A complete message has been assembled. The assembler frees any source wire buffers
+     * internally (multi-fragment case) before returning; for single-fragment messages,
+     * `message.payload` IS the raw wire buffer view and ownership transfers to the caller,
+     * which must free it after running the user codec.
      */
     data class CompleteMessage(
         val message: AssembledMessage,
-        val fragmentsToClose: List<ReadBuffer> = emptyList(),
     ) : AssemblyResult
 
     /**

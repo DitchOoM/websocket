@@ -263,13 +263,34 @@ class MessageAssemblerTest {
     }
 
     // ========================================================================
-    // Fragment Buffer Cleanup (Linux NativeBuffer leak regression tests)
+    // Assembly ownership contract (post buffer-codec lockdown v1)
+    //
+    // The assembler frees per-frame source buffers internally; CompleteMessage
+    // surfaces only the assembled payload that the caller owns. These tests
+    // pin the new ownership invariants.
     // ========================================================================
 
     @Test
-    fun multiFragmentAssemblyReturnsFragmentsForCleanup() {
+    fun singleFrameMessagePayloadAliasesFrameBuffer() {
+        // Single-frame path: assembler returns the wire-buffer view directly as
+        // message.payload. Caller owns and frees it after running the user codec.
         val assembler = MessageAssembler()
+        val frame = textFrame("Hello")
+        val result = assembler.addFrame(frame)
 
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertTrue(
+            result.message.payload === frame.payload.buffer,
+            "Single-frame payload should alias the original wire buffer",
+        )
+    }
+
+    @Test
+    fun multiFragmentMessagePayloadIsCombinedBuffer() {
+        // Multi-fragment path: combineBuffers() allocates a fresh buffer and
+        // frees the source fragments before returning. The assembled payload
+        // is independent of any of the source wire buffers.
+        val assembler = MessageAssembler()
         val frag1 = textFrame("Hello ", fin = false)
         val frag2 = continuationFrame("World")
 
@@ -277,16 +298,15 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(frag2)
 
         assertIs<AssemblyResult.CompleteMessage>(result)
-        // Multi-fragment: combineBuffers() copies data, originals need cleanup
-        assertEquals(2, result.fragmentsToClose.size)
-        assertTrue(result.fragmentsToClose[0] === frag1.payload.buffer, "Should be same buffer object")
-        assertTrue(result.fragmentsToClose[1] === frag2.payload.buffer, "Should be same buffer object")
+        assertEquals("Hello World", result.message.payload.readString(11, Charset.UTF8))
+        val combined = result.message.payload
+        assertTrue(combined !== frag1.payload.buffer)
+        assertTrue(combined !== frag2.payload.buffer)
     }
 
     @Test
-    fun threeFragmentAssemblyReturnsAllFragmentsForCleanup() {
+    fun threeFragmentMessageProducesSingleAssembledBuffer() {
         val assembler = MessageAssembler()
-
         val frag1 = textFrame("A", fin = false)
         val frag2 = continuationFrame("B", fin = false)
         val frag3 = continuationFrame("C")
@@ -296,33 +316,7 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(frag3)
 
         assertIs<AssemblyResult.CompleteMessage>(result)
-        assertEquals(3, result.fragmentsToClose.size)
-    }
-
-    @Test
-    fun singleFrameMessageReturnsEmptyFragmentsToClose() {
-        val assembler = MessageAssembler()
-        val result = assembler.addFrame(textFrame("Hello"))
-
-        assertIs<AssemblyResult.CompleteMessage>(result)
-        assertTrue(result.fragmentsToClose.isEmpty(), "Single frame should have no fragments to close")
-    }
-
-    @Test
-    fun assembledMessagePayloadIsIndependentOfFragmentBuffers() {
-        val assembler = MessageAssembler()
-
-        assembler.addFrame(textFrame("Hello ", fin = false))
-        val result = assembler.addFrame(continuationFrame("World"))
-
-        assertIs<AssemblyResult.CompleteMessage>(result)
-        // The combined payload should be a separate buffer from the fragments
-        val payload = result.message.payload
-        assertEquals("Hello World", payload.readString(11, Charset.UTF8))
-        // Fragments are the originals, not the combined buffer
-        for (frag in result.fragmentsToClose) {
-            assertTrue(frag !== payload, "Fragment should not be the same object as combined payload")
-        }
+        assertEquals("ABC", result.message.payload.readString(3, Charset.UTF8))
     }
 
     // ========================================================================

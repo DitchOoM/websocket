@@ -27,11 +27,15 @@ import kotlin.time.Duration.Companion.seconds
  * allocating fresh). A leak — where the library forgets to call `freeIfNeeded()` on a
  * pooled buffer — manifests as `poolHits ≈ 0` because nothing is ever returned for reuse.
  *
- * Regression captured by this file:
+ * Regressions captured by this file:
  * - `WebSocketCodec.readFrame` used to leak the raw frame buffer returned by
- *   `stream.readBuffer(totalFrameSize)` on every received frame. Under stress this
- *   exhausted the JVM's direct-memory budget even with a deterministic factory. The
- *   try/finally fix closed the leak; these tests lock it in.
+ *   `stream.readBuffer(totalFrameSize)` on every received frame; the try/finally fix
+ *   closed that leak.
+ * - The buffer-codec lockdown v1 cleanup (2026-05-11) replaced the deferred
+ *   `MessageEnvelope.cleanup` pattern with eager `freeIfNeeded()` immediately after
+ *   `binaryCodec.decode`, plus internal fragment cleanup inside `MessageAssembler.
+ *   assembleMessage()`. These tests guard both layers — any new path that aliases a
+ *   library-owned buffer past `emitMessage` will surface here as missed pool returns.
  */
 abstract class AbstractAllocatorLeakTest {
     /** Underlying allocator the pool wraps. Each variant parameterizes over this. */
@@ -133,8 +137,9 @@ abstract class AbstractAllocatorLeakTest {
             if (leaked > 16) { // generous — handshake + a few control-frame allocations
                 fail(
                     "[$variantName] frame buffer leak regression: $leaked pool misses over $frameCount frames. " +
-                        "WebSocketCodec.readFrame must free the buffer returned by stream.readBuffer(). " +
-                        "See the try/finally block around WsFrameCodec.decode.",
+                        "WebSocketCodec.readFrame must free the buffer returned by stream.readBuffer(), and " +
+                        "emitMessage must free the assembled payload immediately after binaryCodec.decode. " +
+                        "Check the try/finally around WsFrameCodec.decode and the eager freeIfNeeded in emitMessage.",
                 )
             }
         }

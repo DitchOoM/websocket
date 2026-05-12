@@ -12,7 +12,10 @@ import com.ditchoom.buffer.stream.StreamProcessor
 import kotlin.jvm.JvmInline
 
 /**
- * Zero-copy [Payload] wrapper around a [ReadBuffer] used by the per-frame codec layer.
+ * Internal zero-copy [Payload] wrapper around a [ReadBuffer] used by the per-frame codec
+ * layer. **Bounded to the WebSocketCodec read-loop scope** — the aliased buffer is freed
+ * by the assembler / `emitMessage` path before any value crosses the consumer boundary;
+ * [BufferPayload] instances must never escape the read loop.
  *
  * The connection-layer pipeline:
  *  1. [com.ditchoom.websocket.WebSocketCodec.readNextFrame] peeks the frame size via
@@ -22,10 +25,13 @@ import kotlin.jvm.JvmInline
  *     [BufferPayloadCodec.decode], which aliases the buffer at the payload window
  *     (position = payload start, limit = payload end) — no copy.
  *  3. [com.ditchoom.websocket.frame.MessageAssembler] reads bytes from
- *     [BufferPayload.buffer] for fragmentation reassembly.
+ *     [BufferPayload.buffer] for fragmentation reassembly. Multi-fragment messages
+ *     are combined into a fresh allocation; per-frame source buffers are freed
+ *     inside the assembler.
  *  4. After reassembly, the user-supplied `binaryCodec` / [com.ditchoom.websocket.codecs.StringCodec]
  *     runs on the assembled payload — that's where the application-level type ([B] or
- *     [String]) is produced.
+ *     [String]) is produced. The buffer is freed immediately after that decode returns;
+ *     the emitted [com.ditchoom.websocket.WebSocketMessage] carries only the typed value.
  *
  * Splitting the per-frame payload type from the application payload type is required:
  * fragmented Text frames may split mid-UTF-8 codepoint, and structured binary may split
