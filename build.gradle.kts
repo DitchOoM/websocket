@@ -476,11 +476,56 @@ val echoWebsocket =
     }
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
 
+/**
+ * `adb reverse` for the Autobahn fuzzingserver + echo server ports so the Android
+ * emulator can reach the host's loopback at the same `localhost:9001` / `:8081`
+ * the JVM / Native / Node agents use. Without this the emulator's `localhost`
+ * resolves to the emulator's own loopback (where nothing listens) and every
+ * integration test under `:connectedDebugAndroidTest -PintegrationTests` fails to
+ * connect; the Autobahn report records zero Android cases, so the validator
+ * vacuously "passes."
+ *
+ * `adb reverse` is preferred over hardcoding `10.0.2.2` because it preserves the
+ * shared `autobahnHost() = "localhost"` actual across JVM / Android and works for
+ * USB-tethered physical devices too (where `10.0.2.2` would not route).
+ */
+val adbReverseForAndroidTests =
+    tasks.register("adbReverseForAndroidTests") {
+        description = "adb reverse :9001 and :8081 so the emulator can reach the host's Autobahn + echo servers."
+        group = "verification"
+        doLast {
+            // Find adb via ANDROID_SDK_ROOT/platform-tools, then ANDROID_HOME, then PATH.
+            val adb =
+                listOfNotNull(
+                    System.getenv("ANDROID_SDK_ROOT")?.let { "$it/platform-tools/adb" },
+                    System.getenv("ANDROID_HOME")?.let { "$it/platform-tools/adb" },
+                    "adb",
+                ).firstOrNull { exec ->
+                    try {
+                        ProcessBuilder(exec, "version").redirectErrorStream(true).start().waitFor() == 0
+                    } catch (_: Exception) {
+                        false
+                    }
+                } ?: run {
+                    logger.warn("adb not found on PATH or under ANDROID_SDK_ROOT — Android integration tests may fail to connect to the host.")
+                    return@doLast
+                }
+            listOf(9001, 8081).forEach { port ->
+                val rc = ProcessBuilder(adb, "reverse", "tcp:$port", "tcp:$port")
+                    .redirectErrorStream(true)
+                    .start()
+                    .also { it.waitFor() }
+                    .exitValue()
+                if (rc != 0) logger.warn("adb reverse tcp:$port returned exit code $rc")
+            }
+        }
+    }
+
 // Shared logic for Autobahn validation tasks. When agentsToValidate is null, all agents are checked.
 fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64")
+        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
@@ -631,6 +676,7 @@ if (runIntegrationTests) {
     tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
         dependsOn(echoWebsocket)
         dependsOn(autobahnContainer)
+        dependsOn(adbReverseForAndroidTests)
         finalizedBy(validateAutobahnResultsAndroid)
     }
     tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
