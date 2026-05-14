@@ -6,7 +6,6 @@ import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.codec.DecodeContext
-import com.ditchoom.buffer.codec.encodeToBuffer
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.toNativeData
@@ -14,6 +13,7 @@ import com.ditchoom.buffer.wrapReadOnly
 import com.ditchoom.websocket.WebSocketConnectionOptions
 import com.ditchoom.websocket.WebSocketException
 import com.ditchoom.websocket.WebSocketMessage
+import com.ditchoom.websocket.encodeToBuffer
 import kotlinx.cinterop.convert
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
