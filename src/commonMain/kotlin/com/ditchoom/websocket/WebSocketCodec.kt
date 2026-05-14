@@ -260,13 +260,18 @@ internal class WebSocketCodec<B>(
                 // Echo payload bytes back as Pong (RFC 6455 requires identical application data).
                 writePongFrameBytes(if (frame.payloadLength > 0) payload else EMPTY_BUFFER)
                 // Decode payload as UTF-8 String for the user-facing Ping message.
-                // RFC 6455 caps control frame app data at 125 bytes; it's usually empty or a small
-                // identifier, so a best-effort UTF-8 decode is fine. If bytes aren't UTF-8, we
-                // still pass through without throwing (readString replaces invalid sequences).
+                // RFC 6455 §5.5.2 treats control-frame application data as opaque bytes — Autobahn
+                // category 2 probes binary (non-UTF-8) ping payloads. JVM's readString is strict
+                // (CodingErrorAction.REPORT), so wrap in try/catch and fall through with "" rather
+                // than killing the read loop mid-close-handshake.
                 payload.position(payloadStart)
                 val appData =
                     if (frame.payloadLength > 0) {
-                        payload.readString(payload.remaining(), Charset.UTF8)
+                        try {
+                            payload.readString(payload.remaining(), Charset.UTF8)
+                        } catch (_: Throwable) {
+                            ""
+                        }
                     } else {
                         ""
                     }
@@ -277,7 +282,11 @@ internal class WebSocketCodec<B>(
                 val payload = frame.payload.buffer
                 val appData =
                     if (frame.payloadLength > 0) {
-                        payload.readString(payload.remaining(), Charset.UTF8)
+                        try {
+                            payload.readString(payload.remaining(), Charset.UTF8)
+                        } catch (_: Throwable) {
+                            ""
+                        }
                     } else {
                         ""
                     }
