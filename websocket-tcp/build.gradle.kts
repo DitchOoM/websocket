@@ -76,7 +76,7 @@ android {
     compileSdk = 36
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 21
+        minSdk = 23
     }
     namespace = "$group.websocket.tcp"
     compileOptions {

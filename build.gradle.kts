@@ -297,10 +297,10 @@ android {
     compileSdk = 36
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        // Library minSdk is 21; tests need 26 so D8 emits dex v040 which allows
-        // spaces in identifiers (Kotlin backtick test names). Override to 26 only
-        // when building the instrumentation test APK via -PinstrumentedTestsMinSdk26.
-        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 21
+        // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
+        // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
+        // -PinstrumentedTestsMinSdk26 when building the instrumentation test APK.
+        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
@@ -522,15 +522,18 @@ val adbReverseForAndroidTests =
                         false
                     }
                 } ?: run {
-                    logger.warn("adb not found on PATH or under ANDROID_SDK_ROOT — Android integration tests may fail to connect to the host.")
+                    logger.warn(
+                        "adb not found on PATH or under ANDROID_SDK_ROOT — Android integration tests may fail to connect to the host.",
+                    )
                     return@doLast
                 }
             listOf(9001, 8081).forEach { port ->
-                val rc = ProcessBuilder(adb, "reverse", "tcp:$port", "tcp:$port")
-                    .redirectErrorStream(true)
-                    .start()
-                    .also { it.waitFor() }
-                    .exitValue()
+                val rc =
+                    ProcessBuilder(adb, "reverse", "tcp:$port", "tcp:$port")
+                        .redirectErrorStream(true)
+                        .start()
+                        .also { it.waitFor() }
+                        .exitValue()
                 if (rc != 0) logger.warn("adb reverse tcp:$port returned exit code $rc")
             }
         }

@@ -139,43 +139,44 @@ internal class WebSocketCodec<B>(
 
     internal fun startReadLoop() {
         val compressionNegotiated = compression is CompressionConfig.Enabled
-        readLoopJob = scope.launch {
-            val messageAssembler = MessageAssembler(compressionNegotiated, bufferFactory)
+        readLoopJob =
+            scope.launch {
+                val messageAssembler = MessageAssembler(compressionNegotiated, bufferFactory)
 
-            try {
-                readLoop@ while (isOpen() && isActive) {
-                    val frame = readNextFrame() ?: break@readLoop
+                try {
+                    readLoop@ while (isOpen() && isActive) {
+                        val frame = readNextFrame() ?: break@readLoop
 
-                    when (val result = messageAssembler.addFrame(frame)) {
-                        is AssemblyResult.ControlFrame -> {
-                            handleControlFrame(result.frame)
-                            if (result.frame is WsFrame.Close) {
+                        when (val result = messageAssembler.addFrame(frame)) {
+                            is AssemblyResult.ControlFrame -> {
+                                handleControlFrame(result.frame)
+                                if (result.frame is WsFrame.Close) {
+                                    return@launch
+                                }
+                            }
+                            is AssemblyResult.CompleteMessage -> emitMessage(result.message)
+                            is AssemblyResult.NeedMoreFrames -> {}
+                            is AssemblyResult.Error -> {
+                                sendCloseFrame(result.code.code, result.reason)
+                                closed = true
                                 return@launch
                             }
                         }
-                        is AssemblyResult.CompleteMessage -> emitMessage(result.message)
-                        is AssemblyResult.NeedMoreFrames -> {}
-                        is AssemblyResult.Error -> {
-                            sendCloseFrame(result.code.code, result.reason)
-                            closed = true
-                            return@launch
-                        }
                     }
+                } catch (_: EndOfStreamException) {
+                    // Clean EOF
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") _: Exception,
+                ) {
+                    // Transport or protocol error
+                } finally {
+                    messageAssembler.reset()
+                    stream.release()
+                    incomingMessageChannel.close()
                 }
-            } catch (_: EndOfStreamException) {
-                // Clean EOF
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (
-                @Suppress("TooGenericExceptionCaught") _: Exception,
-            ) {
-                // Transport or protocol error
-            } finally {
-                messageAssembler.reset()
-                stream.release()
-                incomingMessageChannel.close()
             }
-        }
     }
 
     /**
