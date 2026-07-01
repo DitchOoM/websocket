@@ -63,11 +63,12 @@ def main():
     cases = data.get(agent) or {}
     if not cases:
         sys.exit(f"No Autobahn cases recorded for agent '{agent}' (test binary did not connect?)")
-    # `behavior == FAILED` is the fuzzingserver's per-case verdict (matches the Gradle validator).
+    # Gate on BOTH the data verdict and the close-handshake verdict (matches the Gradle validator):
+    # a case can be behavior=OK yet behaviorClose=FAILED (Case 7.x close-code regressions).
     failures = [
-        f"{cid}: behaviorClose={r.get('behaviorClose')}"
+        f"{cid}: behavior={r.get('behavior')} behaviorClose={r.get('behaviorClose')}"
         for cid, r in cases.items()
-        if r.get("behavior") == "FAILED"
+        if r.get("behavior") == "FAILED" or r.get("behaviorClose") == "FAILED"
     ]
     print(f"{agent}: {len(cases)} cases, {len(failures)} failed")
     if failures:
