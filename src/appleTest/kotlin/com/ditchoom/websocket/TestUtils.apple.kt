@@ -36,3 +36,6 @@ internal actual fun runStrictTest(
             withContext(Dispatchers.Default) { block() }
         }
     }
+
+// JVM/Android, Apple and Linux always have raw TCP socket access.
+internal actual fun hasFullSocketAccess(): Boolean = true

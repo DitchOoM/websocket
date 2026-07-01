@@ -10,8 +10,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Don't let one API level's failure cancel the others.
+      fail-fast: false
       matrix:
-        api-level: [19, 26]
+        # Library minSdk is 23, so the emulator API must be >= 23. (API 19 could never install the
+        # APK — "minSdkVersion [23] > deviceApiLevel [19]" — which is what used to red this job.)
+        api-level: [29, 34]
     steps:
       - name: checkout
         uses: actions/checkout@v4

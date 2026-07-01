@@ -192,7 +192,7 @@ tasks
 // every `ksp*` task. This project only runs the processor once, in commonMain-metadata mode, so the
 // descriptor comes solely from kspCommonMainKotlinMetadata. Narrow the tasks to that one so wiring
 // checkCodecSchema into `check` doesn't drag in per-target (esp. Android instrumented) KSP tasks and
-// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk26 on non-Android hosts).
+// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk34 on non-Android hosts).
 listOf("checkCodecSchema", "updateCodecSchema").forEach { taskName ->
     tasks.named(taskName) {
         setDependsOn(listOf(tasks.named("kspCommonMainKotlinMetadata")))
@@ -303,8 +303,8 @@ android {
     defaultConfig {
         // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
         // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
-        // -PinstrumentedTestsMinSdk26 when building the instrumentation test APK.
-        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 23
+        // -PinstrumentedTestsMinSdk34 when building the instrumentation test APK.
+        minSdk = if (project.hasProperty("instrumentedTestsMinSdk34")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // AGP's connectedDebugAndroidTest is not a gradle Test task, so the

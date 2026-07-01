@@ -1,7 +1,5 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.socket.TransportKind
-import com.ditchoom.socket.networkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -10,10 +8,16 @@ expect class TestRunResult
 
 /**
  * True on platforms with raw socket (TCP) access — JVM, Android, Apple, Linux, Node.js — and false
- * on browser (WebSocket-only). Replaces the v3 `getNetworkCapabilities() == FULL_SOCKET_ACCESS`
- * check now that socket v6 models capabilities as a `Set<TransportKind>`.
+ * on browser (WebSocket-only), which must use the native `WebSocket` path.
+ *
+ * Must be `expect`/`actual`: socket v6's js `networkCapabilities()` advertises TCP unconditionally
+ * (no Node-vs-browser split — browser-only capabilities are a separate wasmJs target this module
+ * doesn't have), so a common `TransportKind.TCP in networkCapabilities()` check wrongly returns true
+ * in the browser and routes tests into `TcpTransport().connect()`, which throws
+ * `UnsupportedOperationException("Sockets are not supported in the browser")`. The js actual splits
+ * on `isNodeJs` instead.
  */
-internal fun hasFullSocketAccess(): Boolean = TransportKind.TCP in networkCapabilities().transports
+internal expect fun hasFullSocketAccess(): Boolean
 
 // Timeout for simple echo/connect tests (ping/pong, payload, UTF-8, close, fragmentation)
 internal val testTimeout = 10.seconds

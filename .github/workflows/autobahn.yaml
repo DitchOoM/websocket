@@ -199,11 +199,12 @@ jobs:
   # macOS), so we additionally validate the real "macOS" agent explicitly.
   apple:
     name: "Apple (macOS)"
-    runs-on: macos-14
+    # Intel runner: GitHub's hosted ARM macOS runners (macos-14, M1) lack nested virtualization, so
+    # Colima can't start the fuzzingserver there. macos-15-intel runs Colima natively (HVF), so it can
+    # host the amd64 crossbario/autobahn-testsuite image and we test the macosX64 target on it.
+    runs-on: macos-15-intel
     timeout-minutes: 60
-    # Non-blocking: GitHub's hosted ARM macOS runners (M1) lack nested virtualization, so Colima
-    # (and any Linux-container tool, incl. Apple `container`) can't start the fuzzingserver. Needs
-    # an Intel runner, a self-hosted M3+/macOS-15 mac, or an off-runner fuzzingserver. Follow-up.
+    # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -221,9 +222,10 @@ jobs:
       - name: Start Docker (Colima)
         run: |
           brew install colima docker
-          colima start --arch x86_64 --cpu 3 --memory 6
-      - name: Run Autobahn (macosArm64)
-        run: ./gradlew macosArm64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+          # Native x86_64 on the Intel runner — no --arch emulation needed.
+          colima start --cpu 3 --memory 6
+      - name: Run Autobahn (macosX64)
+        run: ./gradlew macosX64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Validate results (macOS agent)
         run: python3 .github/scripts/validate_autobahn.py macOS
       - name: Upload report
@@ -236,8 +238,9 @@ jobs:
 
   # ---------------------------------------------------------------------------------- Android
   # Emulator on an ubuntu runner (Docker is native here). connectedDebugAndroidTest is wired to
-  # start the fuzzingserver, adb-reverse :9001, and validate the "Android" agent. minSdk 26 is
-  # required so D8 emits a dex version the emulator accepts (-PinstrumentedTestsMinSdk26).
+  # start the fuzzingserver, adb-reverse :9001, and validate the "Android" agent. The instrumented
+  # build raises minSdk to 34 (-PinstrumentedTestsMinSdk34, so D8 emits a dex version allowing spaces
+  # in Kotlin backtick test names), so the emulator API must be >= 34 to be a compatible device.
   android:
     name: "Android (emulator)"
     runs-on: ubuntu-24.04
@@ -259,15 +262,15 @@ jobs:
       - name: Run Autobahn (Android emulator)
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 26
+          api-level: 34
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           # Root task only (leading ':'): the Autobahn instrumented tests live in the root module's
-          # androidInstrumentedTest. -PinstrumentedTestsMinSdk26 raises the root minSdk to 34; the
-          # unqualified task would also run :websocket-tcp:, whose androidTest stays at minSdk 21 and
+          # androidInstrumentedTest. -PinstrumentedTestsMinSdk34 raises the root minSdk to 34; the
+          # unqualified task would also run :websocket-tcp:, whose androidTest stays at minSdk 23 and
           # fails the manifest merge against the (34) root library.
-          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk26 --no-build-cache
+          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
