@@ -17,13 +17,17 @@ docker run -d --rm --name fuzzingserver \
   -v "$PWD/.docker/reports:/reports" \
   crossbario/autobahn-testsuite
 
-# Wait for the server to accept connections on 9001.
-for _ in $(seq 1 30); do
-  if (exec 3<>/dev/tcp/localhost/9001) 2>/dev/null; then
-    exec 3>&- 3<&-
-    echo "fuzzingserver is up"
-    exit 0
-  fi
+# Wait until wstest actually SERVES on 9001. Docker's port proxy binds the host port instantly —
+# before the server inside is listening — so a plain TCP check races and the first client connect
+# gets "Connection reset". Poll for a real HTTP response instead (mirrors AutobahnDockerTask.isServerReady).
+for _ in $(seq 1 60); do
+  code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://localhost:9001" 2>/dev/null || echo 000)
+  case "$code" in
+    2??|3??|4??)
+      echo "fuzzingserver is ready (HTTP $code)"
+      exit 0
+      ;;
+  esac
   sleep 1
 done
 
