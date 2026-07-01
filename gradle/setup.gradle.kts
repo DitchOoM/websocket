@@ -44,9 +44,11 @@ fun getLatestVersion(): Version {
     if (latestVersion != null && !latestVersion.isVersionZero()) {
         return latestVersion
     }
-    val artifactName = project.findProperty("artifactName")?.toString() ?: rootProject.name
     try {
-        val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/$artifactName/maven-metadata.xml").readText()
+        // Always resolve the base version from the ROOT artifact so every module (root + submodules)
+        // converges on one version lineage — matches socket/buffer. Querying a per-module artifact made
+        // never-published submodules (websocket-tcp) 404 → start their own 0.0.0→1.0.0 lineage.
+        val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
         val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
         val latestStringList = versioning.first()["latest"] as List<Node>
         val result = Version((latestStringList.first().value() as List<*>).first().toString(), false)

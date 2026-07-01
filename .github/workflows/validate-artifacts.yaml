@@ -136,7 +136,13 @@ jobs:
       - name: Checkout validation project
         uses: actions/checkout@v4
         with:
-          sparse-checkout: .ci/validate-resolution
+          sparse-checkout: .ci
+
+      - name: Validate POM completeness (Maven Central pre-flight)
+        # Fails here — before the irreversible publish job — if any websocket POM is missing the
+        # metadata Central requires (name/description/url/licenses/developers/scm) or if module
+        # versions drifted. Validates the exact unsigned artifacts this branch would publish.
+        run: bash .ci/validate-poms.sh /tmp/maven-local
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
