@@ -164,13 +164,18 @@ jobs:
     name: "Linux arm64 (native)"
     needs: build-native
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 40
+    # Non-blocking: the amd64-only fuzzingserver runs under QEMU emulation here, which is slow for
+    # the heavy compression cases. The arm64 TEST BINARY runs natively; only the server is emulated.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Download test binary
         uses: actions/download-artifact@v4
         with:
           name: test-binary-linuxArm64
+      - name: Set up QEMU (run amd64 fuzzingserver on arm64)
+        uses: docker/setup-qemu-action@v3
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (linuxArm64)

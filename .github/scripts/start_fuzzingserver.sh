@@ -10,7 +10,10 @@ docker rm -f fuzzingserver >/dev/null 2>&1 || true
 
 # Flags mirror build.gradle.kts AutobahnDockerTask (proven config): 8G memory for the compression
 # cases, image default CMD runs `wstest -m fuzzingserver -s /config/fuzzingserver.json`.
+# crossbario/autobahn-testsuite is amd64-only; pin the platform so it also runs (under QEMU, when
+# binfmt is registered) on arm64 runners rather than failing the manifest match.
 docker run -d --rm --name fuzzingserver \
+  --platform linux/amd64 \
   --memory=8g --memory-swap=14g \
   -p 9001:9001 \
   -v "$PWD/.docker/config:/config" \
