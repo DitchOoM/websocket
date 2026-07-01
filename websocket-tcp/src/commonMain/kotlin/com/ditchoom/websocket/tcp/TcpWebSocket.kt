@@ -2,8 +2,11 @@ package com.ditchoom.websocket.tcp
 
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.socket.ConnectionOptions
-import com.ditchoom.socket.SocketOptions
+import com.ditchoom.buffer.flow.ReadPolicy
+import com.ditchoom.buffer.flow.WritePolicy
+import com.ditchoom.socket.IoTuning
+import com.ditchoom.socket.TlsConfig
+import com.ditchoom.socket.TransportConfig
 import com.ditchoom.socket.transport.TcpTransport
 import com.ditchoom.websocket.WebSocketConnectionOptions
 import com.ditchoom.websocket.WebSocketMessage
@@ -29,21 +32,19 @@ suspend fun <B> connectTcpWebSocket(
     binaryCodec: Codec<B>,
     parentScope: CoroutineScope? = null,
 ): Connection<WebSocketMessage<B>> {
-    val socketOptions =
-        if (connectionOptions.tls) {
-            SocketOptions.tlsDefault()
-        } else {
-            SocketOptions.LOW_LATENCY
-        }
     val transport =
         TcpTransport().connect(
             hostname = connectionOptions.name,
             port = connectionOptions.port,
-            options =
-                ConnectionOptions(
-                    socketOptions = socketOptions,
-                    connectionTimeout = connectionOptions.connectionTimeout,
+            config =
+                TransportConfig(
                     bufferFactory = connectionOptions.bufferFactory,
+                    connectTimeout = connectionOptions.connectionTimeout,
+                    readPolicy = ReadPolicy.Bounded(connectionOptions.readTimeout),
+                    writePolicy = WritePolicy.Bounded(connectionOptions.writeTimeout),
+                    // TLS uses default certificate validation; tcpNoDelay for low-latency framing.
+                    tls = if (connectionOptions.tls) TlsConfig.DEFAULT else null,
+                    io = IoTuning(tcpNoDelay = true),
                 ),
         )
     return connectWebSocket(

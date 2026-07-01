@@ -1,8 +1,5 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.socket.NetworkCapabilities.FULL_SOCKET_ACCESS
-import com.ditchoom.socket.NetworkCapabilities.WEBSOCKETS_ONLY
-import com.ditchoom.socket.getNetworkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -25,10 +22,8 @@ internal actual fun runTestNoTimeSkipping(
                 }
             }
         } catch (e: UnsupportedOperationException) {
-            when (getNetworkCapabilities()) {
-                FULL_SOCKET_ACCESS -> throw e
-                WEBSOCKETS_ONLY -> {}
-            }
+            // Full-socket platforms must surface the failure; WebSocket-only (browser) may skip it.
+            if (hasFullSocketAccess()) throw e
         }
     }
 

@@ -1,0 +1,68 @@
+message com.ditchoom.websocket.frame.CloseCode
+  0 code scalar:UShort wire=2B order=Default
+message com.ditchoom.websocket.frame.FrameHeaderByte1
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.websocket.frame.TestPayload
+  0 text string remaining reserved=0B
+message com.ditchoom.websocket.frame.WsCloseBody
+  0 statusCode valueclass:com.ditchoom.websocket.frame.CloseCode scalar:UShort wire=2B order=Default
+  1 reason string remaining reserved=0B
+sealed com.ditchoom.websocket.frame.WsFrame dispatch=valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1/1B,inner=UByte/Default,dispatchValue=opcodeValue:Int
+  0 Continuation
+  1 Text
+  2 Binary
+  8 Close
+  9 Ping
+  10 Pong
+message com.ditchoom.websocket.frame.WsFrame.Binary
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.websocket.frame.WsFrame.Close
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 body? when(remaining>=2) msg:com.ditchoom.websocket.frame.WsCloseBody
+message com.ditchoom.websocket.frame.WsFrame.Continuation
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.websocket.frame.WsFrame.Ping
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.websocket.frame.WsFrame.Pong
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.websocket.frame.WsFrame.Text
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+  5 payload payload:P remaining codec=injected:payloadCodec reserved=0B
+message com.ditchoom.websocket.frame.WsFrameHeader
+  0 byte1 valueclass:com.ditchoom.websocket.frame.FrameHeaderByte1 scalar:UByte wire=1B order=Default
+  1 byte2 valueclass:com.ditchoom.websocket.frame.WsHeaderByte2 scalar:UByte wire=1B order=Default
+  2 extendedLength16? when(sibling:byte2.extended16) scalar:UShort order=Big
+  3 extendedLength64? when(sibling:byte2.extended64) scalar:Long order=Big
+  4 maskingKey? when(sibling:byte2.masked) valueclass:com.ditchoom.websocket.frame.WsMaskingKey scalar:UInt order=Default
+message com.ditchoom.websocket.frame.WsHeaderByte2
+  0 raw scalar:UByte wire=1B order=Default
+message com.ditchoom.websocket.frame.WsMaskingKey
+  0 raw scalar:UInt wire=4B order=Default

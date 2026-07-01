@@ -1,6 +1,6 @@
 
 [versions]
-kotlin = "2.3.0"
+kotlin = "2.3.21"
 androidGradlePlugin = "8.13.2"
 dokka = "2.1.0"
 ktlint = "14.0.1"
@@ -9,11 +9,11 @@ atomicfu = "0.29.0"
 kotlinxCoroutines = "1.10.2"
 kotlinWrappers = "2025.12.6"
 kotlinxBenchmark = "0.4.15"
-buffer = "4.3.0-SNAPSHOT"
-bufferCompression = "4.3.0-SNAPSHOT"
-bufferCodec = "4.3.0-SNAPSHOT"
-ksp = "2.3.0"
-socket = "3.0.1-SNAPSHOT"
+buffer = "6.0.0"
+bufferCompression = "6.0.0"
+bufferCodec = "6.0.0"
+ksp = "2.3.9"
+socket = "3.6.10"
 androidxCore = "1.17.0"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
@@ -47,3 +47,4 @@ dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+buffer-codec-schema = { id = "com.ditchoom.buffer.codec-schema", version.ref = "bufferCodec" }

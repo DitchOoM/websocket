@@ -8,10 +8,11 @@ import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.codec.Codec
 import com.ditchoom.buffer.flow.Connection
-import com.ditchoom.socket.ConnectionOptions
-import com.ditchoom.socket.NetworkCapabilities.FULL_SOCKET_ACCESS
-import com.ditchoom.socket.SocketOptions
-import com.ditchoom.socket.getNetworkCapabilities
+import com.ditchoom.buffer.flow.ReadPolicy
+import com.ditchoom.buffer.flow.WritePolicy
+import com.ditchoom.socket.IoTuning
+import com.ditchoom.socket.TlsConfig
+import com.ditchoom.socket.TransportConfig
 import com.ditchoom.socket.transport.TcpTransport
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import kotlinx.coroutines.CoroutineScope
@@ -37,22 +38,19 @@ internal suspend fun <B> connectForTest(
     connectionOptions: WebSocketConnectionOptions,
     binaryCodec: Codec<B>,
 ): Connection<WebSocketMessage<B>> =
-    if (getNetworkCapabilities() == FULL_SOCKET_ACCESS) {
-        val socketOptions =
-            if (connectionOptions.tls) {
-                SocketOptions.tlsDefault()
-            } else {
-                SocketOptions.LOW_LATENCY
-            }
+    if (hasFullSocketAccess()) {
         val transport =
             TcpTransport().connect(
                 hostname = connectionOptions.name,
                 port = connectionOptions.port,
-                options =
-                    ConnectionOptions(
-                        socketOptions = socketOptions,
-                        connectionTimeout = connectionOptions.connectionTimeout,
+                config =
+                    TransportConfig(
                         bufferFactory = connectionOptions.bufferFactory,
+                        connectTimeout = connectionOptions.connectionTimeout,
+                        readPolicy = ReadPolicy.Bounded(connectionOptions.readTimeout),
+                        writePolicy = WritePolicy.Bounded(connectionOptions.writeTimeout),
+                        tls = if (connectionOptions.tls) TlsConfig.DEFAULT else null,
+                        io = IoTuning(tcpNoDelay = true),
                     ),
             )
         connectWebSocket(

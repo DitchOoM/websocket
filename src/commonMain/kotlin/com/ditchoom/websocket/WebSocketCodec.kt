@@ -53,9 +53,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.Volatile
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * WebSocket codec connection over a [ByteStream].
@@ -95,6 +97,16 @@ internal class WebSocketCodec<B>(
     @Volatile
     private var closed = false
     private var serverInitiatedClose = false
+
+    // Set once we've sent a client-initiated Close frame, so the read loop doesn't also emit a
+    // duplicate Close ack when the server's Close response arrives during the close handshake.
+    @Volatile
+    private var clientInitiatedClose = false
+
+    // The read-loop coroutine. close() joins it (bounded) so the server's Close response / EOF is
+    // observed — i.e. in-flight writes drain — before the transport is torn down.
+    private var readLoopJob: kotlinx.coroutines.Job? = null
+
     private val stringDecoder = StreamingStringDecoder()
 
     /**
@@ -127,7 +139,7 @@ internal class WebSocketCodec<B>(
 
     internal fun startReadLoop() {
         val compressionNegotiated = compression is CompressionConfig.Enabled
-        scope.launch {
+        readLoopJob = scope.launch {
             val messageAssembler = MessageAssembler(compressionNegotiated, bufferFactory)
 
             try {
@@ -201,11 +213,11 @@ internal class WebSocketCodec<B>(
                         error("WsFraming.peekFrameSize must not return NoFraming")
                 }
 
-            if (stream.available() < totalFrameSize) {
-                stream.peekByte(stream.available())
-                continue
-            }
-
+            // readBuffer auto-fills to totalFrameSize in one pass (O(refills), each an O(1)
+            // available() check). Do NOT poll here with peekByte(available()): that call walks the
+            // accumulated chunk list to the current end on every socket read and discards the
+            // result, so a large frame arriving dribbled in tiny reads (Autobahn 9.6.x — 1 MB in
+            // 64-byte chops, ~16k reads) costs O(n^2) and stalls for seconds. See ChoppedReadBenchmark.
             val buffer = stream.readBuffer(totalFrameSize)
             var owned = true
             val frame =
@@ -298,7 +310,10 @@ internal class WebSocketCodec<B>(
                 val closeCode = frame.body?.statusCode ?: CloseCode.NO_STATUS_RECEIVED
                 val reason = frame.body?.reason ?: ""
 
-                if (!closed) {
+                // Only ack the server's Close if we haven't already sent our own (client-initiated)
+                // Close — otherwise the server's Close arriving during our close handshake would
+                // trigger a second, spurious Close frame.
+                if (!closed && !clientInitiatedClose) {
                     val responseCode =
                         if (closeCode == CloseCode.PROTOCOL_ERROR) {
                             CloseCode.PROTOCOL_ERROR.code
@@ -680,20 +695,31 @@ internal class WebSocketCodec<B>(
 
     override suspend fun close() {
         if (closed) return
-        closed = true
 
         if (!serverInitiatedClose) {
+            clientInitiatedClose = true
             try {
                 sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
             } catch (_: Exception) {
             }
+            // RFC 6455 §7.1.1: after sending Close, wait (bounded) for the server's Close response /
+            // EOF — i.e. for the read loop to finish — BEFORE tearing down the transport. `closed`
+            // stays false during the wait so the read loop keeps reading. This lets frames already
+            // handed to the transport (e.g. a large data frame sent immediately before close()) drain
+            // to the wire instead of being discarded by the transport teardown below — otherwise a
+            // send()-then-close() truncates the last message (observed as Autobahn 9.5.1 timing out).
+            // Bounded by a short constant (not readTimeout, which bulk-read paths set very high) so a
+            // peer that never sends its Close can't stall close(); real peers ack within milliseconds.
+            withTimeoutOrNull(minOf(readTimeout, CLOSE_HANDSHAKE_TIMEOUT)) { readLoopJob?.join() }
         }
+        closed = true
+
         incomingMessageChannel.close()
         // Clean up compression resources
         val config = compression as? CompressionConfig.Enabled
         config?.compressor?.close()
         config?.decompressor?.close()
-        // Close transport first to break pending I/O, then cancelAndJoin.
+        // Now safe to break any remaining I/O, then cancelAndJoin.
         try {
             transport.close()
         } catch (_: Exception) {
@@ -713,5 +739,12 @@ internal class WebSocketCodec<B>(
          * right-aligned into the prefix after the payload is written.
          */
         const val HEADER_PREFIX_BYTES = 14
+
+        /**
+         * RFC 6455 §7.1.1 close-handshake bound: after sending our Close, wait at most this long for
+         * the peer's Close response (so in-flight writes drain) before forcing the transport closed.
+         * A well-behaved peer acks within milliseconds; this only caps a peer that never responds.
+         */
+        val CLOSE_HANDSHAKE_TIMEOUT = 5.seconds
     }
 }

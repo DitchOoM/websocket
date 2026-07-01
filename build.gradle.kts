@@ -11,6 +11,7 @@ plugins {
     alias(libs.plugins.dokka)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.buffer.codec.schema)
     signing
 }
 
@@ -80,7 +81,7 @@ kotlin {
     // Linux targets (only on Linux host)
     if (hostOs == org.jetbrains.kotlin.konan.target.KonanTarget.LINUX_X64) {
         linuxX64()
-        // linuxArm64() // disabled until buffer-flow publishes arm64 artifacts
+        linuxArm64()
     }
 
     applyDefaultHierarchyTemplate()
@@ -183,6 +184,17 @@ tasks
         dependsOn("kspCommonMainKotlinMetadata")
     }
 
+// The codec-schema wire-drift gate (com.ditchoom.buffer.codec-schema) defaults to depending on
+// every `ksp*` task. This project only runs the processor once, in commonMain-metadata mode, so the
+// descriptor comes solely from kspCommonMainKotlinMetadata. Narrow the tasks to that one so wiring
+// checkCodecSchema into `check` doesn't drag in per-target (esp. Android instrumented) KSP tasks and
+// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk26 on non-Android hosts).
+listOf("checkCodecSchema", "updateCodecSchema").forEach { taskName ->
+    tasks.named(taskName) {
+        setDependsOn(listOf(tasks.named("kspCommonMainKotlinMetadata")))
+    }
+}
+
 val integrationTestPatterns =
     listOf(
         "com.ditchoom.websocket.Autobahn*",
@@ -197,6 +209,9 @@ val profilingTestPatterns =
     listOf(
         "com.ditchoom.websocket.ProfilingTest",
         "com.ditchoom.websocket.TimingProfilingTest",
+        // Heavy large-message/compression throughput benchmark; run manually:
+        //   ./gradlew jvmTest --tests "*ChoppedReadBenchmark*"
+        "com.ditchoom.websocket.ChoppedReadBenchmark",
     )
 
 val runIntegrationTests = project.hasProperty("integrationTests")
