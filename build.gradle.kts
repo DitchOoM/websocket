@@ -107,10 +107,14 @@ kotlin {
             }
         }
         commonMain.dependencies {
-            implementation(libs.buffer)
+            // buffer/buffer-codec/buffer-flow are `api`: this module's public API returns their types
+            // (BufferFactory/PlatformBuffer, Codec, Connection/WebSocketMessage), so consumers of
+            // com.ditchoom:websocket need them on their compile classpath. buffer-compression is
+            // internal (permessage-deflate), so it stays `implementation`.
+            api(libs.buffer)
             implementation(libs.buffer.compression)
-            implementation(libs.buffer.codec)
-            implementation(libs.buffer.flow)
+            api(libs.buffer.codec)
+            api(libs.buffer.flow)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {

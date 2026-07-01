@@ -44,12 +44,9 @@ kotlin {
     sourceSets {
         if (hostOs.family.isAppleFamily) {
             appleMain.dependencies {
+                // buffer/buffer-codec/buffer-flow come transitively as `api` from the root module
+                // (its public API returns Codec/Connection/buffer types), so no explicit adds here.
                 api(project(":"))
-                // Codec/Connection/buffer types are in this module's public API
-                // (connectAppleNativeWebSocket signature), so `api`.
-                api(libs.buffer)
-                api(libs.buffer.codec)
-                api(libs.buffer.flow)
                 implementation(libs.kotlinx.coroutines.core)
             }
             appleTest.dependencies {
