@@ -4,6 +4,20 @@ on:
     branches: [ main ]
     types:
       - closed
+  # Manual trigger — recovers a release when the pull_request_target run can't be
+  # re-fired (e.g. it aborted after the PR was already merged/closed).
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: "Version increment"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      flow:
+        description: "release (AUTOMATIC publish) or draft (USER_MANAGED staging)"
+        type: choice
+        options: [release, draft]
+        default: release
 
 permissions:
   contents: write
@@ -15,7 +29,7 @@ concurrency:
 jobs:
   check-release:
     name: Check if release is needed
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
       flow: ${{ steps.check.outputs.flow }}
@@ -29,6 +43,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Manual dispatch: take flow + increment straight from the inputs.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            case "${{ inputs.increment }}" in
+              major) echo "gradle-args=-PincrementMajor=true" >> $GITHUB_OUTPUT ;;
+              minor) echo "gradle-args=-PincrementMinor=true" >> $GITHUB_OUTPUT ;;
+              *)     echo "gradle-args=" >> $GITHUB_OUTPUT ;;
+            esac
+            echo "flow=${{ inputs.flow }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           gradle_args=""
           if ${{ contains(github.event.pull_request.labels.*.name, 'major') }}; then
             gradle_args="-PincrementMajor=true"
@@ -49,8 +74,13 @@ jobs:
             exit 0
           fi
 
-          # Check if only non-code files changed
-          changed_files=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+          # Check if only non-code files changed. Use the paginated files API:
+          # `gh pr diff --name-only` fails with HTTP 406 once the diff exceeds
+          # GitHub's 20k-line cap (large docs/lockfile PRs), which would abort the
+          # whole release.
+          changed_files=$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename')
           for file in $changed_files; do
             case "$file" in
               .github/*|*.md|.gitignore|.editorconfig|CLAUDE.md|LICENSE|*.txt)
@@ -88,7 +118,7 @@ jobs:
       version: ${{ needs.build-linux.outputs.version }}
 
   publish:
-    needs: [check-release, validate]
+    needs: [check-release, build-linux, validate]
     if: needs.check-release.outputs.flow == 'draft' || needs.check-release.outputs.flow == 'release'
     uses: ./.github/workflows/publish-to-central.yaml
     with:
@@ -116,6 +146,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           version="${{ needs.build-linux.outputs.version }}"
+          # PR context is empty on manual workflow_dispatch — fall back to generic notes.
+          PR_TITLE="${PR_TITLE:-Release v${version}}"
+          PR_URL="${PR_URL:-https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}}"
           deployment_id="${{ needs.publish.outputs.deployment-id }}"
           staging_url="https://central.sonatype.com/publishing/deployments"
 
@@ -148,6 +181,9 @@ jobs:
         run: |
           version="${{ needs.build-linux.outputs.version }}"
           tag="v${version}"
+          # PR context is empty on manual workflow_dispatch — fall back to generic notes.
+          PR_TITLE="${PR_TITLE:-Release ${tag}}"
+          PR_URL="${PR_URL:-https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}}"
 
           # Check if tag already exists
           if git rev-parse "$tag" >/dev/null 2>&1; then
