@@ -1,15 +1,18 @@
 package com.ditchoom.websocket
 
 import agentName
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.PlatformBuffer
-import com.ditchoom.buffer.allocate
-import com.ditchoom.buffer.pool.BufferPool
-import com.ditchoom.websocket.frame.FrameWriter
+import com.ditchoom.buffer.codec.EncodeContext
+import com.ditchoom.buffer.managed
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+import com.ditchoom.websocket.frame.FrameHeaderByte1
+import com.ditchoom.websocket.frame.WsFrameHeader
+import com.ditchoom.websocket.frame.WsFrameHeaderCodec
+import com.ditchoom.websocket.frame.WsMaskingKey
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 // Memory measurement helpers - platform-specific implementations
@@ -41,20 +44,18 @@ class ProfilingTest {
                     port = 8081,
                     websocketEndpoint = "/echo",
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Heap)
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()), BinaryPassThroughCodec)
 
             // Force GC before measurement
             forceGc()
             val memBefore = getUsedMemoryMB()
 
             repeat(iterations) { i ->
-                val buf = PlatformBuffer.allocate(payloadSize, AllocationZone.Heap)
+                val buf = BufferFactory.managed().allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
-                ws.write(buf)
-                ws.incomingMessages.first()
+                ws.send(WebSocketMessage.Binary(buf))
+                ws.receive().first()
 
                 if (i == iterations / 2) {
                     forceGc()
@@ -67,9 +68,6 @@ class ProfilingTest {
             val memAfter = getUsedMemoryMB()
 
             ws.close()
-            withTimeoutOrNull(10.seconds) {
-                ws.connectionState.first { it is ConnectionState.Disconnected }
-            }
 
             println(
                 "PROFILE [${agentName()}] memory_large_payload: " +
@@ -92,14 +90,9 @@ class ProfilingTest {
                         port = 8081,
                         websocketEndpoint = "/echo",
                     )
-                val ws = WebSocketClient.allocate(connectionOptions, allocationZone = AllocationZone.Direct)
-                ws.connect()
-                ws.awaitConnected()
+                val ws = connectForTest(connectionOptions)
                 times.add(mark.elapsedNow().inWholeMilliseconds)
                 ws.close()
-                withTimeoutOrNull(10.seconds) {
-                    ws.connectionState.first { it is ConnectionState.Disconnected }
-                }
             }
             println(
                 "PROFILE [${agentName()}] connect: avg=${times.average().toLong()}ms min=${times.min()}ms max=${times.max()}ms (n=$iterations)",
@@ -164,23 +157,30 @@ class ProfilingTest {
         size: Int,
         iterations: Int,
     ) {
-        val pool = BufferPool(allocationZone = AllocationZone.Heap)
-        val writer = FrameWriter(clientMode = true, pool = pool)
-        val payload = PlatformBuffer.allocate(size)
+        val payload = BufferFactory.Default.allocate(size)
         repeat(size) { payload.writeByte(0x42) }
         payload.position(0)
 
-        // Warmup
-        repeat(10) {
-            writer.writeBinaryFrame(payload)
+        fun encodeFrame() {
+            val mask = WsMaskingKey(MaskingKey.FourByteMaskingKey().packed.toUInt())
+            val header =
+                WsFrameHeader.build(
+                    byte1 = FrameHeaderByte1.pack(true, false, false, false, Opcode.Binary),
+                    payloadSize = payload.remaining().toLong(),
+                    masked = true,
+                    maskingKey = mask,
+                )
+            val buf = BufferFactory.Default.allocate(header.wireSize + payload.remaining()) as PlatformBuffer
+            WsFrameHeaderCodec.encode(buf, header, EncodeContext.Empty)
+            buf.xorMaskCopy(payload, mask.raw.toInt())
             payload.position(0)
         }
 
+        // Warmup
+        repeat(10) { encodeFrame() }
+
         val mark = TimeSource.Monotonic.markNow()
-        repeat(iterations) {
-            writer.writeBinaryFrame(payload)
-            payload.position(0)
-        }
+        repeat(iterations) { encodeFrame() }
         val elapsed = mark.elapsedNow()
         val avgUs = elapsed.inWholeMicroseconds / iterations
         val throughputKBs =
@@ -200,7 +200,7 @@ class ProfilingTest {
         isBinary: Boolean,
         iterations: Int,
     ) {
-        val zone = if (payloadSize > 16384) AllocationZone.Heap else AllocationZone.Direct
+        val factory = if (payloadSize > 16384) BufferFactory.managed() else BufferFactory.Default
 
         // Connect (with independent scope - null parentScope)
         val connectMark = TimeSource.Monotonic.markNow()
@@ -210,9 +210,7 @@ class ProfilingTest {
                 port = 8081,
                 websocketEndpoint = "/echo",
             )
-        val ws = WebSocketClient.allocate(connectionOptions, allocationZone = zone)
-        ws.connect()
-        ws.awaitConnected()
+        val ws = connectForTest(connectionOptions.copy(bufferFactory = factory), BinaryPassThroughCodec)
         val connectTime = connectMark.elapsedNow()
 
         // Echo loop - measure write and read separately
@@ -228,27 +226,24 @@ class ProfilingTest {
             // Write
             val wMark = TimeSource.Monotonic.markNow()
             if (isBinary) {
-                val buf = PlatformBuffer.allocate(payloadSize, zone)
+                val buf = factory.allocate(payloadSize)
                 repeat(payloadSize) { buf.writeByte(0xAB.toByte()) }
                 buf.position(0)
-                ws.write(buf)
+                ws.send(WebSocketMessage.Binary(buf))
             } else {
-                ws.write(textPayload)
+                ws.send(WebSocketMessage.Text(textPayload))
             }
             writeTimes.add(wMark.elapsedNow().inWholeMicroseconds)
 
             // Read echo
             val rMark = TimeSource.Monotonic.markNow()
-            ws.incomingMessages.first()
+            ws.receive().first()
             readTimes.add(rMark.elapsedNow().inWholeMicroseconds)
 
             roundTripTimes.add(rtMark.elapsedNow().inWholeMicroseconds)
         }
 
         ws.close()
-        withTimeoutOrNull(10.seconds) {
-            ws.connectionState.first { it is ConnectionState.Disconnected }
-        }
 
         val totalRtMs = roundTripTimes.sum() / 1000
         val avgWriteUs = writeTimes.average().toLong()

@@ -1,28 +1,66 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
 
-// WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
-private const val SYNC_FLUSH_MARKER = 0x0000FFFF
+/**
+ * Compression configuration for a WebSocket codec connection.
+ *
+ * Models the result of permessage-deflate negotiation as a sealed type,
+ * eliminating impossible states (e.g. context takeover flags without compression,
+ * or compressionEnabled=true with null decompressor).
+ */
+sealed interface CompressionConfig {
+    data object None : CompressionConfig
 
-// Pre-allocated sync marker buffer to avoid allocation on every decompression.
-// Uses Direct zone so that on Linux K/N, this is a NativeBuffer with direct pointer
-// access. Heap zone would create a ByteArrayBuffer requiring pin/unpin (futex) on
-// every withInputPointer() call in the zlib decompressor.
+    /**
+     * Compression was negotiated via permessage-deflate.
+     *
+     * @param decompressor Always present — incoming messages may be compressed.
+     * @param compressor Null when the platform can't honor the negotiated client_max_window_bits
+     *   (e.g. JVM Deflater only supports window=15). In that case, outgoing frames are uncompressed
+     *   but incoming compressed frames are still decompressed.
+     * @param serverNoContextTakeover If true, reset decompressor after each message.
+     * @param clientNoContextTakeover If true, reset compressor after each message.
+     */
+    class Enabled(
+        val decompressor: StreamingDecompressor,
+        val compressor: StreamingCompressor?,
+        val serverNoContextTakeover: Boolean,
+        val clientNoContextTakeover: Boolean,
+    ) : CompressionConfig
+}
+
+// WebSocket permessage-deflate terminator: 0x00 0x00 0xFF 0xFF
+
+/**
+ * Checks if the next 4 bytes at the buffer's current position are the sync flush marker.
+ * Reads bytes individually to avoid byte order issues.
+ * Does NOT advance the buffer position (restores it after reading).
+ */
+private fun isSyncFlushMarker(buffer: ReadBuffer): Boolean {
+    if (buffer.remaining() < 4) return false
+    val pos = buffer.position()
+    val b0 = buffer.readByte()
+    val b1 = buffer.readByte()
+    val b2 = buffer.readByte()
+    val b3 = buffer.readByte()
+    buffer.position(pos)
+    return b0 == 0x00.toByte() && b1 == 0x00.toByte() && b2 == 0xFF.toByte() && b3 == 0xFF.toByte()
+}
+
+// Pre-allocated sync marker: exact byte sequence 00 00 FF FF (RFC 7692).
+// Wrapped from a constant byte array — no buffer allocation needed for 4 bytes.
+private val SYNC_FLUSH_MARKER_BYTES = byteArrayOf(0x00, 0x00, 0xFF.toByte(), 0xFF.toByte())
 private val SYNC_FLUSH_MARKER_BUFFER: ReadBuffer by lazy {
-    val buffer = PlatformBuffer.allocate(4, AllocationZone.Direct)
-    buffer.writeInt(SYNC_FLUSH_MARKER)
-    buffer.resetForRead()
-    buffer
+    BufferFactory.managed().wrap(SYNC_FLUSH_MARKER_BYTES)
 }
 
 /**
@@ -36,7 +74,7 @@ internal fun totalRemaining(chunks: List<ReadBuffer>): Int = chunks.sumOf { it.r
  */
 internal fun combineChunks(
     chunks: List<ReadBuffer>,
-    zone: AllocationZone,
+    factory: BufferFactory = BufferFactory.managed(),
     pool: BufferPool? = null,
 ): ReadBuffer {
     if (chunks.isEmpty()) return ReadBuffer.EMPTY_BUFFER
@@ -45,7 +83,7 @@ internal fun combineChunks(
     // since combineChunks would have returned the same object that gets freed.
     val totalSize = chunks.sumOf { it.remaining() }
     if (totalSize == 0) return ReadBuffer.EMPTY_BUFFER
-    val result = pool?.acquire(totalSize) ?: PlatformBuffer.allocate(totalSize, zone)
+    val result = pool?.acquire(totalSize) ?: factory.allocate(totalSize)
     for (chunk in chunks) {
         result.write(chunk)
     }
@@ -61,10 +99,11 @@ private fun stripSyncFlushMarkerInPlace(buffer: ReadBuffer): ReadBuffer {
     if (remaining >= 4) {
         val pos = buffer.position()
         buffer.position(pos + remaining - 4)
-        val marker = buffer.readInt()
-        buffer.position(pos)
-        if (marker == SYNC_FLUSH_MARKER) {
+        if (isSyncFlushMarker(buffer)) {
+            buffer.position(pos)
             buffer.setLimit(buffer.limit() - 4)
+        } else {
+            buffer.position(pos)
         }
     }
     return buffer
@@ -79,12 +118,19 @@ private fun stripSyncFlushMarkerInPlace(buffer: ReadBuffer): ReadBuffer {
 internal fun compressSync(
     buffer: ReadBuffer,
     compressor: StreamingCompressor,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.managed(),
     pool: BufferPool? = null,
 ): List<ReadBuffer> {
     val chunks = mutableListOf<ReadBuffer>()
-    compressor.compress(buffer) { chunks.add(it) }
-    compressor.flush { chunks.add(it) }
+    try {
+        compressor.compress(buffer) { chunks.add(it) }
+        compressor.flush { chunks.add(it) }
+    } catch (t: Throwable) {
+        // Any chunks produced before the deflate/flush threw are orphaned —
+        // release them before re-throwing so we don't leak direct memory.
+        chunks.freeAll()
+        throw t
+    }
 
     if (chunks.isEmpty()) return emptyList()
 
@@ -95,8 +141,7 @@ internal fun compressSync(
         val pos = lastChunk.position()
         val endPos = pos + lastChunk.remaining()
         lastChunk.position(endPos - 4)
-        val marker = lastChunk.readInt()
-        if (marker == SYNC_FLUSH_MARKER) {
+        if (isSyncFlushMarker(lastChunk)) {
             lastChunk.position(pos)
             lastChunk.setLimit(endPos - 4)
             if (lastChunk.remaining() == 0) {
@@ -108,32 +153,23 @@ internal fun compressSync(
     }
 
     // Marker spans multiple chunks or doesn't match - need to combine and strip
-    val combined = combineChunks(chunks, zone, pool)
+    val combined =
+        try {
+            combineChunks(chunks, factory, pool)
+        } catch (t: Throwable) {
+            chunks.freeAll()
+            throw t
+        }
     chunks.freeAll()
     return listOf(stripSyncFlushMarkerInPlace(combined))
-}
-
-/**
- * Decodes a decompressed chunk to StringBuilder and frees it.
- */
-private fun decodeAndFree(
-    chunk: ReadBuffer,
-    decoder: StreamingStringDecoder,
-    sb: StringBuilder,
-) {
-    if (chunk.position() != 0) chunk.position(0)
-    if (chunk.remaining() > 0) {
-        decoder.decode(chunk, sb)
-    }
-    chunk.freeIfNeeded()
 }
 
 /**
  * Decompresses a buffer directly to a String using a sync streaming decompressor.
  *
  * Uses [StreamingStringDecoder] for platform-optimized UTF-8 decoding with automatic
- * multi-byte boundary handling. Each decompressed chunk is decoded and freed immediately,
- * keeping peak memory to one chunk + StringBuilder.
+ * multi-byte boundary handling. Each decompressed chunk is decoded and freed immediately
+ * via scoped API, keeping peak memory to one chunk + StringBuilder.
  */
 internal fun decompressToStringSync(
     buffer: ReadBuffer,
@@ -141,10 +177,22 @@ internal fun decompressToStringSync(
     decoder: StreamingStringDecoder,
 ): String {
     val sb = StringBuilder()
-    decompressor.decompress(buffer) { decodeAndFree(it, decoder, sb) }
+    // Each chunk is library-owned; decode it then free immediately to keep peak memory
+    // at one chunk + the StringBuilder. The current buffer-compression API doesn't
+    // auto-release, so we do it inline (former `decompressScoped`/`flushScoped` shape).
+    decompressor.decompress(buffer) { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
     SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { decodeAndFree(it, decoder, sb) }
-    decompressor.flush { decodeAndFree(it, decoder, sb) }
+    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
+    decompressor.flush { chunk ->
+        decoder.decode(chunk, sb)
+        chunk.freeIfNeeded()
+    }
     decoder.finish(sb)
     decoder.reset()
     return sb.toString()
@@ -156,7 +204,8 @@ internal fun decompressToStringSync(
 internal fun decompressToBufferSync(
     buffer: ReadBuffer,
     decompressor: StreamingDecompressor,
-    zone: AllocationZone = AllocationZone.Heap,
+    factory: BufferFactory = BufferFactory.managed(),
+    pool: BufferPool? = null,
 ): ReadBuffer {
     var totalSize = 0
     val chunks = mutableListOf<ReadBuffer>()
@@ -169,11 +218,16 @@ internal fun decompressToBufferSync(
         chunks.add(chunk)
     }
 
-    decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
+    try {
+        decompressor.decompress(buffer) { chunk -> addChunk(chunk) }
 
-    SYNC_FLUSH_MARKER_BUFFER.position(0)
-    decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
-    decompressor.flush { chunk -> addChunk(chunk) }
+        SYNC_FLUSH_MARKER_BUFFER.position(0)
+        decompressor.decompress(SYNC_FLUSH_MARKER_BUFFER) { chunk -> addChunk(chunk) }
+        decompressor.flush { chunk -> addChunk(chunk) }
+    } catch (t: Throwable) {
+        chunks.freeAll()
+        throw t
+    }
 
     // Single chunk optimization - no copy needed
     if (chunks.size == 1) {
@@ -185,11 +239,25 @@ internal fun decompressToBufferSync(
         return ReadBuffer.EMPTY_BUFFER
     }
 
-    // Combine chunks into final output
-    val output = PlatformBuffer.allocate(totalSize, zone)
-    for (chunk in chunks) {
-        chunk.position(0)
-        output.write(chunk)
+    // Combine chunks into final output. Allocation can throw (e.g. OOM) —
+    // release the staged chunks before propagating so the leak doesn't
+    // compound on the exception path.
+    val output =
+        try {
+            pool?.acquire(totalSize) ?: factory.allocate(totalSize)
+        } catch (t: Throwable) {
+            chunks.freeAll()
+            throw t
+        }
+    try {
+        for (chunk in chunks) {
+            chunk.position(0)
+            output.write(chunk)
+        }
+    } catch (t: Throwable) {
+        output.freeIfNeeded()
+        chunks.freeAll()
+        throw t
     }
     chunks.freeAll()
     output.resetForRead()

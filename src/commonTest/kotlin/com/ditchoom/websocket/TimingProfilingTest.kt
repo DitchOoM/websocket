@@ -2,12 +2,10 @@ package com.ditchoom.websocket
 
 import agentName
 import autobahnHost
-import com.ditchoom.buffer.AllocationZone
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.StreamingStringDecoder
-import com.ditchoom.buffer.allocate
-import com.ditchoom.buffer.compression.BufferAllocator
 import com.ditchoom.buffer.compression.CompressionAlgorithm
 import com.ditchoom.buffer.compression.CompressionLevel
 import com.ditchoom.buffer.compression.StreamingCompressor
@@ -15,6 +13,7 @@ import com.ditchoom.buffer.compression.StreamingDecompressor
 import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.managed
 import kotlinx.coroutines.flow.take
 import kotlin.test.Test
 import kotlin.time.Duration
@@ -45,23 +44,23 @@ class TimingProfilingTest {
                     StreamingCompressor.create(
                         CompressionAlgorithm.Raw,
                         CompressionLevel.Default,
-                        BufferAllocator.Direct,
+                        BufferFactory.Default,
                     )
                 val decompressor =
                     StreamingDecompressor.create(
                         CompressionAlgorithm.Raw,
-                        BufferAllocator.Direct,
+                        BufferFactory.Default,
                     )
                 val decoder = StreamingStringDecoder()
 
                 // Warmup
                 repeat(10) {
-                    val buf = PlatformBuffer.allocate(size, AllocationZone.Direct)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.writeString(text, Charset.UTF8)
                     buf.resetForRead()
                     val compressed = compressSync(buf, compressor)
                     compressor.reset()
-                    val combined = combineChunks(compressed, AllocationZone.Heap)
+                    val combined = combineChunks(compressed, BufferFactory.managed())
                     compressed.freeAll()
                     val decompressedStr = decompressToStringSync(combined, decompressor, decoder)
                     combined.freeIfNeeded()
@@ -78,7 +77,7 @@ class TimingProfilingTest {
                 repeat(iterations) {
                     // String encode
                     var mark = TimeSource.Monotonic.markNow()
-                    val buf = PlatformBuffer.allocate(size, AllocationZone.Direct)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.writeString(text, Charset.UTF8)
                     buf.resetForRead()
                     stringEncodeTotal += mark.elapsedNow()
@@ -91,7 +90,7 @@ class TimingProfilingTest {
 
                     // Buffer combine
                     mark = TimeSource.Monotonic.markNow()
-                    val combined = combineChunks(compressed, AllocationZone.Heap)
+                    val combined = combineChunks(compressed, BufferFactory.managed())
                     compressed.freeAll()
                     bufferAllocTotal += mark.elapsedNow()
 
@@ -135,23 +134,19 @@ class TimingProfilingTest {
                     websocketEndpoint = "/runCase?case=302&agent=${agentName()}",
                     requestCompression = true,
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, parentScope = this, allocationZone = AllocationZone.Heap)
-
-            // Connect
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()))
 
             var writeTotal = Duration.ZERO
             var readTotal = Duration.ZERO
 
             try {
-                ws.incomingMessages.take(count).collect { msg ->
-                    val text = (msg as WebSocketMessage.Text).value
+                ws.receive().take(count).collect { msg ->
+                    val text = (msg as WebSocketMessage.Text).payload
 
                     // Measure write (includes compress + frame + socket write)
                     val writeMark = TimeSource.Monotonic.markNow()
-                    ws.write(text)
+                    ws.send(WebSocketMessage.Text(text))
                     writeTotal += writeMark.elapsedNow()
                 }
             } catch (_: Exception) {
@@ -193,20 +188,17 @@ class TimingProfilingTest {
                     websocketEndpoint = "/runCase?case=302&agent=${agentName()}",
                     requestCompression = false, // NO compression
                 )
-            val ws = WebSocketClient.allocate(connectionOptions, parentScope = this, allocationZone = AllocationZone.Heap)
-
             val connectMark = TimeSource.Monotonic.markNow()
-            ws.connect()
-            ws.awaitConnected()
+            val ws = connectForTest(connectionOptions.copy(bufferFactory = BufferFactory.managed()))
 
             var writeTotal = Duration.ZERO
 
             try {
-                ws.incomingMessages.take(count).collect { msg ->
-                    val text = (msg as WebSocketMessage.Text).value
+                ws.receive().take(count).collect { msg ->
+                    val text = (msg as WebSocketMessage.Text).payload
 
                     val writeMark = TimeSource.Monotonic.markNow()
-                    ws.write(text)
+                    ws.send(WebSocketMessage.Text(text))
                     writeTotal += writeMark.elapsedNow()
                 }
             } catch (_: Exception) {
@@ -242,7 +234,7 @@ class TimingProfilingTest {
                 // Direct (NativeBuffer = malloc/free on Linux)
                 val directMark = TimeSource.Monotonic.markNow()
                 repeat(iterations) {
-                    val buf = PlatformBuffer.allocate(size, AllocationZone.Direct)
+                    val buf = BufferFactory.Default.allocate(size)
                     buf.freeIfNeeded()
                 }
                 val directTime = directMark.elapsedNow()
@@ -250,7 +242,7 @@ class TimingProfilingTest {
                 // Heap (ByteArrayBuffer = managed allocation)
                 val heapMark = TimeSource.Monotonic.markNow()
                 repeat(iterations) {
-                    val buf = PlatformBuffer.allocate(size, AllocationZone.Heap)
+                    val buf = BufferFactory.managed().allocate(size)
                     buf.freeIfNeeded()
                 }
                 val heapTime = heapMark.elapsedNow()

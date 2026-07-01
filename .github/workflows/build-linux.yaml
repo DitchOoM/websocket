@@ -17,7 +17,7 @@ jobs:
   build:
     name: "Linux / JVM / JS / Android"
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -47,10 +47,10 @@ jobs:
         id: version
         run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
 
-      - name: Run JVM / JS tests
+      - name: Run JVM / JS / Android tests
         run: >-
           ./gradlew ktlintCheck
-          jvmTest jsNodeTest jsBrowserTest
+          jvmTest jsNodeTest jsBrowserTest testDebugUnitTest
           --no-build-cache ${{ inputs.gradle-args }}
 
       - name: Run Linux x64 tests
@@ -67,3 +67,31 @@ jobs:
           name: maven-local-linux
           path: ~/.m2/repository/com/ditchoom
           retention-days: 3
+
+      - name: Build ARM64 test binary
+        run: >-
+          ./gradlew linkDebugTestLinuxArm64
+          --no-build-cache ${{ inputs.gradle-args }}
+
+      - name: Upload ARM64 test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-test-binary
+          path: build/bin/linuxArm64/debugTest/test.kexe
+          retention-days: 1
+
+  test-arm64:
+    name: "Linux ARM64 (native)"
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - name: Download ARM64 test binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-test-binary
+
+      - name: Run ARM64 tests
+        run: |
+          chmod +x test.kexe
+          ./test.kexe "--ktest_negative_gradle_filter=com.ditchoom.websocket.Autobahn*,com.ditchoom.websocket.WebSocketTests,com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.ProfilingTest,com.ditchoom.websocket.TimingProfilingTest"

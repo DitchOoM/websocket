@@ -1,0 +1,277 @@
+name: "Autobahn Conformance"
+
+# Runs the RFC 6455 Autobahn conformance suite (AutobahnCase*) for every platform as an
+# independent, parallel job so one slow/failing target doesn't serialize the rest.
+#
+# Two execution models (chosen per platform):
+#   * Gradle jobs (JVM, JS-Node, JS-Browser, Apple, Android): `<task> -PintegrationTests` — the
+#     build auto-starts the fuzzingserver (AutobahnDockerTask) and validates the platform's agent
+#     via a `finalizedBy validateAutobahnResults<Platform>` finalizer.
+#   * Native jobs (Linux x64/arm64): the test binary is compiled ONCE in `build-native`, uploaded,
+#     then each arch job downloads the kexe, starts the fuzzingserver, runs only Autobahn cases,
+#     and validates with .github/scripts/validate_autobahn.py.
+#
+# Every job uploads its fuzzingserver report (.docker/reports/clients) as an artifact.
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+      - '.editorconfig'
+  workflow_dispatch:
+
+concurrency:
+  group: autobahn-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Only the RFC conformance cases (categories 1-13). AutobahnStress* is factory-matrix coverage
+  # whose pass/fail is judged by the JUnit assertion, not per-case fuzzingserver validation.
+  AUTOBAHN_FILTER: "com.ditchoom.websocket.AutobahnCase*"
+
+jobs:
+  # ----------------------------------------------------------------------------- Gradle: JVM / JS
+  jvm:
+    name: "JVM"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Run Autobahn (JVM)
+        run: ./gradlew jvmTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-jvm
+          path: .docker/reports/clients
+          retention-days: 7
+
+  js-node:
+    name: "JS (Node)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Run Autobahn (jsNode)
+        run: ./gradlew jsNodeTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-jsnode
+          path: .docker/reports/clients
+          retention-days: 7
+
+  js-browser:
+    name: "JS (Browser)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Non-blocking for now: --tests AutobahnCase* bypasses the build's per-case browser exclusions
+    # (browser can't reach some cases — reserved close codes, window-bits control). Conformance for
+    # the reachable cases passes; the JUnit task fails on the unreachable ones. Harden in follow-up.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - uses: browser-actions/setup-chrome@v1
+      - name: Run Autobahn (jsBrowser)
+        run: ./gradlew jsBrowserTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-jsbrowser
+          path: .docker/reports/clients
+          retention-days: 7
+
+  # -------------------------------------------------------- Native: compile once, run per arch
+  build-native:
+    name: "Build native test binaries"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+      - name: Link Linux test binaries
+        run: ./gradlew linkDebugTestLinuxX64 linkDebugTestLinuxArm64 --no-build-cache
+      - name: Upload linuxX64 kexe
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-linuxX64
+          path: build/bin/linuxX64/debugTest/test.kexe
+          retention-days: 1
+      - name: Upload linuxArm64 kexe
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-linuxArm64
+          path: build/bin/linuxArm64/debugTest/test.kexe
+          retention-days: 1
+
+  linux-x64:
+    name: "Linux x64 (native)"
+    needs: build-native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4   # for .docker/config + validation scripts
+      - name: Download test binary
+        uses: actions/download-artifact@v4
+        with:
+          name: test-binary-linuxX64
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+      - name: Run Autobahn (linuxX64)
+        run: |
+          chmod +x test.kexe
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+      - name: Validate results
+        run: python3 .github/scripts/validate_autobahn.py LinuxX64
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-linuxx64
+          path: .docker/reports/clients
+          retention-days: 7
+
+  linux-arm64:
+    name: "Linux arm64 (native)"
+    needs: build-native
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    # Non-blocking: the amd64-only fuzzingserver runs under QEMU emulation here, which is slow for
+    # the heavy compression cases. The arm64 TEST BINARY runs natively; only the server is emulated.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download test binary
+        uses: actions/download-artifact@v4
+        with:
+          name: test-binary-linuxArm64
+      - name: Set up QEMU (run amd64 fuzzingserver on arm64)
+        uses: docker/setup-qemu-action@v3
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+      - name: Run Autobahn (linuxArm64)
+        run: |
+          chmod +x test.kexe
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+      # linuxArm64 shares src/linuxTest, so it reports under the same "LinuxX64" agent name.
+      - name: Validate results
+        run: python3 .github/scripts/validate_autobahn.py LinuxX64
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-linuxarm64
+          path: .docker/reports/clients
+          retention-days: 7
+
+  # ----------------------------------------------------------------------------------- Apple
+  # macOS GitHub runners have no Docker daemon, so we bring one up via Colima to host the
+  # fuzzingserver. The KotlinNativeTest finalizer validates the "LinuxX64" agent (vacuous on
+  # macOS), so we additionally validate the real "macOS" agent explicitly.
+  apple:
+    name: "Apple (macOS)"
+    runs-on: macos-14
+    timeout-minutes: 60
+    # Non-blocking: GitHub's hosted ARM macOS runners (M1) lack nested virtualization, so Colima
+    # (and any Linux-container tool, incl. Apple `container`) can't start the fuzzingserver. Needs
+    # an Intel runner, a self-hosted M3+/macOS-15 mac, or an off-runner fuzzingserver. Follow-up.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
+      - name: Start Docker (Colima)
+        run: |
+          brew install colima docker
+          colima start --arch x86_64 --cpu 3 --memory 6
+      - name: Run Autobahn (macosArm64)
+        run: ./gradlew macosArm64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+      - name: Validate results (macOS agent)
+        run: python3 .github/scripts/validate_autobahn.py macOS
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-apple
+          path: .docker/reports/clients
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------- Android
+  # Emulator on an ubuntu runner (Docker is native here). connectedDebugAndroidTest is wired to
+  # start the fuzzingserver, adb-reverse :9001, and validate the "Android" agent. minSdk 26 is
+  # required so D8 emits a dex version the emulator accepts (-PinstrumentedTestsMinSdk26).
+  android:
+    name: "Android (emulator)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Non-blocking: emulator + instrumented-manifest setup still being shaken out. Follow-up.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Autobahn (Android emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          # Root task only (leading ':'): the Autobahn instrumented tests live in the root module's
+          # androidInstrumentedTest. -PinstrumentedTestsMinSdk26 raises the root minSdk to 34; the
+          # unqualified task would also run :websocket-tcp:, whose androidTest stays at minSdk 21 and
+          # fails the manifest merge against the (34) root library.
+          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk26 --no-build-cache
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-report-android
+          path: .docker/reports/clients
+          retention-days: 7

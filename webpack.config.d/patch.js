@@ -3,6 +3,7 @@ config.resolve.alias = {
     "util": false,
     "tls": false,
     "crypto": false,
+    "fs": false,
 }
 if (config.devServer != null) {
     config.devServer.headers = {

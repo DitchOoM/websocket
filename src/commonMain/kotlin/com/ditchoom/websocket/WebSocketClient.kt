@@ -1,37 +1,21 @@
 package com.ditchoom.websocket
 
-import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.SuspendCloseable
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
+import com.ditchoom.buffer.flow.Connection
 
-interface WebSocketClient : SuspendCloseable {
-    val scope: CoroutineScope
-
-    suspend fun connect(): WebSocketClient
-
-    suspend fun localPort(): Int
-
-    suspend fun remotePort(): Int
-
-    suspend fun write(buffer: ReadBuffer)
-
-    suspend fun write(string: String)
-
-    suspend fun ping(payloadData: ReadBuffer = EMPTY_BUFFER)
-
-    suspend fun isPingSupported(): Boolean = true
-
-    companion object
-
-    val connectionState: StateFlow<ConnectionState>
-    val incomingMessages: Flow<WebSocketMessage>
-
-    /** Text messages only — avoids filterIsInstance overhead for typed consumers. */
-    val incomingTextMessages: Flow<String>
-
-    /** Binary messages only — avoids filterIsInstance overhead for typed consumers. */
-    val incomingBinaryMessages: Flow<ReadBuffer>
+/**
+ * Executes [block] with this connection, then closes it regardless of outcome.
+ *
+ * ```kotlin
+ * connectWebSocket(transport, options).use { ws ->
+ *     ws.send(WebSocketMessage.Text("hello"))
+ *     val echo = ws.receive().first()
+ * }
+ * ```
+ */
+suspend inline fun <B, R> Connection<WebSocketMessage<B>>.use(block: (Connection<WebSocketMessage<B>>) -> R): R {
+    try {
+        return block(this)
+    } finally {
+        close()
+    }
 }

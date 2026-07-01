@@ -29,7 +29,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-2-2 - parse valid 101 response with all required headers`() {
+    fun rfc6455Section422ParseValid101ResponseWithAllRequiredHeaders() {
         // "If the server chooses to accept the incoming connection, it MUST
         // reply with a valid HTTP response indicating the following:
         // 1. An HTTP Status-Line with a status code of 101
@@ -57,7 +57,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-2-2 - parse response with Sec-WebSocket-Protocol`() {
+    fun rfc6455Section422ParseResponseWithSecWebSocketProtocol() {
         // "Optionally, a |Sec-WebSocket-Protocol| header field, with a value
         // /protocol/ that indicates the subprotocol the server has selected"
         val response =
@@ -77,7 +77,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 6455 Section 4-2-2 - parse response with Sec-WebSocket-Extensions`() {
+    fun rfc6455Section422ParseResponseWithSecWebSocketExtensions() {
         // "Optionally, a |Sec-WebSocket-Extensions| header field, with a
         // value /extensions/ indicating the extensions the server accepts"
         val response =
@@ -104,7 +104,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 4-2-2 Example - Sec-WebSocket-Accept calculation`() {
+    fun rfc6455Section422ExampleSecWebSocketAcceptCalculation() {
         // "For this header field, the server has to take the value (as present
         // in the header field, e.g., the base64-encoded [RFC4648] version minus
         // any leading and trailing whitespace) and concatenate this with the
@@ -128,7 +128,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 7230 Section 3-1-2 - parse HTTP 1-1 status line`() {
+    fun rfc7230Section312ParseHTTP11StatusLine() {
         // "status-line = HTTP-version SP status-code SP reason-phrase CRLF"
         val response =
             """
@@ -147,7 +147,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7230 Section 3-1-2 - parse HTTP 1-0 status line`() {
+    fun rfc7230Section312ParseHTTP10StatusLine() {
         // HTTP/1.0 is also acceptable per the spec
         val response =
             """
@@ -165,7 +165,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7230 Section 3-1-2 - empty reason phrase is valid`() {
+    fun rfc7230Section312EmptyReasonPhraseIsValid() {
         // "A client SHOULD ignore the reason-phrase content."
         // The reason phrase can be empty
         val response =
@@ -185,7 +185,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7230 Section 3-1-2 - parse various status codes`() {
+    fun rfc7230Section312ParseVariousStatusCodes() {
         // Non-101 status codes should still be parseable
         for ((code, reason) in listOf(
             200 to "OK",
@@ -217,7 +217,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 7230 Section 3-2 - header names are case-insensitive`() {
+    fun rfc7230Section32HeaderNamesAreCaseInsensitive() {
         // "Each header field consists of a case-insensitive field name"
         val response =
             """
@@ -238,7 +238,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7230 Section 3-2 - header value with leading whitespace`() {
+    fun rfc7230Section32HeaderValueWithLeadingWhitespace() {
         // "optional leading whitespace (OWS) [...] before the field value"
         val response =
             """
@@ -257,7 +257,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7230 Section 3-2 - header value with trailing whitespace`() {
+    fun rfc7230Section32HeaderValueWithTrailingWhitespace() {
         // "optional [...] trailing whitespace (OWS)"
         val response =
             """
@@ -281,7 +281,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 7692 Section 7-1-1 - server_no_context_takeover parameter`() {
+    fun rfc7692Section711Server_no_context_takeoverParameter() {
         // "A server MAY include the 'server_no_context_takeover' extension
         // parameter in an extension negotiation response to indicate that
         // the server will not reuse the LZ77 sliding window"
@@ -304,7 +304,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7692 Section 7-1-1 - client_no_context_takeover parameter`() {
+    fun rfc7692Section711Client_no_context_takeoverParameter() {
         // "A server MAY include the 'client_no_context_takeover' extension
         // parameter in an extension negotiation response to require the
         // client to not reuse the LZ77 sliding window"
@@ -327,7 +327,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7692 Section 7-1-2 - server_max_window_bits parameter`() {
+    fun rfc7692Section712Server_max_window_bitsParameter() {
         // "A server MAY include the 'server_max_window_bits' extension parameter
         // in an extension negotiation response to inform the client of the LZ77
         // sliding window size it will use"
@@ -349,7 +349,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7692 Section 7-1-2 - client_max_window_bits parameter`() {
+    fun rfc7692Section712Client_max_window_bitsParameter() {
         // "A server MAY include the 'client_max_window_bits' extension parameter
         // in an extension negotiation response"
         val response =
@@ -370,7 +370,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 7692 Section 7 - all compression parameters together`() {
+    fun rfc7692Section7AllCompressionParametersTogether() {
         val response =
             """
             HTTP/1.1 101 Switching Protocols
@@ -397,7 +397,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `RFC 6455 Section 9-1 - parse multiple extensions`() {
+    fun rfc6455Section91ParseMultipleExtensions() {
         // "The value of the 'Sec-WebSocket-Extensions' header field consists
         // of a comma-separated list of extension offers"
         val response =
@@ -420,7 +420,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 6455 Section 9-1 - extension parameter without value`() {
+    fun rfc6455Section91ExtensionParameterWithoutValue() {
         // "extension-param = token [ '=' (token | quoted-string) ]"
         // Parameter can have no value
         val extensions = HandshakeResponseParser.parseExtensions("ext; flag")
@@ -431,7 +431,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `RFC 6455 Section 9-1 - extension parameter with quoted value`() {
+    fun rfc6455Section91ExtensionParameterWithQuotedValue() {
         // "extension-param = token [ '=' (token | quoted-string) ]"
         val extensions = HandshakeResponseParser.parseExtensions("ext; param=\"quoted value\"")
 
@@ -444,7 +444,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `zero-copy - buffer position is restored after parsing`() {
+    fun zeroCopyBufferPositionIsRestoredAfterParsing() {
         val response =
             """
             HTTP/1.1 101 Switching Protocols
@@ -463,7 +463,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `zero-copy - buffer can be parsed multiple times`() {
+    fun zeroCopyBufferCanBeParsedMultipleTimes() {
         val response =
             """
             HTTP/1.1 101 Switching Protocols
@@ -487,7 +487,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `findHeaderEnd - returns correct index`() {
+    fun findHeaderEndReturnsCorrectIndex() {
         val response = "HTTP/1.1 101 OK\r\nHeader: value\r\n\r\nbody".toReadBuffer(Charset.UTF8)
 
         val endIndex = HandshakeResponseParser.findHeaderEnd(response)
@@ -498,7 +498,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `findHeaderEnd - returns -1 when not found`() {
+    fun findHeaderEndReturns1WhenNotFound() {
         val incomplete = "HTTP/1.1 101 OK\r\nHeader: value\r\n".toReadBuffer(Charset.UTF8)
 
         val endIndex = HandshakeResponseParser.findHeaderEnd(incomplete)
@@ -511,7 +511,7 @@ class HandshakeResponseParserTest {
     // ========================================================================
 
     @Test
-    fun `error - malformed status line throws HandshakeException`() {
+    fun errorMalformedStatusLineThrowsHandshakeException() {
         val malformed = "INVALID\r\n\r\n".toReadBuffer(Charset.UTF8)
 
         assertFailsWith<HandshakeException> {
@@ -520,7 +520,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `error - missing status code throws HandshakeException`() {
+    fun errorMissingStatusCodeThrowsHandshakeException() {
         val malformed = "HTTP/1.1 \r\n\r\n".toReadBuffer(Charset.UTF8)
 
         assertFailsWith<HandshakeException> {
@@ -529,7 +529,7 @@ class HandshakeResponseParserTest {
     }
 
     @Test
-    fun `error - non-numeric status code throws HandshakeException`() {
+    fun errorNonNumericStatusCodeThrowsHandshakeException() {
         val malformed = "HTTP/1.1 ABC Switching\r\n\r\n".toReadBuffer(Charset.UTF8)
 
         assertFailsWith<HandshakeException> {

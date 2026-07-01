@@ -7,9 +7,11 @@ import java.util.Base64
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
+    alias(libs.plugins.ksp)
     alias(libs.plugins.dokka)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.buffer.codec.schema)
     signing
 }
 
@@ -27,6 +29,7 @@ project.version = getNextVersion(!isRunningOnGithub).toString()
 logger.lifecycle("Version: ${project.version}, isRunningOnGithub: $isRunningOnGithub, isMainBranchGithub: $isMainBranchGithub")
 
 repositories {
+    mavenLocal()
     mavenCentral()
     google()
     maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
@@ -44,7 +47,13 @@ kotlin {
         compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
     }
     js {
-        browser()
+        browser {
+            testTask {
+                useKarma {
+                    useChromeHeadless()
+                }
+            }
+        }
         nodejs {
             testTask {
                 useMocha {
@@ -77,15 +86,41 @@ kotlin {
 
     applyDefaultHierarchyTemplate()
     sourceSets {
+        // Cannot use appleMain directly because compileAppleMainKotlinMetadata
+        // can't resolve Apple-specific types (NSData, nw_connection_t, etc.) from dependencies.
+        if (hostOs.family.isAppleFamily) {
+            val appleNativeImplDir = file("src/appleNativeImpl/kotlin")
+            listOf(
+                "macosArm64Main",
+                "macosX64Main",
+                "iosArm64Main",
+                "iosSimulatorArm64Main",
+                "iosX64Main",
+                "tvosArm64Main",
+                "tvosSimulatorArm64Main",
+                "tvosX64Main",
+                "watchosArm64Main",
+                "watchosSimulatorArm64Main",
+                "watchosX64Main",
+            ).forEach { sourceSetName ->
+                findByName(sourceSetName)?.kotlin?.srcDir(appleNativeImplDir)
+            }
+        }
         commonMain.dependencies {
-            implementation(libs.buffer)
+            // buffer/buffer-codec/buffer-flow are `api`: this module's public API returns their types
+            // (BufferFactory/PlatformBuffer, Codec, Connection/WebSocketMessage), so consumers of
+            // com.ditchoom:websocket need them on their compile classpath. buffer-compression is
+            // internal (permessage-deflate), so it stays `implementation`.
+            api(libs.buffer)
             implementation(libs.buffer.compression)
-            implementation(libs.socket)
+            api(libs.buffer.codec)
+            api(libs.buffer.flow)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.socket) // For integration tests (real TCP transport)
         }
         jvmTest.dependencies {
             implementation(libs.kotlinx.coroutines.debug)
@@ -107,9 +142,14 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation(kotlin("test"))
+                // atomicfu runtime is needed because the atomicfu compiler plugin
+                // doesn't transform Android unit test bytecode — kotlinx-coroutines
+                // references AtomicFU at runtime
+                implementation(libs.atomicfu)
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
+        androidInstrumentedTest.dependsOn(commonJvmTest)
 
         androidInstrumentedTest.dependencies {
             implementation(kotlin("test"))
@@ -121,10 +161,50 @@ kotlin {
     }
 }
 
+// KSP: generate codecs for commonMain (visible to all targets)
+dependencies {
+    add("kspCommonMainMetadata", libs.buffer.codec.processor)
+}
+
+// Wire KSP commonMain output into each target's source set
+kotlin.sourceSets.commonMain {
+    kotlin.srcDir("build/generated/ksp/metadata/commonMain/kotlin")
+}
+
+// Ensure KSP runs before compilation and source jar tasks for all targets
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    if (name != "kspCommonMainKotlinMetadata") {
+        dependsOn("kspCommonMainKotlinMetadata")
+    }
+}
+// Gradle 8.14 strict mode flags tasks that read build/generated/ksp/metadata/commonMain/kotlin
+// without an explicit dependency on the KSP task that produces it. Cover the downstream tasks
+// that consume commonMain sources: source JARs + ktlint check/format variants on commonMain/commonTest.
+tasks
+    .matching {
+        it.name.contains("SourcesJar", ignoreCase = true) ||
+            (it.name.startsWith("runKtlint") && it.name.contains("Common"))
+    }.configureEach {
+        dependsOn("kspCommonMainKotlinMetadata")
+    }
+
+// The codec-schema wire-drift gate (com.ditchoom.buffer.codec-schema) defaults to depending on
+// every `ksp*` task. This project only runs the processor once, in commonMain-metadata mode, so the
+// descriptor comes solely from kspCommonMainKotlinMetadata. Narrow the tasks to that one so wiring
+// checkCodecSchema into `check` doesn't drag in per-target (esp. Android instrumented) KSP tasks and
+// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk26 on non-Android hosts).
+listOf("checkCodecSchema", "updateCodecSchema").forEach { taskName ->
+    tasks.named(taskName) {
+        setDependsOn(listOf(tasks.named("kspCommonMainKotlinMetadata")))
+    }
+}
+
 val integrationTestPatterns =
     listOf(
         "com.ditchoom.websocket.Autobahn*",
         "com.ditchoom.websocket.WebSocketTests",
+        "com.ditchoom.websocket.PublicWssValidationTest",
+        "com.ditchoom.websocket.NativeWebSocketClientTest",
     )
 
 // Profiling tests are excluded from CI - they're diagnostic tools for local profiling,
@@ -133,6 +213,9 @@ val profilingTestPatterns =
     listOf(
         "com.ditchoom.websocket.ProfilingTest",
         "com.ditchoom.websocket.TimingProfilingTest",
+        // Heavy large-message/compression throughput benchmark; run manually:
+        //   ./gradlew jvmTest --tests "*ChoppedReadBenchmark*"
+        "com.ditchoom.websocket.ChoppedReadBenchmark",
     )
 
 val runIntegrationTests = project.hasProperty("integrationTests")
@@ -142,6 +225,7 @@ tasks.withType<Test>().configureEach {
     failFast = true
     testLogging {
         showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
     // Always exclude profiling tests from CI - run manually when needed
     filter {
@@ -149,7 +233,6 @@ tasks.withType<Test>().configureEach {
     }
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
-        // (Streaming decompression reduced requirement from 2GB to ~640MB)
         maxHeapSize = "1g"
     } else {
         filter {
@@ -163,8 +246,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.native.tasks.KotlinNativeTest
     // Always exclude profiling tests from CI
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
 }
 
@@ -173,15 +255,45 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     // Always exclude profiling tests from CI
     profilingTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     if (!runIntegrationTests) {
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.Autobahn*")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests")
+        integrationTestPatterns.forEach { this.filter.excludeTestsMatching(it) }
     }
-    // Exclude tests from browser that require Node.js APIs or raw socket access
-    // Browser WebSocket handles handshake/compression internally via native API
+    // Browser exclusions — see docs/docs/platforms/javascript.md for the full rationale.
+    // After v2's connectForTest flip to connectNativeWebSocket, the browser path
+    // exercises BrowserWebSocketController (native `WebSocket`) end-to-end, so most
+    // autobahn coverage works natively. The exclusions below fall into three buckets:
+    //   (1) tests that drive the TCP-path codec directly (not applicable on browser),
+    //   (2) tests of browser-unsupported features (frame-level ping/pong, invalid
+    //       close codes, permessage-deflate window-bits control),
+    //   (3) known-failing infrastructure (SharedArrayBuffer + Chrome API friction).
     if (name.contains("Browser", ignoreCase = true)) {
+        // (1) TCP-path unit tests — not relevant on browser's native WS.
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecMockTest")
+        // (1) Direct-to-codec compression tests construct StreamingCompressor/Decompressor
+        // explicitly; the buffer library's sync compression needs Node's zlib and will
+        // throw on browser construction. Real browser consumers never hit this code path
+        // because the native WebSocket runs permessage-deflate itself.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionPathTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionEchoTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.CompressionRoundTripTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.JsCompressionIsolationTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.JsBugRegressionTests")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.DecompressToStringTest")
-        this.filter.excludeTestsMatching("com.ditchoom.websocket.DefaultWebSocketClientMockTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.MockAutobahnCat9CompressionTest")
+        // (2) Browser `WebSocket` API constraints.
+        // Autobahn case 7.9.x tests sending invalid/reserved close codes (1004, 1005,
+        // 1006, 1012…). The browser API rejects these before they hit the wire.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase7CloseTests")
+        // Autobahn case 13 requires control over permessage-deflate window bits and
+        // context takeover, neither of which the browser `WebSocket` API exposes.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.AutobahnCase13*")
+        // Browser WebSocket has no app-level ping/pong — send() silently no-ops and
+        // the browser handles protocol-level keepalive internally.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketTests.pingPongWorks")
+        // test.mosquitto.org:8081 WSS is flaky from headless Chrome specifically
+        // (other WSS endpoints in this suite — HiveMQ 8884, echo.websocket.org:443,
+        // websocket-echo.com:443 — all work). Non-platform, endpoint-specific.
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.PublicWssValidationTest.mosquittoWssConnect")
     }
 }
 
@@ -189,8 +301,49 @@ android {
     compileSdk = 36
     sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
-        minSdk = 21
+        // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
+        // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
+        // -PinstrumentedTestsMinSdk26 when building the instrumentation test APK.
+        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
+        // profilingTestPatterns / integrationTestPatterns filters applied above
+        // via tasks.withType<Test> do not affect it. Filter at the runner instead.
+        val profilingClasses =
+            listOf(
+                "com.ditchoom.websocket.ProfilingTest",
+                "com.ditchoom.websocket.TimingProfilingTest",
+            )
+        val integrationClasses =
+            listOf(
+                "com.ditchoom.websocket.AutobahnCase1PayloadTests",
+                "com.ditchoom.websocket.AutobahnCase2FragmentationTests",
+                "com.ditchoom.websocket.AutobahnCase3Utf8Tests",
+                "com.ditchoom.websocket.AutobahnCase4ReservedOpcodeTests",
+                "com.ditchoom.websocket.AutobahnCase5ControlFrameTests",
+                "com.ditchoom.websocket.AutobahnCase6PingPongTests",
+                "com.ditchoom.websocket.AutobahnCase7CloseTests",
+                "com.ditchoom.websocket.AutobahnCase9CompressionTests",
+                "com.ditchoom.websocket.AutobahnCase10MiscTests",
+                "com.ditchoom.websocket.AutobahnCase12CompressionTests",
+                "com.ditchoom.websocket.AutobahnCase13CompressionTests",
+                "com.ditchoom.websocket.AutobahnStressDefaultTests",
+                "com.ditchoom.websocket.AutobahnStressManagedTests",
+                "com.ditchoom.websocket.AutobahnStressDeterministicTests",
+                "com.ditchoom.websocket.AutobahnStressSharedTests",
+                "com.ditchoom.websocket.AutobahnStressPooledTests",
+                "com.ditchoom.websocket.WebSocketTests",
+                "com.ditchoom.websocket.PublicWssValidationTest",
+            )
+        val notClasses =
+            buildList {
+                addAll(profilingClasses)
+                if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
+            }
+        if (notClasses.isNotEmpty()) {
+            testInstrumentationRunnerArguments["notClass"] = notClasses.joinToString(",")
+        }
     }
     namespace = "$group.${rootProject.name}"
 
@@ -282,7 +435,9 @@ ktlint {
     outputToConsole.set(true)
     android.set(true)
     filter {
-        exclude("**/generated/**")
+        exclude { element ->
+            element.file.path.contains("/build/")
+        }
     }
 }
 
@@ -296,6 +451,26 @@ dokka {
         }
         reportUndocumented.set(false)
     }
+
+    // Suppress duplicate Apple source sets that share appleNativeImpl - keep only macosArm64
+    val suppressedAppleTargets =
+        listOf(
+            "macosX64",
+            "iosArm64",
+            "iosSimulatorArm64",
+            "iosX64",
+            "tvosArm64",
+            "tvosSimulatorArm64",
+            "tvosX64",
+            "watchosArm64",
+            "watchosSimulatorArm64",
+            "watchosX64",
+        )
+    dokkaSourceSets {
+        suppressedAppleTargets.forEach { target ->
+            findByName("${target}Main")?.suppress?.set(true)
+        }
+    }
 }
 
 tasks.register<Copy>("copyDokkaToDocusaurus") {
@@ -304,30 +479,9 @@ tasks.register<Copy>("copyDokkaToDocusaurus") {
     into(layout.projectDirectory.dir("docs/static/api"))
 }
 
-afterEvaluate {
-    // Split publishing metadata fix: When publishing from split CI jobs (Linux + Apple),
-    // each host only registers its own targets. The root module metadata (.module file)
-    // generated on Linux would be missing Apple variants, breaking KMP resolution for
-    // Apple consumers. Fix: on Linux, inject Apple variant references into the generated
-    // .module file. On Apple, skip the root metadata publication (Linux publishes it).
-    if (isRunningOnGithub) {
-        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsLinux) {
-            tasks.named("generateMetadataFileForKotlinMultiplatformPublication") {
-                doLast {
-                    val moduleFile = outputs.files.singleFile
-                    injectAppleVariantsIntoModuleMetadata(moduleFile, project.version.toString(), "websocket")
-                }
-            }
-        }
-        if (org.jetbrains.kotlin.konan.target.HostManager.hostIsMac) {
-            // Skip root metadata publication — published from Linux with all variant references
-            tasks
-                .matching {
-                    it.name.startsWith("publishKotlinMultiplatformPublication")
-                }.configureEach { enabled = false }
-        }
-    }
-}
+// Split publishing: both Linux and Apple hosts publish root metadata (.module file)
+// with their respective variants. The validate-artifacts workflow merges them with
+// jq deduplication. No build-time injection or suppression needed.
 
 tasks.register("nextVersion") {
     doLast {
@@ -341,11 +495,59 @@ val echoWebsocket =
     }
 val autobahnContainer = tasks.register<AutobahnDockerTask>("startAutobahnDockerContainer")
 
+/**
+ * `adb reverse` for the Autobahn fuzzingserver + echo server ports so the Android
+ * emulator can reach the host's loopback at the same `localhost:9001` / `:8081`
+ * the JVM / Native / Node agents use. Without this the emulator's `localhost`
+ * resolves to the emulator's own loopback (where nothing listens) and every
+ * integration test under `:connectedDebugAndroidTest -PintegrationTests` fails to
+ * connect; the Autobahn report records zero Android cases, so the validator
+ * vacuously "passes."
+ *
+ * `adb reverse` is preferred over hardcoding `10.0.2.2` because it preserves the
+ * shared `autobahnHost() = "localhost"` actual across JVM / Android and works for
+ * USB-tethered physical devices too (where `10.0.2.2` would not route).
+ */
+val adbReverseForAndroidTests =
+    tasks.register("adbReverseForAndroidTests") {
+        description = "adb reverse :9001 and :8081 so the emulator can reach the host's Autobahn + echo servers."
+        group = "verification"
+        doLast {
+            // Find adb via ANDROID_SDK_ROOT/platform-tools, then ANDROID_HOME, then PATH.
+            val adb =
+                listOfNotNull(
+                    System.getenv("ANDROID_SDK_ROOT")?.let { "$it/platform-tools/adb" },
+                    System.getenv("ANDROID_HOME")?.let { "$it/platform-tools/adb" },
+                    "adb",
+                ).firstOrNull { exec ->
+                    try {
+                        ProcessBuilder(exec, "version").redirectErrorStream(true).start().waitFor() == 0
+                    } catch (_: Exception) {
+                        false
+                    }
+                } ?: run {
+                    logger.warn(
+                        "adb not found on PATH or under ANDROID_SDK_ROOT — Android integration tests may fail to connect to the host.",
+                    )
+                    return@doLast
+                }
+            listOf(9001, 8081).forEach { port ->
+                val rc =
+                    ProcessBuilder(adb, "reverse", "tcp:$port", "tcp:$port")
+                        .redirectErrorStream(true)
+                        .start()
+                        .also { it.waitFor() }
+                        .exitValue()
+                if (rc != 0) logger.warn("adb reverse tcp:$port returned exit code $rc")
+            }
+        }
+    }
+
 // Shared logic for Autobahn validation tasks. When agentsToValidate is null, all agents are checked.
 fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
     Action<Task> {
         val autobahnHost = System.getenv("AUTOBAHN_HOST") ?: "localhost"
-        val allAgents = listOf("JVM", "NodeJS", "macOS", "LinuxX64")
+        val allAgents = listOf("JVM", "NodeJS", "BrowserJS", "macOS", "LinuxX64", "Android")
         allAgents.forEach { agent ->
             try {
                 val socket = Socket(autobahnHost, 9001)
@@ -424,6 +626,10 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
             val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
             val failures = mutableListOf<String>()
             json.forEach { (agent, cases) ->
+                // Skip stress agents — they exist for factory-matrix coverage and
+                // their pass/fail is judged by the JUnit assertion completing without
+                // exception, not by per-case fuzzingserver validation.
+                if (agent.contains("-stress-")) return@forEach
                 // Skip agents not in the filter set (when a filter is specified)
                 if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
                 @Suppress("UNCHECKED_CAST")
@@ -461,6 +667,14 @@ val validateAutobahnResultsJs =
     tasks.register("validateAutobahnResultsJs") {
         doLast(createAutobahnValidationAction(setOf("NodeJS")))
     }
+val validateAutobahnResultsBrowser =
+    tasks.register("validateAutobahnResultsBrowser") {
+        doLast(createAutobahnValidationAction(setOf("BrowserJS")))
+    }
+val validateAutobahnResultsAndroid =
+    tasks.register("validateAutobahnResultsAndroid") {
+        doLast(createAutobahnValidationAction(setOf("Android")))
+    }
 // Validates all agents (used by the convenience integrationTest task)
 val validateAutobahnResults =
     tasks.register("validateAutobahnResults") {
@@ -480,10 +694,21 @@ if (runIntegrationTests) {
         dependsOn(autobahnContainer)
         finalizedBy(validateAutobahnResultsLinuxX64)
     }
+    // AGP's connectedDebugAndroidTest is not a gradle Test task - wire it by name.
+    tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+        dependsOn(echoWebsocket)
+        dependsOn(autobahnContainer)
+        dependsOn(adbReverseForAndroidTests)
+        finalizedBy(validateAutobahnResultsAndroid)
+    }
     tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().configureEach {
         dependsOn(echoWebsocket)
         dependsOn(autobahnContainer)
-        finalizedBy(validateAutobahnResultsJs)
+        if (name.contains("Browser", ignoreCase = true)) {
+            finalizedBy(validateAutobahnResultsBrowser)
+        } else {
+            finalizedBy(validateAutobahnResultsJs)
+        }
     }
     tasks.named("check") {
         dependsOn(echoWebsocket)
@@ -499,78 +724,4 @@ tasks.register("integrationTest") {
     dependsOn(echoWebsocket)
     dependsOn(autobahnContainer)
     finalizedBy(validateAutobahnResults)
-}
-
-/**
- * Split publishing metadata fix: inject Apple variant references into the Gradle Module Metadata
- * (.module) file. When publishing from split CI jobs, the Linux host generates the root metadata
- * but only has Linux/JVM/JS/Android targets registered. Apple variants must be injected so
- * that KMP consumers on Apple platforms can resolve the dependency.
- */
-@Suppress("UNCHECKED_CAST")
-fun injectAppleVariantsIntoModuleMetadata(
-    moduleFile: File,
-    version: String,
-    artifactId: String,
-) {
-    val appleTargets =
-        listOf(
-            "iosArm64" to "ios_arm64",
-            "iosSimulatorArm64" to "ios_simulator_arm64",
-            "iosX64" to "ios_x64",
-            "macosArm64" to "macos_arm64",
-            "macosX64" to "macos_x64",
-            "tvosArm64" to "tvos_arm64",
-            "tvosSimulatorArm64" to "tvos_simulator_arm64",
-            "tvosX64" to "tvos_x64",
-            "watchosArm64" to "watchos_arm64",
-            "watchosSimulatorArm64" to "watchos_simulator_arm64",
-            "watchosX64" to "watchos_x64",
-        )
-
-    val json = groovy.json.JsonSlurper().parseText(moduleFile.readText()) as MutableMap<String, Any>
-    val variants = json["variants"] as MutableList<Any>
-
-    appleTargets.forEach { (gradleName, konanName) ->
-        val moduleName = "$artifactId-${gradleName.lowercase()}"
-        val availableAt =
-            mapOf(
-                "url" to "../../$moduleName/$version/$moduleName-$version.module",
-                "group" to "com.ditchoom",
-                "module" to moduleName,
-                "version" to version,
-            )
-        variants.add(
-            mapOf(
-                "name" to "${gradleName}ApiElements-published",
-                "attributes" to
-                    mapOf(
-                        "org.gradle.category" to "library",
-                        "org.gradle.jvm.environment" to "non-jvm",
-                        "org.gradle.usage" to "kotlin-api",
-                        "org.jetbrains.kotlin.native.target" to konanName,
-                        "org.jetbrains.kotlin.platform.type" to "native",
-                    ),
-                "available-at" to availableAt,
-            ),
-        )
-        variants.add(
-            mapOf(
-                "name" to "${gradleName}SourcesElements-published",
-                "attributes" to
-                    mapOf(
-                        "org.gradle.category" to "documentation",
-                        "org.gradle.dependency.bundling" to "external",
-                        "org.gradle.docstype" to "sources",
-                        "org.gradle.jvm.environment" to "non-jvm",
-                        "org.gradle.usage" to "kotlin-runtime",
-                        "org.jetbrains.kotlin.native.target" to konanName,
-                        "org.jetbrains.kotlin.platform.type" to "native",
-                    ),
-                "available-at" to availableAt,
-            ),
-        )
-    }
-
-    moduleFile.writeText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)))
 }

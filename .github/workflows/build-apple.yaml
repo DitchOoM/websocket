@@ -17,7 +17,7 @@ jobs:
   build:
     name: "Apple Targets"
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -42,10 +42,26 @@ jobs:
         run: echo "version=$(./gradlew -q nextVersion ${{ inputs.gradle-args }})" >> $GITHUB_OUTPUT
 
       - name: Run Apple target tests
-        run: ./gradlew macosArm64Test iosSimulatorArm64Test --no-build-cache ${{ inputs.gradle-args }}
+        run: >-
+          ./gradlew macosX64Test macosArm64Test iosSimulatorArm64Test
+          tvosSimulatorArm64Test watchosSimulatorArm64Test ktlintCheck
+          --no-build-cache ${{ inputs.gradle-args }}
 
-      - name: Publish to Maven Local
-        run: ./gradlew publishToMavenLocal --no-build-cache ${{ inputs.gradle-args }}
+      - name: Publish Apple targets to Maven Local
+        run: >-
+          ./gradlew --no-build-cache ${{ inputs.gradle-args }}
+          publishKotlinMultiplatformPublicationToMavenLocal
+          publishIosArm64PublicationToMavenLocal
+          publishIosSimulatorArm64PublicationToMavenLocal
+          publishIosX64PublicationToMavenLocal
+          publishMacosArm64PublicationToMavenLocal
+          publishMacosX64PublicationToMavenLocal
+          publishTvosArm64PublicationToMavenLocal
+          publishTvosSimulatorArm64PublicationToMavenLocal
+          publishTvosX64PublicationToMavenLocal
+          publishWatchosArm64PublicationToMavenLocal
+          publishWatchosSimulatorArm64PublicationToMavenLocal
+          publishWatchosX64PublicationToMavenLocal
 
       - name: Upload Maven local artifacts
         uses: actions/upload-artifact@v4

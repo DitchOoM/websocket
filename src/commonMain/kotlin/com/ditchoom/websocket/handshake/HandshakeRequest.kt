@@ -1,8 +1,9 @@
 package com.ditchoom.websocket.handshake
 
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
+import com.ditchoom.websocket.internal.GrowableWriteBuffer
 
 /**
  * Builder for WebSocket client handshake requests.
@@ -94,11 +95,15 @@ class HandshakeRequest private constructor(
                 append("\r\n")
             }
 
-        val bytes = request.encodeToByteArray()
-        val buffer = PlatformBuffer.allocate(bytes.size)
-        buffer.writeBytes(bytes)
-        buffer.resetForRead()
-        return buffer
+        // Encode once into a growable buffer and let position() report the size —
+        // avoids walking the request string twice (utf8ByteCount-then-writeString
+        // does codepoint inspection both times). Initial size is the char count,
+        // which is a tight upper bound for ASCII-heavy HTTP and grows for the
+        // rare multibyte header value.
+        val growable = GrowableWriteBuffer(BufferFactory.Default, initialSize = request.length)
+        growable.writeString(request)
+        growable.underlying.resetForRead()
+        return growable.underlying
     }
 
     /**

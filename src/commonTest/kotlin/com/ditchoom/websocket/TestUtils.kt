@@ -1,10 +1,19 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.socket.TransportKind
+import com.ditchoom.socket.networkCapabilities
 import kotlinx.coroutines.CoroutineScope
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 expect class TestRunResult
+
+/**
+ * True on platforms with raw socket (TCP) access — JVM, Android, Apple, Linux, Node.js — and false
+ * on browser (WebSocket-only). Replaces the v3 `getNetworkCapabilities() == FULL_SOCKET_ACCESS`
+ * check now that socket v6 models capabilities as a `Set<TransportKind>`.
+ */
+internal fun hasFullSocketAccess(): Boolean = TransportKind.TCP in networkCapabilities().transports
 
 // Timeout for simple echo/connect tests (ping/pong, payload, UTF-8, close, fragmentation)
 internal val testTimeout = 10.seconds

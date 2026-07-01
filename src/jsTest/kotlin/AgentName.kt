@@ -1,5 +1,5 @@
 
-import com.ditchoom.socket.isNodeJs
+import com.ditchoom.websocket.isNodeJs
 
 actual fun agentName(): String =
     if (isNodeJs) {

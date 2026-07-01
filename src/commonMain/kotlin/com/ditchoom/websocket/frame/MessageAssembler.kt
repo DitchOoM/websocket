@@ -1,10 +1,10 @@
 package com.ditchoom.websocket.frame
 
-import com.ditchoom.buffer.AllocationZone
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.allocate
+import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.Opcode
 import kotlin.jvm.JvmInline
 
@@ -22,27 +22,12 @@ import kotlin.jvm.JvmInline
  * ## RFC 6455 Section 5.4 - Fragmentation
  * https://datatracker.ietf.org/doc/html/rfc6455#section-5.4
  *
- * ## Usage
- *
- * ```kotlin
- * val assembler = MessageAssembler(compressionEnabled = false)
- *
- * while (true) {
- *     val frame = frameReader.readFrame() ?: continue
- *     when (val result = assembler.addFrame(frame)) {
- *         is AssemblyResult.ControlFrame -> handleControl(result.frame)
- *         is AssemblyResult.CompleteMessage -> handleMessage(result.message)
- *         is AssemblyResult.NeedMoreFrames -> continue
- *         is AssemblyResult.Error -> handleError(result.reason)
- *     }
- * }
- * ```
- *
  * @param compressionEnabled Whether permessage-deflate compression is negotiated.
  *                           When true, RSV1 bit is allowed on data frames.
  */
-class MessageAssembler(
+internal class MessageAssembler(
     private val compressionEnabled: Boolean = false,
+    private val bufferFactory: BufferFactory = BufferFactory.managed(),
 ) {
     private var firstFrameOpcode: Opcode? = null
     private var firstFrameRsv1: Boolean = false
@@ -52,34 +37,28 @@ class MessageAssembler(
     /**
      * Adds a frame to the assembler.
      *
-     * @param frame The parsed frame to add
+     * @param frame The decoded frame to add
      * @return The result of adding this frame
      */
-    fun addFrame(frame: ParsedFrame): AssemblyResult {
-        // RFC 6455: Reserved opcodes are not allowed
-        if (frame is ParsedFrame.InvalidFrame) {
-            return AssemblyResult.Error(
-                CloseCode.PROTOCOL_ERROR,
-                frame.reason,
-            )
-        }
+    fun addFrame(frame: WsFrame<BufferPayload>): AssemblyResult {
+        val h = frame.byte1
 
         // RFC 6455 Section 5.2: RSV bits MUST be 0 unless an extension is negotiated.
         // RSV2 and RSV3 are never used by any defined extension.
-        if (frame.rsv2) {
+        if (h.rsv2) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "RSV2 must be 0 when no extension defining its meaning is negotiated",
             )
         }
-        if (frame.rsv3) {
+        if (h.rsv3) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "RSV3 must be 0 when no extension defining its meaning is negotiated",
             )
         }
         // RSV1 is used by permessage-deflate extension
-        if (frame.rsv1 && !compressionEnabled) {
+        if (h.rsv1 && !compressionEnabled) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "RSV1 must be 0 when permessage-deflate is not negotiated",
@@ -87,7 +66,7 @@ class MessageAssembler(
         }
 
         // Control frames are handled immediately and don't affect fragmentation state
-        if (frame.isControlFrame) {
+        if (frame is WsFrame.Close || frame is WsFrame.Ping<*> || frame is WsFrame.Pong<*>) {
             return handleControlFrame(frame)
         }
 
@@ -98,6 +77,7 @@ class MessageAssembler(
      * Resets the assembler state, discarding any partial message.
      */
     fun reset() {
+        fragmentBuffers.freeAll()
         firstFrameOpcode = null
         firstFrameRsv1 = false
         fragmentBuffers.clear()
@@ -110,9 +90,11 @@ class MessageAssembler(
     val isFragmentInProgress: Boolean
         get() = firstFrameOpcode != null
 
-    private fun handleControlFrame(frame: ParsedFrame): AssemblyResult {
+    private fun handleControlFrame(frame: WsFrame<BufferPayload>): AssemblyResult {
+        val byte1 = frame.byte1
+        val payloadLength = frame.payloadLength
         // RFC 6455 Section 5.5: Control frames MUST have FIN set
-        if (!frame.fin) {
+        if (!byte1.fin) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "Control frame must have FIN set",
@@ -120,7 +102,7 @@ class MessageAssembler(
         }
 
         // RFC 6455 Section 5.5: Control frames MUST have payload <= 125 bytes
-        if (frame.payloadLength > 125) {
+        if (payloadLength > 125) {
             return AssemblyResult.Error(
                 CloseCode.PROTOCOL_ERROR,
                 "Control frame payload exceeds 125 bytes",
@@ -128,23 +110,20 @@ class MessageAssembler(
         }
 
         // RFC 6455 Section 7.4.1: Validate close frame
-        if (frame is ParsedFrame.ControlFrame.Close) {
-            // Check for invalid UTF-8 in close reason
-            if (frame.hasInvalidUtf8) {
-                return AssemblyResult.Error(
-                    CloseCode.INVALID_PAYLOAD,
-                    "Invalid UTF-8 in close reason",
-                )
-            }
-
-            // Check if the close code is valid per RFC 6455 Section 7.4.1
-            // Valid codes for wire transmission: 1000-1003, 1007-1011, 3000-3999, 4000-4999
-            // Codes 1005, 1006, 1015 MUST NOT be sent on the wire
-            // Invalid codes include: 0-999, 1004-1006, 1012-2999, 5000+
-            if (frame.payloadLength >= 2 && !frame.closeCode.isValidForWire) {
+        if (frame is WsFrame.Close) {
+            // Close payload must be 0 or >= 2 bytes (status code is 2 bytes)
+            if (payloadLength == 1L) {
                 return AssemblyResult.Error(
                     CloseCode.PROTOCOL_ERROR,
-                    "Invalid close code: ${frame.closeCode.code}",
+                    "Invalid close payload length",
+                )
+            }
+            val closeCode = frame.body?.statusCode ?: CloseCode.NO_STATUS_RECEIVED
+            // Check if the close code is valid per RFC 6455 Section 7.4.1
+            if (payloadLength >= 2 && !closeCode.isValidForWire) {
+                return AssemblyResult.Error(
+                    CloseCode.PROTOCOL_ERROR,
+                    "Invalid close code: ${closeCode.code}",
                 )
             }
         }
@@ -152,28 +131,27 @@ class MessageAssembler(
         return AssemblyResult.ControlFrame(frame)
     }
 
-    private fun handleDataFrame(frame: ParsedFrame): AssemblyResult =
+    private fun handleDataFrame(frame: WsFrame<BufferPayload>): AssemblyResult =
         when (frame) {
-            is ParsedFrame.DataFrame.Text -> handleFirstFragment(frame)
-            is ParsedFrame.DataFrame.Binary -> handleFirstFragment(frame)
-            is ParsedFrame.DataFrame.Continuation -> handleContinuation(frame)
-            is ParsedFrame.ControlFrame -> {
+            is WsFrame.Text<BufferPayload> -> handleFirstFragment(frame, frame.payload.buffer)
+            is WsFrame.Binary<BufferPayload> -> handleFirstFragment(frame, frame.payload.buffer)
+            is WsFrame.Continuation<BufferPayload> -> handleContinuation(frame)
+            is WsFrame.Close, is WsFrame.Ping<*>, is WsFrame.Pong<*> -> {
                 // Should not reach here - control frames handled separately
                 AssemblyResult.Error(
                     CloseCode.PROTOCOL_ERROR,
                     "Unexpected control frame in data frame handler",
                 )
             }
-            is ParsedFrame.InvalidFrame -> {
-                // Should not reach here - invalid frames handled at the start of addFrame()
-                AssemblyResult.Error(
-                    CloseCode.PROTOCOL_ERROR,
-                    frame.reason,
-                )
-            }
         }
 
-    private fun handleFirstFragment(frame: ParsedFrame): AssemblyResult {
+    private fun handleFirstFragment(
+        frame: WsFrame<BufferPayload>,
+        payload: ReadBuffer,
+    ): AssemblyResult {
+        val byte1 = frame.byte1
+        val payloadLen = frame.payloadLength.toInt()
+
         // RFC 6455 Section 5.4: Cannot start new message while one is in progress
         if (isFragmentInProgress) {
             return AssemblyResult.Error(
@@ -182,29 +160,27 @@ class MessageAssembler(
             )
         }
 
-        if (frame.fin) {
+        if (byte1.fin) {
             // Complete message in a single frame (common case)
-            // Note: FrameReader guarantees payload.position() == 0
             return AssemblyResult.CompleteMessage(
                 AssembledMessage(
-                    opcode = frame.opcode,
-                    payload = frame.payload,
-                    compressed = frame.rsv1,
+                    opcode = byte1.opcode,
+                    payload = payload,
+                    compressed = byte1.rsv1,
                 ),
             )
         }
 
         // Start of fragmented message
-        firstFrameOpcode = frame.opcode
-        firstFrameRsv1 = frame.rsv1
-        fragmentBuffers.add(frame.payload)
-        // Use payloadLength instead of remaining() to handle buffers with non-zero position
-        totalPayloadSize += frame.payloadLength
+        firstFrameOpcode = byte1.opcode
+        firstFrameRsv1 = byte1.rsv1
+        fragmentBuffers.add(payload)
+        totalPayloadSize += payloadLen
 
         return AssemblyResult.NeedMoreFrames
     }
 
-    private fun handleContinuation(frame: ParsedFrame): AssemblyResult {
+    private fun handleContinuation(frame: WsFrame.Continuation<BufferPayload>): AssemblyResult {
         // RFC 6455 Section 5.4: Continuation without a starting fragment is an error
         if (!isFragmentInProgress) {
             return AssemblyResult.Error(
@@ -213,31 +189,40 @@ class MessageAssembler(
             )
         }
 
-        fragmentBuffers.add(frame.payload)
-        // Use payloadLength instead of remaining() to handle buffers with non-zero position
-        totalPayloadSize += frame.payloadLength
+        fragmentBuffers.add(frame.payload.buffer)
+        totalPayloadSize += frame.payloadLength.toInt()
 
-        if (!frame.fin) {
+        if (!frame.byte1.fin) {
             return AssemblyResult.NeedMoreFrames
         }
 
-        // Final fragment - assemble the message.
-        // Save fragment buffers before reset clears the list. For multi-fragment messages,
-        // combineBuffers() copies data to a new Heap buffer, so the original fragment
-        // NativeBuffers must be freed by the caller (Linux has no GC for native heap).
-        // For single-fragment messages, the payload IS the fragment (no copy), so no cleanup needed.
-        val fragments = if (fragmentBuffers.size > 1) fragmentBuffers.toList() else emptyList()
+        // Final fragment — assemble. assembleMessage frees the per-frame source buffers
+        // before returning, so the caller only ever owns `result.message.payload`.
         val message = assembleMessage()
+        fragmentBuffers.clear()
         reset()
-        return AssemblyResult.CompleteMessage(message, fragments)
+        return AssemblyResult.CompleteMessage(message)
     }
 
+    /**
+     * Builds the [AssembledMessage]:
+     * - **Single fragment**: the lone wire-buffer view is the payload — ownership transfers
+     *   to the caller (no free here; the caller frees after running the user codec).
+     * - **Multi-fragment**: allocates a combined buffer, copies each fragment in, then
+     *   **frees the source wire buffers** before returning. The caller only sees and owns
+     *   the combined buffer.
+     * - **Zero-length**: returns [EMPTY_BUFFER]; any retained zero-length wire-buffer views
+     *   are freed here for symmetry.
+     */
     private fun assembleMessage(): AssembledMessage {
         val payload =
             when {
                 fragmentBuffers.size == 1 -> fragmentBuffers[0]
-                totalPayloadSize == 0 -> EMPTY_BUFFER
-                else -> combineBuffers()
+                totalPayloadSize == 0 -> {
+                    fragmentBuffers.freeAll()
+                    EMPTY_BUFFER
+                }
+                else -> combineBuffers().also { fragmentBuffers.freeAll() }
             }
 
         return AssembledMessage(
@@ -248,12 +233,8 @@ class MessageAssembler(
     }
 
     private fun combineBuffers(): ReadBuffer {
-        val combined = PlatformBuffer.allocate(totalPayloadSize, AllocationZone.Heap)
+        val combined = bufferFactory.allocate(totalPayloadSize)
         for (buf in fragmentBuffers) {
-            // Reset position to re-read from start
-            // Note: position(0) is correct here - these buffers are already in read mode.
-            // resetForRead() is for write-mode buffers and would set limit=writePosition.
-            buf.position(0)
             combined.write(buf)
         }
         combined.resetForRead()
@@ -264,26 +245,23 @@ class MessageAssembler(
 /**
  * Result of adding a frame to the assembler.
  */
-sealed interface AssemblyResult {
+internal sealed interface AssemblyResult {
     /**
      * A control frame was received. Handle it immediately.
      * Control frames can be interspersed between data frame fragments.
      */
     data class ControlFrame(
-        val frame: ParsedFrame,
+        val frame: WsFrame<BufferPayload>,
     ) : AssemblyResult
 
     /**
-     * A complete message has been assembled.
-     *
-     * @property fragmentsToClose Fragment payload buffers that should be closed after processing.
-     *   For multi-fragment messages, combineBuffers() copies data to a new buffer, but the
-     *   original fragment NativeBuffers must be explicitly freed on Linux (no GC for native heap).
-     *   Empty for single-frame messages where the payload IS the fragment buffer.
+     * A complete message has been assembled. The assembler frees any source wire buffers
+     * internally (multi-fragment case) before returning; for single-fragment messages,
+     * `message.payload` IS the raw wire buffer view and ownership transfers to the caller,
+     * which must free it after running the user codec.
      */
     data class CompleteMessage(
         val message: AssembledMessage,
-        val fragmentsToClose: List<ReadBuffer> = emptyList(),
     ) : AssemblyResult
 
     /**
@@ -307,7 +285,7 @@ sealed interface AssemblyResult {
  * @property payload The complete message payload
  * @property compressed Whether the message was compressed (RSV1 bit set on first frame)
  */
-data class AssembledMessage(
+internal data class AssembledMessage(
     val opcode: Opcode,
     val payload: ReadBuffer,
     val compressed: Boolean,
@@ -320,19 +298,12 @@ data class AssembledMessage(
  * This value class provides zero-allocation overhead for close code handling.
  */
 @JvmInline
+@com.ditchoom.buffer.codec.annotations.ProtocolMessage
 value class CloseCode(
     val code: UShort,
 ) {
-    /**
-     * Whether a close code is actually present in the close frame.
-     * Per RFC 6455, status code 1005 (NO_STATUS_RECEIVED) indicates no code was present.
-     */
     val isPresent: Boolean get() = code != 1005u.toUShort()
 
-    /**
-     * Whether this is a valid close code per RFC 6455 Section 7.4.1.
-     * Valid codes are: 1000-1003, 1007-1011, 3000-3999, 4000-4999.
-     */
     val isValid: Boolean
         get() =
             code in 1000u..1003u ||
@@ -340,16 +311,8 @@ value class CloseCode(
                 code in 3000u..3999u ||
                 code in 4000u..4999u
 
-    /**
-     * Whether this close code is valid to receive from a peer (can be sent on the wire).
-     * Per RFC 6455 Section 7.4.1, codes 1005, 1006, and 1015 MUST NOT be sent on the wire.
-     * They are only used internally to indicate connection state.
-     */
     val isValidForWire: Boolean
         get() {
-            // Per RFC 6455 Section 7.4.1:
-            // 1005 (NO_STATUS_RECEIVED), 1006 (ABNORMAL_CLOSURE), and 1015 (TLS_HANDSHAKE)
-            // are reserved and MUST NOT be sent on the wire
             return isValid &&
                 code != 1005u.toUShort() &&
                 code != 1006u.toUShort() &&
@@ -357,19 +320,9 @@ value class CloseCode(
         }
 
     companion object {
-        /** 1000 - Normal closure */
         val NORMAL = CloseCode(1000u)
-
-        /** 1002 - Protocol error */
         val PROTOCOL_ERROR = CloseCode(1002u)
-
-        /**
-         * 1005 - No status received. Per RFC 6455, this status code is used internally
-         * and MUST NOT be sent on the wire. Indicates no close code was present in the frame.
-         */
         val NO_STATUS_RECEIVED = CloseCode(1005u)
-
-        /** 1007 - Invalid payload data (e.g., non-UTF-8 in text message) */
         val INVALID_PAYLOAD = CloseCode(1007u)
     }
 }

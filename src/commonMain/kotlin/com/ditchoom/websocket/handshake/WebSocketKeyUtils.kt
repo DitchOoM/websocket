@@ -1,5 +1,11 @@
 package com.ditchoom.websocket.handshake
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.managed
+import com.ditchoom.websocket.internal.Sha1
+import com.ditchoom.websocket.internal.writeSha1Of
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import com.ditchoom.websocket.generateWebSocketKey as platformGenerateKey
 
 // WebSocket key generation and validation utilities.
@@ -31,18 +37,27 @@ fun generateWebSocketKey(): String = platformGenerateKey()
  * Computes the expected Sec-WebSocket-Accept value for a given client key.
  *
  * Per RFC 6455 Section 4.2.2:
- * "The |Sec-WebSocket-Accept| header field indicates whether the server is
- * willing to accept the connection. If the server accepts the connection,
- * this header field must include a hash of the client's nonce sent in
- * |Sec-WebSocket-Key| as follows:
- *
- * 1. Take the value of the |Sec-WebSocket-Key| header field (as a string,
- *    not base64-decoded).
- * 2. Append the string '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'.
+ * 1. Take the Sec-WebSocket-Key header value (as a string).
+ * 2. Append '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'.
  * 3. SHA-1 hash the resulting string.
- * 4. base64-encode the 20-byte hash."
- *
- * @param clientKey The Sec-WebSocket-Key value sent by the client
- * @return The expected Sec-WebSocket-Accept value
+ * 4. base64-encode the 20-byte hash.
  */
-expect fun computeAcceptKey(clientKey: String): String
+@OptIn(ExperimentalEncodingApi::class)
+fun computeAcceptKey(clientKey: String): String {
+    val concatenated = clientKey + WEBSOCKET_GUID
+    // clientKey is base64 (ASCII) and WEBSOCKET_GUID is ASCII, so character count
+    // equals UTF-8 byte count — no codepoint walk needed.
+    val input = BufferFactory.managed().allocate(concatenated.length)
+    input.writeString(concatenated)
+    input.resetForRead()
+
+    val digest = BufferFactory.managed().allocate(Sha1.DIGEST_SIZE)
+    digest.writeSha1Of(input)
+    digest.resetForRead()
+
+    // kotlin.io.encoding.Base64 takes ByteArray — one unavoidable boundary
+    // copy at the stdlib API. This path runs once per WebSocket handshake.
+    @Suppress("NoByteArrayInProd") // Kotlin stdlib Base64.encode takes ByteArray
+    val digestBytes = digest.readByteArray(Sha1.DIGEST_SIZE)
+    return Base64.encode(digestBytes)
+}

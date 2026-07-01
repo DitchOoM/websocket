@@ -1,16 +1,16 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.websocket.handshake.computeAcceptKey
 
 /**
  * Test helper for building mock WebSocket handshake responses.
  *
  * All buffer-building methods leave the buffer in WRITE mode (position at end of data)
- * because [MockClientToServerSocket.read] calls `resetForRead()` before copying to
+ * because [MockWebSocketTransport.read] calls `resetForRead()` before copying to
  * the caller's buffer. Calling `resetForRead()` twice would set limit=0.
  */
 object MockHandshakeHelper {
@@ -25,7 +25,7 @@ object MockHandshakeHelper {
     }
 
     private fun bytesToBuffer(bytes: ByteArray): ReadBuffer {
-        val buffer = PlatformBuffer.allocate(bytes.size)
+        val buffer = BufferFactory.Default.allocate(bytes.size)
         buffer.writeBytes(bytes)
         // Leave in write mode - mock socket will call resetForRead()
         return buffer
@@ -110,7 +110,7 @@ object MockHandshakeHelper {
                 payload.size <= 65535 -> 4
                 else -> 10
             }
-        val buffer = PlatformBuffer.allocate(headerSize + payload.size)
+        val buffer = BufferFactory.Default.allocate(headerSize + payload.size)
 
         buffer.writeByte(byte1.toByte())
         when {

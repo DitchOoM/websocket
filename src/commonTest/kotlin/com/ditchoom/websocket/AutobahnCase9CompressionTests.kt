@@ -5,7 +5,7 @@ import kotlin.test.Test
 class AutobahnCase9CompressionTests {
     @Test
     fun category9_text() =
-        runTestNoTimeSkipping {
+        runHeavyCompressionTest {
             // 9.1: Large text (single message echo)
             for (case in 247..252) echoMessageAndClose(case, requestCompression = true)
             // 9.3: Fragmented text 4MB
@@ -16,7 +16,7 @@ class AutobahnCase9CompressionTests {
 
     @Test
     fun category9_binary() =
-        runTestNoTimeSkipping {
+        runHeavyCompressionTest {
             // 9.2: Large binary (single message echo)
             for (case in 253..258) echoBinaryMessageAndClose(case, requestCompression = true)
             // 9.4: Fragmented binary 4MB

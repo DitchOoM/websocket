@@ -1,5 +1,7 @@
 package com.ditchoom.websocket
 
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.deterministic
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -36,8 +38,23 @@ data class WebSocketConnectionOptions(
     val protocols: List<String> = emptyList(),
     val requestCompression: Boolean = false,
     val compressionOptions: CompressionOptions = CompressionOptions(),
+    /**
+     * Internal buffer allocator for frame read/write + compression chunks. Advanced
+     * performance knob — most callers should leave it at the default.
+     *
+     * The default [BufferFactory.deterministic] is off-heap (zero-copy NIO) and
+     * `freeNativeMemory()` synchronously closes the backing Arena, so buffer-pool
+     * release actually reclaims memory instead of waiting for GC. This matches the
+     * pool lifecycle the socket transport and codec use internally.
+     *
+     * Alternatives only worth considering for measurement or tuning:
+     * - [BufferFactory.managed] — heap-backed; avoids direct-memory accounting but
+     *   forces JDK internal copy on NIO reads/writes (breaks zero-copy).
+     * - A pre-constructed [BufferPool] — to share a pool across multiple connections.
+     */
+    val bufferFactory: BufferFactory = BufferFactory.deterministic(),
 ) {
-    internal fun buildUrl(): String {
+    fun buildUrl(): String {
         val prefix =
             if (tls) {
                 "wss://"

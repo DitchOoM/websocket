@@ -1,9 +1,9 @@
 package com.ditchoom.websocket.frame
 
+import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
-import com.ditchoom.buffer.PlatformBuffer
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
-import com.ditchoom.buffer.allocate
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
@@ -29,7 +29,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `single text frame returns complete message`() {
+    fun singleTextFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello"))
 
@@ -40,7 +40,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `single binary frame returns complete message`() {
+    fun singleBinaryFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(binaryFrame(byteCount = 3))
 
@@ -50,7 +50,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `single frame with RSV1 indicates compression`() {
+    fun singleFrameWithRSV1IndicatesCompression() {
         val assembler = MessageAssembler(compressionEnabled = true)
         val result = assembler.addFrame(textFrame("Hello", rsv1 = true))
 
@@ -59,7 +59,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `empty text frame returns complete message`() {
+    fun emptyTextFrameReturnsCompleteMessage() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame(""))
 
@@ -72,7 +72,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `two fragment message assembles correctly`() {
+    fun twoFragmentMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("Hello ", fin = false))
@@ -85,7 +85,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `three fragment message assembles correctly`() {
+    fun threeFragmentMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("One", fin = false))
@@ -100,7 +100,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `fragmented binary message assembles correctly`() {
+    fun fragmentedBinaryMessageAssemblesCorrectly() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(binaryFrame(byteCount = 2, fin = false))
@@ -114,7 +114,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV1 from first fragment is preserved`() {
+    fun rsv1FromFirstFragmentIsPreserved() {
         val assembler = MessageAssembler(compressionEnabled = true)
 
         assembler.addFrame(textFrame("A", fin = false, rsv1 = true))
@@ -125,7 +125,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `isFragmentInProgress tracks state correctly`() {
+    fun isFragmentInProgressTracksStateCorrectly() {
         val assembler = MessageAssembler()
 
         assertFalse(assembler.isFragmentInProgress)
@@ -142,16 +142,16 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `control frame returns immediately`() {
+    fun controlFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pingFrame("ping"))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Ping, result.frame.opcode)
+        assertEquals(Opcode.Ping, result.frame.byte1.opcode)
     }
 
     @Test
-    fun `control frame during fragmentation returns control frame`() {
+    fun controlFrameDuringFragmentationReturnsControlFrame() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -165,25 +165,25 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `pong frame returns immediately`() {
+    fun pongFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pongFrame("pong"))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Pong, result.frame.opcode)
+        assertEquals(Opcode.Pong, result.frame.byte1.opcode)
     }
 
     @Test
-    fun `close frame returns immediately`() {
+    fun closeFrameReturnsImmediately() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(closeFrame(CloseCode.NORMAL))
 
         assertIs<AssemblyResult.ControlFrame>(result)
-        assertEquals(Opcode.Close, result.frame.opcode)
+        assertEquals(Opcode.Close, result.frame.byte1.opcode)
     }
 
     @Test
-    fun `control frame without FIN returns error`() {
+    fun controlFrameWithoutFINReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(pingFrame("ping", fin = false))
 
@@ -192,7 +192,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `control frame over 125 bytes returns error`() {
+    fun controlFrameOver125BytesReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(oversizedPingFrame(byteCount = 126))
 
@@ -205,7 +205,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `continuation without first frame returns error`() {
+    fun continuationWithoutFirstFrameReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(continuationFrame("data"))
 
@@ -214,7 +214,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `new message during fragmentation returns error`() {
+    fun newMessageDuringFragmentationReturnsError() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -225,7 +225,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `binary frame during text fragmentation returns error`() {
+    fun binaryFrameDuringTextFragmentationReturnsError() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -236,7 +236,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV2 bit set returns error`() {
+    fun rsv2BitSetReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello", rsv2 = true))
 
@@ -245,7 +245,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV3 bit set returns error`() {
+    fun rsv3BitSetReturnsError() {
         val assembler = MessageAssembler()
         val result = assembler.addFrame(textFrame("Hello", rsv3 = true))
 
@@ -254,7 +254,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `RSV1 without compression enabled returns error`() {
+    fun rsv1WithoutCompressionEnabledReturnsError() {
         val assembler = MessageAssembler(compressionEnabled = false)
         val result = assembler.addFrame(textFrame("Hello", rsv1 = true))
 
@@ -263,13 +263,34 @@ class MessageAssemblerTest {
     }
 
     // ========================================================================
-    // Fragment Buffer Cleanup (Linux NativeBuffer leak regression tests)
+    // Assembly ownership contract (post buffer-codec lockdown v1)
+    //
+    // The assembler frees per-frame source buffers internally; CompleteMessage
+    // surfaces only the assembled payload that the caller owns. These tests
+    // pin the new ownership invariants.
     // ========================================================================
 
     @Test
-    fun `multi-fragment assembly returns fragments for cleanup`() {
+    fun singleFrameMessagePayloadAliasesFrameBuffer() {
+        // Single-frame path: assembler returns the wire-buffer view directly as
+        // message.payload. Caller owns and frees it after running the user codec.
         val assembler = MessageAssembler()
+        val frame = textFrame("Hello")
+        val result = assembler.addFrame(frame)
 
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertTrue(
+            result.message.payload === frame.payload.buffer,
+            "Single-frame payload should alias the original wire buffer",
+        )
+    }
+
+    @Test
+    fun multiFragmentMessagePayloadIsCombinedBuffer() {
+        // Multi-fragment path: combineBuffers() allocates a fresh buffer and
+        // frees the source fragments before returning. The assembled payload
+        // is independent of any of the source wire buffers.
+        val assembler = MessageAssembler()
         val frag1 = textFrame("Hello ", fin = false)
         val frag2 = continuationFrame("World")
 
@@ -277,16 +298,15 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(frag2)
 
         assertIs<AssemblyResult.CompleteMessage>(result)
-        // Multi-fragment: combineBuffers() copies data, originals need cleanup
-        assertEquals(2, result.fragmentsToClose.size)
-        assertTrue(result.fragmentsToClose[0] === frag1.payload, "Should be same buffer object")
-        assertTrue(result.fragmentsToClose[1] === frag2.payload, "Should be same buffer object")
+        assertEquals("Hello World", result.message.payload.readString(11, Charset.UTF8))
+        val combined = result.message.payload
+        assertTrue(combined !== frag1.payload.buffer)
+        assertTrue(combined !== frag2.payload.buffer)
     }
 
     @Test
-    fun `three-fragment assembly returns all fragments for cleanup`() {
+    fun threeFragmentMessageProducesSingleAssembledBuffer() {
         val assembler = MessageAssembler()
-
         val frag1 = textFrame("A", fin = false)
         val frag2 = continuationFrame("B", fin = false)
         val frag3 = continuationFrame("C")
@@ -296,33 +316,7 @@ class MessageAssemblerTest {
         val result = assembler.addFrame(frag3)
 
         assertIs<AssemblyResult.CompleteMessage>(result)
-        assertEquals(3, result.fragmentsToClose.size)
-    }
-
-    @Test
-    fun `single frame message returns empty fragments to close`() {
-        val assembler = MessageAssembler()
-        val result = assembler.addFrame(textFrame("Hello"))
-
-        assertIs<AssemblyResult.CompleteMessage>(result)
-        assertTrue(result.fragmentsToClose.isEmpty(), "Single frame should have no fragments to close")
-    }
-
-    @Test
-    fun `assembled message payload is independent of fragment buffers`() {
-        val assembler = MessageAssembler()
-
-        assembler.addFrame(textFrame("Hello ", fin = false))
-        val result = assembler.addFrame(continuationFrame("World"))
-
-        assertIs<AssemblyResult.CompleteMessage>(result)
-        // The combined payload should be a separate buffer from the fragments
-        val payload = result.message.payload
-        assertEquals("Hello World", payload.readString(11, Charset.UTF8))
-        // Fragments are the originals, not the combined buffer
-        for (frag in result.fragmentsToClose) {
-            assertTrue(frag !== payload, "Fragment should not be the same object as combined payload")
-        }
+        assertEquals("ABC", result.message.payload.readString(3, Charset.UTF8))
     }
 
     // ========================================================================
@@ -330,7 +324,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `reset clears fragment state`() {
+    fun resetClearsFragmentState() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -342,7 +336,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `can start new message after reset`() {
+    fun canStartNewMessageAfterReset() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("Hello", fin = false))
@@ -359,7 +353,7 @@ class MessageAssemblerTest {
     // ========================================================================
 
     @Test
-    fun `can assemble multiple messages in sequence`() {
+    fun canAssembleMultipleMessagesInSequence() {
         val assembler = MessageAssembler()
 
         val result1 = assembler.addFrame(textFrame("First"))
@@ -372,7 +366,7 @@ class MessageAssemblerTest {
     }
 
     @Test
-    fun `can assemble fragmented then single message`() {
+    fun canAssembleFragmentedThenSingleMessage() {
         val assembler = MessageAssembler()
 
         assembler.addFrame(textFrame("A", fin = false))
@@ -385,8 +379,66 @@ class MessageAssemblerTest {
     }
 
     // ========================================================================
+    // Non-Zero Position Fragment Regression Tests
+    //
+    // Verifies that MessageAssembler correctly combines fragments where
+    // the payload buffers have position > 0 (sliced/transferred chunks).
+    // ========================================================================
+
+    @Test
+    fun combineFragmentsWithNonZeroPositionPayloads() {
+        val assembler = MessageAssembler()
+
+        // Create fragment payloads with position > 0 (simulates sliced buffers)
+        val buf1 = BufferFactory.Default.allocate(10)
+        buf1.writeBytes("xxHello ".encodeToByteArray()) // 2 prefix + "Hello "
+        buf1.resetForRead()
+        buf1.readByte() // skip prefix
+        buf1.readByte() // skip prefix — position=2, remaining=8 ("Hello XX")
+        // Trim to just "Hello "
+        buf1.setLimit(buf1.position() + 6)
+
+        val buf2 = BufferFactory.Default.allocate(10)
+        buf2.writeBytes("yyyWorld".encodeToByteArray()) // 3 prefix + "World"
+        buf2.resetForRead()
+        buf2.readByte() // skip
+        buf2.readByte() // skip
+        buf2.readByte() // skip — position=3, remaining=5 ("World")
+        // Trim to just "World"
+        buf2.setLimit(buf2.position() + 5)
+
+        val frag1 =
+            header(Opcode.Text, buf1.remaining().toLong(), fin = false)
+                .toTextFrame(BufferPayload(buf1))
+        val frag2 =
+            header(Opcode.Continuation, buf2.remaining().toLong())
+                .toContinuationFrame(BufferPayload(buf2))
+
+        assembler.addFrame(frag1)
+        val result = assembler.addFrame(frag2)
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertEquals(Opcode.Text, result.message.opcode)
+        assertEquals("Hello World", result.message.payload.readString(11, Charset.UTF8))
+    }
+
+    // ========================================================================
     // Helper Functions - Using Value Classes for Efficient Frame Creation
     // ========================================================================
+
+    private fun header(
+        opcode: Opcode,
+        payloadSize: Long,
+        fin: Boolean = true,
+        rsv1: Boolean = false,
+        rsv2: Boolean = false,
+        rsv3: Boolean = false,
+    ): WsFrameHeader =
+        WsFrameHeader.build(
+            byte1 = FrameHeaderByte1.pack(fin, rsv1, rsv2, rsv3, opcode),
+            payloadSize = payloadSize,
+            masked = false,
+        )
 
     /**
      * Creates a text frame. Uses String.toReadBuffer() directly.
@@ -397,14 +449,10 @@ class MessageAssemblerTest {
         rsv1: Boolean = false,
         rsv2: Boolean = false,
         rsv3: Boolean = false,
-    ): ParsedFrame.DataFrame.Text {
+    ): WsFrame.Text<BufferPayload> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.DataFrame.Text(
-            header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2, rsv3, Opcode.Text),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
-            payloadLength = buffer.remaining(),
-            payload = buffer,
-        )
+        return header(Opcode.Text, buffer.remaining().toLong(), fin, rsv1, rsv2, rsv3)
+            .toTextFrame(BufferPayload(buffer))
     }
 
     /**
@@ -414,22 +462,18 @@ class MessageAssemblerTest {
         byteCount: Int,
         fin: Boolean = true,
         rsv1: Boolean = false,
-    ): ParsedFrame.DataFrame.Binary {
+    ): WsFrame.Binary<BufferPayload> {
         val buffer =
             if (byteCount == 0) {
                 ReadBuffer.EMPTY_BUFFER
             } else {
-                PlatformBuffer.allocate(byteCount).apply {
+                BufferFactory.Default.allocate(byteCount).apply {
                     repeat(byteCount) { writeByte(0xFE.toByte()) }
                     resetForRead()
                 }
             }
-        return ParsedFrame.DataFrame.Binary(
-            header1 = FrameHeaderByte1.pack(fin, rsv1, rsv2 = false, rsv3 = false, Opcode.Binary),
-            header2 = FrameHeaderByte2.forPayload(byteCount),
-            payloadLength = byteCount,
-            payload = buffer,
-        )
+        return header(Opcode.Binary, byteCount.toLong(), fin, rsv1)
+            .toBinaryFrame(BufferPayload(buffer))
     }
 
     /**
@@ -438,14 +482,10 @@ class MessageAssemblerTest {
     private fun continuationFrame(
         text: String,
         fin: Boolean = true,
-    ): ParsedFrame.DataFrame.Continuation {
+    ): WsFrame.Continuation<BufferPayload> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.DataFrame.Continuation(
-            header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Continuation),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
-            payloadLength = buffer.remaining(),
-            payload = buffer,
-        )
+        return header(Opcode.Continuation, buffer.remaining().toLong(), fin)
+            .toContinuationFrame(BufferPayload(buffer))
     }
 
     /**
@@ -454,62 +494,38 @@ class MessageAssemblerTest {
     private fun pingFrame(
         text: String = "",
         fin: Boolean = true,
-    ): ParsedFrame.ControlFrame.Ping {
+    ): WsFrame.Ping<BufferPayload> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.ControlFrame.Ping(
-            header1 = FrameHeaderByte1.pack(fin, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
-            payloadLength = buffer.remaining(),
-            payload = buffer,
-        )
+        return header(Opcode.Ping, buffer.remaining().toLong(), fin)
+            .toPingFrame(BufferPayload(buffer))
     }
 
     /**
      * Creates a pong frame.
      */
-    private fun pongFrame(text: String = ""): ParsedFrame.ControlFrame.Pong {
+    private fun pongFrame(text: String = ""): WsFrame.Pong<BufferPayload> {
         val buffer = if (text.isEmpty()) ReadBuffer.EMPTY_BUFFER else text.toReadBuffer(Charset.UTF8)
-        return ParsedFrame.ControlFrame.Pong(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Pong),
-            header2 = FrameHeaderByte2.forPayload(buffer.remaining()),
-            payloadLength = buffer.remaining(),
-            payload = buffer,
-        )
+        return header(Opcode.Pong, buffer.remaining().toLong())
+            .toPongFrame(BufferPayload(buffer))
     }
 
     /**
      * Creates a close frame using CloseCode value class.
      */
-    private fun closeFrame(code: CloseCode = CloseCode.NORMAL): ParsedFrame.ControlFrame.Close {
-        val buffer =
-            PlatformBuffer.allocate(2).apply {
-                writeUShort(code.code)
-                resetForRead()
-            }
-        return ParsedFrame.ControlFrame.Close(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Close),
-            header2 = FrameHeaderByte2.forPayload(2),
-            payloadLength = 2,
-            payload = buffer,
-            closeCode = code,
-            closeReason = "",
-        )
-    }
+    private fun closeFrame(code: CloseCode = CloseCode.NORMAL): WsFrame.Close =
+        header(Opcode.Close, payloadSize = 2)
+            .toCloseFrame(WsCloseBody(code, ""))
 
     /**
      * Creates an oversized control frame for error testing.
      */
-    private fun oversizedPingFrame(byteCount: Int): ParsedFrame.ControlFrame.Ping {
+    private fun oversizedPingFrame(byteCount: Int): WsFrame.Ping<BufferPayload> {
         val buffer =
-            PlatformBuffer.allocate(byteCount).apply {
+            BufferFactory.Default.allocate(byteCount).apply {
                 repeat(byteCount) { writeByte(0x00) }
                 resetForRead()
             }
-        return ParsedFrame.ControlFrame.Ping(
-            header1 = FrameHeaderByte1.pack(fin = true, rsv1 = false, rsv2 = false, rsv3 = false, Opcode.Ping),
-            header2 = FrameHeaderByte2.forPayload(byteCount),
-            payloadLength = byteCount,
-            payload = buffer,
-        )
+        return header(Opcode.Ping, byteCount.toLong())
+            .toPingFrame(BufferPayload(buffer))
     }
 }
