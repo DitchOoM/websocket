@@ -263,6 +263,12 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
+          target: default
+          # API 34+ ships no 32-bit x86 system image — only x86_64.
+          arch: x86_64
+          # Cap userdata so the emulator doesn't FATAL "not enough space" at launch (API 34's default
+          # userdata partition is large). Mirrors DitchOoM/socket's proven android_integration config.
+          disk-size: 4096M
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
