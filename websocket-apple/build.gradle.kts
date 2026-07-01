@@ -45,6 +45,13 @@ kotlin {
         if (hostOs.family.isAppleFamily) {
             appleMain.dependencies {
                 api(project(":"))
+                // The root module declares these as `implementation` (not exposed transitively), and
+                // websocket-apple uses NSURLSession — so, unlike websocket-tcp, it doesn't pull them
+                // in via socket. Declare them here: Codec/Connection/buffer types are in this module's
+                // public API (connectAppleNativeWebSocket signature), so `api`.
+                api(libs.buffer)
+                api(libs.buffer.codec)
+                api(libs.buffer.flow)
                 implementation(libs.kotlinx.coroutines.core)
             }
             appleTest.dependencies {
