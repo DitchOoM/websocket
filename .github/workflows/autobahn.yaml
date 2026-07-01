@@ -258,7 +258,11 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: ./gradlew connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk26 --no-build-cache
+          # Root task only (leading ':'): the Autobahn instrumented tests live in the root module's
+          # androidInstrumentedTest. -PinstrumentedTestsMinSdk26 raises the root minSdk to 34; the
+          # unqualified task would also run :websocket-tcp:, whose androidTest stays at minSdk 21 and
+          # fails the manifest merge against the (34) root library.
+          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk26 --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
