@@ -371,16 +371,26 @@ jobs:
           # which on the emulator is the device itself (only :9001 is adb-reversed to the fuzzingserver).
           script: |
             set +e
+            # STREAM logcat to a file BEFORE the tests run — do NOT rely on a post-mortem `logcat -d`.
+            # A process-wide OOM (the case-9 read-buffer-pool OOM) crashes the instrumented app on a
+            # background dispatcher and the runner tears the emulator down ~1s after BUILD FAILED, so a
+            # post-run dump races the teardown and can capture nothing (an earlier run uploaded an EMPTY
+            # diagnostics artifact for exactly this reason). A background stream started up front already
+            # holds the ART OOM stack + `malloc_space fragmentation` detail by the time the crash hits.
+            mkdir -p android-diagnostics
+            adb logcat -c 2>/dev/null || true
+            adb logcat -v threadtime > android-diagnostics/logcat.txt 2>&1 &
+            logcat_pid=$!
             ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
             code=$?
-            # Capture on-device post-mortem traces BEFORE the emulator is torn down. logcat holds the
-            # ART OOM stack + `malloc_space fragmentation` detail (exactly how the case-9 OOM was
-            # diagnosed); tombstones hold any native crash. Best-effort — never fail the job on these.
-            mkdir -p android-diagnostics
-            adb logcat -d > android-diagnostics/logcat.txt 2>&1 || true
+            # Best-effort post-mortem snapshots (never fail the job on these).
             adb shell dumpsys meminfo com.ditchoom.websocket.test > android-diagnostics/meminfo.txt 2>&1 || true
             adb root >/dev/null 2>&1 || true
             adb pull /data/tombstones android-diagnostics/tombstones 2>/dev/null || true
+            # Preserve gradle's instrumented-test report: it echoes the ART "Logcat of last crash" OOM
+            # stack (how this run's OOM was actually recovered) even if on-device capture came up empty.
+            cp -R build/reports/androidTests android-diagnostics/androidTests-report 2>/dev/null || true
+            kill "$logcat_pid" 2>/dev/null || true
             exit $code
       - name: Upload report
         if: always()
