@@ -59,7 +59,10 @@ jobs:
           cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
           cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (JVM)
-        run: ./gradlew jvmTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+        # Root task only (leading ':'): the Autobahn suites live in the root module. An unqualified
+        # task also runs :websocket-tcp:jvmTest, whose tests never match the filter — Gradle then
+        # fails that task with "No tests found for given includes".
+        run: ./gradlew :jvmTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -107,7 +110,8 @@ jobs:
         # Dump a V8 heap snapshot if Node approaches its heap limit, for post-mortem of a JS OOM.
         env:
           NODE_OPTIONS: --heapsnapshot-near-heap-limit=2
-        run: ./gradlew jsNodeTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+        # Root task only — see the JVM job's comment.
+        run: ./gradlew :jsNodeTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -154,7 +158,8 @@ jobs:
           cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
           cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (jsBrowser)
-        run: ./gradlew jsBrowserTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+        # Root task only — see the JVM job's comment.
+        run: ./gradlew :jsBrowserTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
