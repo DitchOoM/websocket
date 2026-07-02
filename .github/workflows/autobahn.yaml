@@ -275,10 +275,22 @@ jobs:
           brew install colima docker
           # Native x86_64 on the Intel runner — no --arch emulation needed.
           colima start --cpu 3 --memory 6
-      - name: Build Autobahn testsuite image (native amd64 via Colima)
-        # Plain docker build: no buildx/GHA-cache plumbing inside Colima; ~3-4 min, and this leg's
-        # wall clock is dominated by the Kotlin/Native compile anyway.
-        run: docker build -t autobahn-testsuite:local .docker/autobahn
+      # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
+      # tarball keyed on the image inputs: a hit turns the ~3-4 min build into a ~15s load.
+      - name: Restore Autobahn image cache
+        id: autobahn-image-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/autobahn-image.tar
+          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
+      - name: Build or load Autobahn testsuite image (native amd64 via Colima)
+        run: |
+          if [ -f /tmp/autobahn-image.tar ]; then
+            docker load -i /tmp/autobahn-image.tar
+          else
+            docker build -t autobahn-testsuite:local .docker/autobahn
+            docker save autobahn-testsuite:local -o /tmp/autobahn-image.tar
+          fi
       - name: Run Autobahn (macosX64)
         run: ./gradlew macosX64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Validate results (macOS agent)
