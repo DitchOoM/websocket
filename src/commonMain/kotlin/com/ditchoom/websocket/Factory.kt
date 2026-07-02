@@ -80,11 +80,19 @@ suspend fun <B> connectWebSocket(
         val requestBuffer = handshakeRequest.toBuffer()
         transport.write(requestBuffer, connectionOptions.writeTimeout)
 
-        // Build auto-filling stream processor
+        // Build auto-filling stream processor. The pool MUST be thread-safe: the read loop
+        // (codec coroutine) acquires/releases stream chunks while send() — invoked from the
+        // caller's coroutine on a different worker thread — concurrently takes scratch buffers
+        // from the same pool. BufferPool's default is the NOT-thread-safe single-threaded
+        // implementation; under concurrency its ArrayDeque desyncs and clear()/acquire() NPE
+        // (surfaced by AllocatorLeakTests on Android API 29 once small-read compaction raised
+        // read-side pool traffic).
         val pool =
             bufferFactory as? com.ditchoom.buffer.pool.BufferPool
-                ?: com.ditchoom.buffer.pool
-                    .BufferPool(factory = bufferFactory)
+                ?: com.ditchoom.buffer.pool.BufferPool(
+                    threadingMode = com.ditchoom.buffer.pool.ThreadingMode.MultiThreaded,
+                    factory = bufferFactory,
+                )
         val autoFillingStream =
             StreamProcessor
                 .builder(pool)
