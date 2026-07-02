@@ -52,6 +52,21 @@ jobs:
           name: autobahn-report-jvm
           path: .docker/reports/clients
           retention-days: 7
+      # On failure, upload post-mortem traces: heap dumps (incl. direct-buffer OOM), JVM crash logs,
+      # and the full test reports (stdout has the per-case trace + any OOM stack).
+      - name: Upload JVM diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-jvm-diagnostics
+          path: |
+            **/build/oom-dumps/**
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/hs_err_pid*.log
+            **/hs_err_pid*.mdmp
+          retention-days: 7
+          if-no-files-found: ignore
 
   js-node:
     name: "JS (Node)"
@@ -282,7 +297,19 @@ jobs:
           # integration classes via the instrumentation runner's notClass arg: PublicWssValidationTest
           # hits flaky public endpoints (echo.websocket.org/hivemq); WebSocketTests targets 127.0.0.1,
           # which on the emulator is the device itself (only :9001 is adb-reversed to the fuzzingserver).
-          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
+          script: |
+            set +e
+            ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
+            code=$?
+            # Capture on-device post-mortem traces BEFORE the emulator is torn down. logcat holds the
+            # ART OOM stack + `malloc_space fragmentation` detail (exactly how the case-9 OOM was
+            # diagnosed); tombstones hold any native crash. Best-effort — never fail the job on these.
+            mkdir -p android-diagnostics
+            adb logcat -d > android-diagnostics/logcat.txt 2>&1 || true
+            adb shell dumpsys meminfo com.ditchoom.websocket.test > android-diagnostics/meminfo.txt 2>&1 || true
+            adb root >/dev/null 2>&1 || true
+            adb pull /data/tombstones android-diagnostics/tombstones 2>/dev/null || true
+            exit $code
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -290,3 +317,11 @@ jobs:
           name: autobahn-report-android
           path: .docker/reports/clients
           retention-days: 7
+      - name: Upload Android diagnostics (logcat / tombstones / meminfo)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-android-diagnostics
+          path: android-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
