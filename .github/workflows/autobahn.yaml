@@ -284,9 +284,9 @@ jobs:
     # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
     # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
     runs-on: macos-15-intel
-    # 45 min: the intel runner is slow and the compression-heavy cases dominate; 30 was cancelled
-    # mid-suite on the first run (which also skipped the image-cache save post-step).
-    timeout-minutes: 45
+    # 60 min: the intel runner is slow — Colima ~3 min + image build ~8.5 min (uncached) + the
+    # compression-heavy suite. 30 and 45 both timed out mid-suite.
+    timeout-minutes: 60
     # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
     continue-on-error: true
     steps:
@@ -303,9 +303,13 @@ jobs:
           # core and the suite blew the job timeout).
           colima start --cpu 2 --memory 4
       # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
-      # tarball keyed on the image inputs: a hit turns the ~3-4 min build into a ~15s load.
+      # tarball keyed on the image inputs: a hit turns the ~8 min build into a ~15s load.
+      # Explicit restore/save (not actions/cache) so the tarball is saved even when the job
+      # later fails or times out — the combined action's post-step skips on cancellation,
+      # which kept this leg rebuilding from scratch every round.
       - name: Restore Autobahn image cache
-        uses: actions/cache@v4
+        id: autobahn-image-cache
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/autobahn-image.tar
           key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
@@ -317,6 +321,12 @@ jobs:
             docker build -t autobahn-testsuite:local .docker/autobahn
             docker save autobahn-testsuite:local -o /tmp/autobahn-image.tar
           fi
+      - name: Save Autobahn image cache
+        if: always() && steps.autobahn-image-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/autobahn-image.tar
+          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (macosX64)
