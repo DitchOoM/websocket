@@ -42,6 +42,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Registry repository names must be lowercase; github.repository_owner may not be
+      # (e.g. DitchOoM).
+      - name: Compute lowercase image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autobahn-testsuite" >> "$GITHUB_ENV"
+
       - name: Build (and push on main/dispatch)
         id: push
         uses: docker/build-push-action@v6
@@ -50,8 +55,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/autobahn-testsuite:alpine
-            ghcr.io/${{ github.repository_owner }}/autobahn-testsuite:latest
+            ${{ env.IMAGE }}:alpine
+            ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # OCI media types so the image is first-class under Apple's `container`
@@ -75,4 +80,4 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "### Image digest (pin this in autobahn.yaml)" >> "$GITHUB_STEP_SUMMARY"
-          echo '`ghcr.io/${{ github.repository_owner }}/autobahn-testsuite@${{ steps.push.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${IMAGE}@${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
