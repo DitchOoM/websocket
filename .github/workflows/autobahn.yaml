@@ -243,20 +243,13 @@ jobs:
           retention-days: 7
 
   # ----------------------------------------------------------------------------------- Apple
-  # macOS GitHub runners have no Docker daemon, so we bring one up via Colima to host the
-  # fuzzingserver. The KotlinNativeTest finalizer validates the "LinuxX64" agent (vacuous on
-  # macOS), so we additionally validate the real "macOS" agent explicitly.
-  apple:
-    name: "Apple (macOS)"
-    # Intel runner: GitHub's hosted ARM macOS runners (macos-14, M1) lack nested virtualization, so
-    # Colima can't start the fuzzingserver there. macos-15-intel runs Colima natively (HVF); the
-    # in-repo testsuite image is built natively (amd64) inside Colima and we test macosX64 on it.
-    # (On Apple-silicon dev machines the same image runs natively arm64 under Docker or Apple's
-    # `container` CLI — see .docker/autobahn/Dockerfile.)
-    runs-on: macos-15-intel
-    timeout-minutes: 60
-    # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
-    continue-on-error: true
+  # Compile-once/run-separately, mirroring the Linux native legs: the kexe is cross-compiled on a
+  # fast (arm64) macOS runner in parallel with everything else, and the run leg only needs Colima +
+  # the prebuilt binary — no JDK/Gradle/Konan on the Docker-hosting runner.
+  build-macos-test:
+    name: "Build macosX64 test binary"
+    runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -270,6 +263,36 @@ jobs:
           path: ~/.konan
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
+      - name: Link macosX64 test binary
+        run: ./gradlew linkDebugTestMacosX64 --no-build-cache
+      - name: Upload macosX64 kexe
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-macosX64
+          path: build/bin/macosX64/debugTest/test.kexe
+          retention-days: 1
+
+  # macOS GitHub runners have no Docker daemon, so we bring one up via Colima to host the
+  # fuzzingserver, then run the prebuilt kexe directly and validate the "macOS" agent with
+  # the same script the Linux legs use.
+  apple:
+    name: "Apple (macOS)"
+    needs: build-macos-test
+    # Intel runner: GitHub's hosted ARM macOS runners (macos-14/15, M1/M2) lack nested
+    # virtualization, so Colima can't start the fuzzingserver there. macos-15-intel runs Colima
+    # natively (HVF); the in-repo testsuite image runs natively (amd64) inside it, and the
+    # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
+    # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4   # for .docker/config + validation scripts
+      - name: Download test binary
+        uses: actions/download-artifact@v4
+        with:
+          name: test-binary-macosX64
       - name: Start Docker (Colima)
         run: |
           brew install colima docker
@@ -278,7 +301,6 @@ jobs:
       # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
       # tarball keyed on the image inputs: a hit turns the ~3-4 min build into a ~15s load.
       - name: Restore Autobahn image cache
-        id: autobahn-image-cache
         uses: actions/cache@v4
         with:
           path: /tmp/autobahn-image.tar
@@ -291,8 +313,12 @@ jobs:
             docker build -t autobahn-testsuite:local .docker/autobahn
             docker save autobahn-testsuite:local -o /tmp/autobahn-image.tar
           fi
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (macosX64)
-        run: ./gradlew macosX64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+        run: |
+          chmod +x test.kexe
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
       - name: Validate results (macOS agent)
         run: python3 .github/scripts/validate_autobahn.py macOS
       - name: Upload report
