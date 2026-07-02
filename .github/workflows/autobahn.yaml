@@ -284,7 +284,9 @@ jobs:
     # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
     # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    # 45 min: the intel runner is slow and the compression-heavy cases dominate; 30 was cancelled
+    # mid-suite on the first run (which also skipped the image-cache save post-step).
+    timeout-minutes: 45
     # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
     continue-on-error: true
     steps:
@@ -296,8 +298,10 @@ jobs:
       - name: Start Docker (Colima)
         run: |
           brew install colima docker
-          # Native x86_64 on the Intel runner — no --arch emulation needed.
-          colima start --cpu 3 --memory 6
+          # Native x86_64 on the Intel runner — no --arch emulation needed. The runner has 4
+          # vCPUs: give the VM 2 so the test binary keeps 2 (--cpu 3 left the kexe a single
+          # core and the suite blew the job timeout).
+          colima start --cpu 2 --memory 4
       # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
       # tarball keyed on the image inputs: a hit turns the ~3-4 min build into a ~15s load.
       - name: Restore Autobahn image cache
