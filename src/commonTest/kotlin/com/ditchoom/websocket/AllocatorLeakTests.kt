@@ -5,6 +5,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.shared
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
@@ -54,6 +55,9 @@ abstract class AbstractAllocatorLeakTest {
     ) = runStrictTest(timeout = 30.seconds) {
         val pool =
             BufferPool(
+                // Thread-safe: the codec read loop and test-side sends hit the pool from
+                // different worker threads (see connectWebSocket's pool wrap).
+                threadingMode = ThreadingMode.MultiThreaded,
                 maxPoolSize = 64,
                 defaultBufferSize = 8192,
                 factory = backingFactory,
@@ -113,6 +117,7 @@ abstract class AbstractAllocatorLeakTest {
         runStrictTest(timeout = 30.seconds) {
             val pool =
                 BufferPool(
+                    threadingMode = ThreadingMode.MultiThreaded,
                     maxPoolSize = 4, // tight pool amplifies leak detection — every few leaks = ceiling exceeded
                     defaultBufferSize = 8192,
                     factory = backingFactory,
