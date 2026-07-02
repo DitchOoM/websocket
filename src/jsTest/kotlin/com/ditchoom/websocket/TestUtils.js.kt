@@ -30,3 +30,7 @@ internal actual fun runStrictTest(
             block()
         }
     }
+
+// Only Node has raw TCP sockets; the browser (Karma/ChromeHeadless) has none and must use the
+// native WebSocket path — so route browser tests away from TcpTransport (isNodeJs is false there).
+internal actual fun hasFullSocketAccess(): Boolean = isNodeJs

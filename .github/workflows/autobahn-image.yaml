@@ -1,0 +1,83 @@
+# Build and publish the in-repo Autobahn testsuite image (.docker/autobahn) to GHCR as a
+# multi-arch (linux/amd64 + linux/arm64) Alpine image. Replaces the amd64-only
+# crossbario/autobahn-testsuite Docker Hub image so arm64 CI runners and Apple `container`
+# run it natively.
+#
+# Consumers opt in via AUTOBAHN_IMAGE (start_fuzzingserver.sh + AutobahnDockerTask).
+# Run this once via workflow_dispatch (and make the GHCR package public) before flipping
+# autobahn.yaml over.
+name: autobahn-image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.docker/autobahn/**'
+      - '.github/workflows/autobahn-image.yaml'
+  pull_request:
+    paths:
+      - '.docker/autobahn/**'
+      - '.github/workflows/autobahn-image.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 leg builds under QEMU here (build-time only; consumers run natively).
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Registry repository names must be lowercase; github.repository_owner may not be
+      # (e.g. DitchOoM).
+      - name: Compute lowercase image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autobahn-testsuite" >> "$GITHUB_ENV"
+
+      - name: Build (and push on main/dispatch)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:alpine
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # OCI media types so the image is first-class under Apple's `container`
+          # runtime and other strict-OCI consumers.
+          outputs: type=image,oci-mediatypes=true
+
+      - name: Smoke test (native amd64)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker buildx build --load -t ats-smoke .docker/autobahn
+          docker run -d --rm --name ats-smoke -p 9001:9001 \
+            -v "$PWD/.docker/config:/config" -v "$PWD/.docker/reports:/reports" ats-smoke
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://localhost:9001 || true)
+            if [ "$code" = "400" ] || [ "$code" = "200" ]; then echo "ready (HTTP $code)"; exit 0; fi
+            sleep 1
+          done
+          echo "fuzzingserver did not come up" >&2; docker logs ats-smoke >&2; exit 1
+
+      - name: Digest summary
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "### Image digest (pin this in autobahn.yaml)" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${IMAGE}@${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

@@ -73,13 +73,16 @@ The library minimizes allocations by:
 
 ### Running Autobahn Integration Tests
 ```bash
-# Start Autobahn server
-docker run -d --name fuzzingserver -p 9001:9001 \
-  -v $(pwd)/.docker/config:/config \
-  crossbario/autobahn-testsuite \
-  wstest -m fuzzingserver -s /config/fuzzingserver.json
+# Build the in-repo multi-arch Alpine testsuite image (native arm64 + amd64;
+# published to GHCR by .github/workflows/autobahn-image.yaml)
+docker build -t autobahn-testsuite:alpine .docker/autobahn
 
-# Run integration tests
-./gradlew jvmTest -PintegrationTests
-./gradlew linuxX64Test -PintegrationTests
+# Start the fuzzingserver (runtime-agnostic: docker / Apple `container` / podman;
+# defaults to the amd64-only crossbario image when AUTOBAHN_IMAGE is unset)
+AUTOBAHN_IMAGE=autobahn-testsuite:alpine bash .github/scripts/start_fuzzingserver.sh
+
+# Run integration tests (AUTOBAHN_HOST=127.0.0.1 makes Gradle reuse the running server;
+# AUTOBAHN_IMAGE/CONTAINER_RUNTIME are honored by the Gradle task too)
+AUTOBAHN_HOST=127.0.0.1 ./gradlew jvmTest -PintegrationTests
+AUTOBAHN_HOST=127.0.0.1 ./gradlew linuxX64Test -PintegrationTests
 ```

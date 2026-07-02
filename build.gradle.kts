@@ -192,7 +192,7 @@ tasks
 // every `ksp*` task. This project only runs the processor once, in commonMain-metadata mode, so the
 // descriptor comes solely from kspCommonMainKotlinMetadata. Narrow the tasks to that one so wiring
 // checkCodecSchema into `check` doesn't drag in per-target (esp. Android instrumented) KSP tasks and
-// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk26 on non-Android hosts).
+// their Android test-manifest processing (which needs -PinstrumentedTestsMinSdk34 on non-Android hosts).
 listOf("checkCodecSchema", "updateCodecSchema").forEach { taskName ->
     tasks.named(taskName) {
         setDependsOn(listOf(tasks.named("kspCommonMainKotlinMetadata")))
@@ -303,8 +303,8 @@ android {
     defaultConfig {
         // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
         // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
-        // -PinstrumentedTestsMinSdk26 when building the instrumentation test APK.
-        minSdk = if (project.hasProperty("instrumentedTestsMinSdk26")) 34 else 23
+        // -PinstrumentedTestsMinSdk34 when building the instrumentation test APK.
+        minSdk = if (project.hasProperty("instrumentedTestsMinSdk34")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
@@ -621,10 +621,16 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
         }
 
         // Parse results and fail on failures (filtered to agentsToValidate if specified)
+        val scope = agentsToValidate?.joinToString(", ") ?: "all agents"
+        // Only enforce presence of a report when the Autobahn integration suite was actually run —
+        // a plain `./gradlew check` (no -PintegrationTests) excludes those tests, produces no report,
+        // and must not be failed by this finalizer.
+        val expectReport = project.hasProperty("integrationTests")
         if (!indexJson.isNullOrBlank()) {
             @Suppress("UNCHECKED_CAST")
             val json = groovy.json.JsonSlurper().parseText(indexJson) as Map<String, Any>
             val failures = mutableListOf<String>()
+            var casesSeen = 0
             json.forEach { (agent, cases) ->
                 // Skip stress agents — they exist for factory-matrix coverage and
                 // their pass/fail is judged by the JUnit assertion completing without
@@ -634,12 +640,23 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
                 if (agentsToValidate != null && agent !in agentsToValidate) return@forEach
                 @Suppress("UNCHECKED_CAST")
                 (cases as? Map<String, Any>)?.forEach { (caseId, result) ->
+                    casesSeen++
                     @Suppress("UNCHECKED_CAST")
                     val r = result as? Map<String, Any>
-                    if (r?.get("behavior") == "FAILED") {
-                        failures.add("$agent case $caseId: behaviorClose=${r["behaviorClose"]}")
+                    val behavior = r?.get("behavior")
+                    // Gate on BOTH the data verdict and the close-handshake verdict: a case can be
+                    // behavior=OK yet behaviorClose=FAILED (Case 7.x close-code regressions), which
+                    // must not slip through. Non-FAILED verdicts (OK / NON-STRICT / INFORMATIONAL) pass.
+                    val behaviorClose = r?.get("behaviorClose")
+                    if (behavior == "FAILED" || behaviorClose == "FAILED") {
+                        failures.add("$agent case $caseId: behavior=$behavior behaviorClose=$behaviorClose")
                     }
                 }
+            }
+            // A report that recorded no cases for the requested agent means the test client never
+            // connected — a real failure when we ran the integration suite (matches validate_autobahn.py).
+            if (expectReport && casesSeen == 0) {
+                throw GradleException("No Autobahn cases recorded for $scope — the test agent did not connect.")
             }
             if (failures.isNotEmpty()) {
                 throw GradleException(
@@ -647,10 +664,11 @@ fun createAutobahnValidationAction(agentsToValidate: Set<String>?) =
                         failures.joinToString("\n") { "  - $it" },
                 )
             }
-            val scope = agentsToValidate?.joinToString(", ") ?: "all agents"
-            println("All Autobahn tests passed for $scope!")
+            println("All Autobahn tests passed for $scope! ($casesSeen cases)")
+        } else if (expectReport) {
+            throw GradleException("No Autobahn report index.json found for $scope — the integration suite produced no report.")
         } else {
-            println("Warning: No Autobahn report index.json found")
+            println("Warning: No Autobahn report index.json found (no -PintegrationTests; skipping validation)")
         }
     }
 

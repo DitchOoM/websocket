@@ -10,8 +10,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Don't let one API level's failure cancel the others.
+      fail-fast: false
       matrix:
-        api-level: [19, 26]
+        # Library minSdk is 23, so the emulator API must be >= 23. (API 19 could never install the
+        # APK — "minSdkVersion [23] > deviceApiLevel [19]" — which is what used to red this job.)
+        api-level: [29, 34]
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -37,13 +41,20 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ matrix.api-level }}
+          # arch + disk in the key so a stale x86 / larger-disk AVD is never restored.
+          key: avd-x86_64-${{ matrix.api-level }}-disk4096
 
       - name: create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
+          target: default
+          # API 34+ ships no 32-bit x86 system image — only x86_64.
+          arch: x86_64
+          # Cap userdata so the emulator doesn't FATAL "not enough space" at launch (API 34's default
+          # userdata partition is large). Mirrors DitchOoM/socket's proven android_integration config.
+          disk-size: 4096M
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
@@ -53,6 +64,12 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
+          target: default
+          # API 34+ ships no 32-bit x86 system image — only x86_64.
+          arch: x86_64
+          # Cap userdata so the emulator doesn't FATAL "not enough space" at launch (API 34's default
+          # userdata partition is large). Mirrors DitchOoM/socket's proven android_integration config.
+          disk-size: 4096M
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true

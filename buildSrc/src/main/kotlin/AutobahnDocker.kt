@@ -30,6 +30,12 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
         val containerName = "fuzzingserver"
         val port = 9001
         val remoteHost = System.getenv("AUTOBAHN_HOST")
+        // Image + runtime overrides, mirroring .github/scripts/start_fuzzingserver.sh.
+        // AUTOBAHN_IMAGE selects the multi-arch Alpine image built from .docker/autobahn
+        // (native arm64); default stays the historical amd64-only Docker Hub image.
+        // CONTAINER_RUNTIME supports `container` (Apple Containerization) and podman.
+        val image = System.getenv("AUTOBAHN_IMAGE") ?: "crossbario/autobahn-testsuite"
+        val runtime = System.getenv("CONTAINER_RUNTIME") ?: "docker"
 
         // Check if remote server is available first (e.g., tailscale host)
         if (!remoteHost.isNullOrEmpty() && isServerReady(remoteHost, port)) {
@@ -43,13 +49,13 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
 
         // 1. Stop and remove existing container (if any)
         try {
-            ProcessBuilder("docker", "stop", containerName)
+            ProcessBuilder(runtime, "stop", containerName)
                 .redirectErrorStream(true)
                 .start()
                 .waitFor()
         } catch (e: Exception) { /* container may not exist */ }
         try {
-            ProcessBuilder("docker", "rm", containerName)
+            ProcessBuilder(runtime, "rm", containerName)
                 .redirectErrorStream(true)
                 .start()
                 .waitFor()
@@ -59,7 +65,7 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
         val reportsDir = "${parameters.projectDir.absolutePath}/.docker/reports"
         try {
             val cleanProcess = ProcessBuilder(
-                "docker", "run", "--rm",
+                runtime, "run", "--rm",
                 "-v", "$reportsDir:/reports",
                 "alpine", "sh", "-c", "rm -rf /reports/clients/*"
             )
@@ -76,17 +82,28 @@ abstract class AutobahnDockerContainer : WorkAction<AutobahnDockerParams> {
         println("  config: ${parameters.projectDir.absolutePath}/.docker/config:/config")
         println("  reports: ${parameters.projectDir.absolutePath}/.docker/reports:/reports")
 
-        // Start the container in detached mode with memory limits
-        // Autobahn testsuite stores wire logs in memory - needs ~6GB for full compression suite
-        // GitHub Actions runners have 7GB, so 8GB limit is safe with swap
+        // Start the container in detached mode with memory limits, mirroring
+        // .github/scripts/start_fuzzingserver.sh: the PyPy-based crossbario image keeps the
+        // proven 8g (+6g swap) for its in-memory wire logs; the in-repo Alpine/CPython image
+        // peaks at ~340 MiB for a full 517-case single-agent run, so 2g is ~6x headroom.
+        // Apple `container` sizes a per-container VM with -m and has no --memory-swap.
+        val isUpstreamImage = image.startsWith("crossbario/")
+        val memory = System.getenv("AUTOBAHN_MEMORY") ?: if (isUpstreamImage) "8g" else "2g"
+        val memorySwap = System.getenv("AUTOBAHN_MEMORY_SWAP") ?: if (isUpstreamImage) "14g" else "3g"
+        val memoryArgs =
+            if (runtime == "container") {
+                listOf("-m", memory)
+            } else {
+                listOf("--memory=$memory", "--memory-swap=$memorySwap")
+            }
         val process = ProcessBuilder(
-            "docker", "run", "-d", "--rm",
-            "--memory=8g", "--memory-swap=14g",
-            "-v", "${parameters.projectDir.absolutePath}/.docker/config:/config",
-            "-v", "${parameters.projectDir.absolutePath}/.docker/reports:/reports",
-            "-p", "$port:9001",
-            "--name", containerName,
-            "crossbario/autobahn-testsuite"
+            listOf(runtime, "run", "-d", "--rm") + memoryArgs + listOf(
+                "-v", "${parameters.projectDir.absolutePath}/.docker/config:/config",
+                "-v", "${parameters.projectDir.absolutePath}/.docker/reports:/reports",
+                "-p", "$port:9001",
+                "--name", containerName,
+                image
+            )
         )
             .redirectErrorStream(true)
             .start()
