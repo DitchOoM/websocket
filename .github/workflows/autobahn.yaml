@@ -276,7 +276,13 @@ jobs:
           # androidInstrumentedTest. -PinstrumentedTestsMinSdk34 raises the root minSdk to 34; the
           # unqualified task would also run :websocket-tcp:, whose androidTest stays at minSdk 23 and
           # fails the manifest merge against the (34) root library.
-          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 --no-build-cache
+          #
+          # Scope to the Autobahn conformance suite, matching the other legs' `--tests AutobahnCase*`.
+          # connectedAndroidTest ignores Gradle's `--tests` glob, so exclude the non-Autobahn
+          # integration classes via the instrumentation runner's notClass arg: PublicWssValidationTest
+          # hits flaky public endpoints (echo.websocket.org/hivemq); WebSocketTests targets 127.0.0.1,
+          # which on the emulator is the device itself (only :9001 is adb-reversed to the fuzzingserver).
+          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
