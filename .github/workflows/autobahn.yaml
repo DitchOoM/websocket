@@ -67,6 +67,21 @@ jobs:
           name: autobahn-report-jvm
           path: .docker/reports/clients
           retention-days: 7
+      # On failure, upload post-mortem traces: heap dumps (incl. direct-buffer OOM), JVM crash logs,
+      # and the full test reports (stdout has the per-case trace + any OOM stack).
+      - name: Upload JVM diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-jvm-diagnostics
+          path: |
+            **/build/oom-dumps/**
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/hs_err_pid*.log
+            **/hs_err_pid*.mdmp
+          retention-days: 7
+          if-no-files-found: ignore
 
   js-node:
     name: "JS (Node)"
@@ -89,6 +104,9 @@ jobs:
           cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
           cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (jsNode)
+        # Dump a V8 heap snapshot if Node approaches its heap limit, for post-mortem of a JS OOM.
+        env:
+          NODE_OPTIONS: --heapsnapshot-near-heap-limit=2
         run: ./gradlew jsNodeTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
         if: always()
@@ -97,6 +115,18 @@ jobs:
           name: autobahn-report-jsnode
           path: .docker/reports/clients
           retention-days: 7
+      # On failure: test reports (per-test stdout holds the JS error/stack) + any V8 heap snapshot.
+      - name: Upload JS (Node) diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-jsnode-diagnostics
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/*.heapsnapshot
+          retention-days: 7
+          if-no-files-found: ignore
 
   js-browser:
     name: "JS (Browser)"
@@ -132,6 +162,18 @@ jobs:
           name: autobahn-report-jsbrowser
           path: .docker/reports/clients
           retention-days: 7
+      # On failure: test reports capture the Karma/ChromeHeadless console output + failure stacks.
+      - name: Upload JS (Browser) diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-jsbrowser-diagnostics
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/build/reports/karma/**
+          retention-days: 7
+          if-no-files-found: ignore
 
   # -------------------------------------------------------- Native: compile once, run per arch
   build-native:
@@ -190,8 +232,14 @@ jobs:
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (linuxX64)
         run: |
+          mkdir -p native-diagnostics
+          ulimit -c unlimited
+          # Route core dumps next to the binary so a native crash (SIGSEGV/SIGABRT/OOM) is uploadable.
+          sudo sysctl -w kernel.core_pattern="$PWD/native-diagnostics/core.%e.%p" >/dev/null 2>&1 || true
           chmod +x test.kexe
-          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+          # Tee stderr — Kotlin/Native prints the crash backtrace there — into an artifact file.
+          set -o pipefail
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER" 2>&1 | tee native-diagnostics/output.txt
       - name: Validate results
         run: python3 .github/scripts/validate_autobahn.py LinuxX64
       - name: Upload report
@@ -201,6 +249,14 @@ jobs:
           name: autobahn-report-linuxx64
           path: .docker/reports/clients
           retention-days: 7
+      - name: Upload Linux x64 diagnostics (backtrace / core dump)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-linuxx64-diagnostics
+          path: native-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
 
   linux-arm64:
     name: "Linux arm64 (native)"
@@ -229,8 +285,12 @@ jobs:
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (linuxArm64)
         run: |
+          mkdir -p native-diagnostics
+          ulimit -c unlimited
+          sudo sysctl -w kernel.core_pattern="$PWD/native-diagnostics/core.%e.%p" >/dev/null 2>&1 || true
           chmod +x test.kexe
-          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+          set -o pipefail
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER" 2>&1 | tee native-diagnostics/output.txt
       # linuxArm64 shares src/linuxTest, so it reports under the same "LinuxX64" agent name.
       - name: Validate results
         run: python3 .github/scripts/validate_autobahn.py LinuxX64
@@ -241,6 +301,14 @@ jobs:
           name: autobahn-report-linuxarm64
           path: .docker/reports/clients
           retention-days: 7
+      - name: Upload Linux arm64 diagnostics (backtrace / core dump)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-linuxarm64-diagnostics
+          path: native-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ----------------------------------------------------------------------------------- Apple
   # Compile-once/run-separately, mirroring the Linux native legs: the kexe is cross-compiled on a
@@ -342,6 +410,23 @@ jobs:
           name: autobahn-report-apple
           path: .docker/reports/clients
           retention-days: 7
+      # On failure: Gradle test reports hold the Kotlin/Native crash backtrace + per-test stdout;
+      # grab any core dumps too (best-effort — /cores needs the ulimit above).
+      - name: Upload Apple diagnostics (backtrace / core dumps)
+        if: failure()
+        run: |
+          mkdir -p apple-diagnostics
+          sudo cp /cores/* apple-diagnostics/ 2>/dev/null || true
+          cp -R build/reports/tests apple-diagnostics/reports 2>/dev/null || true
+          cp -R build/test-results apple-diagnostics/test-results 2>/dev/null || true
+      - name: Upload Apple diagnostics artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-apple-diagnostics
+          path: apple-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------------- Android
   # Emulator on an ubuntu runner (Docker is native here). connectedDebugAndroidTest is wired to
@@ -398,7 +483,29 @@ jobs:
           # integration classes via the instrumentation runner's notClass arg: PublicWssValidationTest
           # hits flaky public endpoints (echo.websocket.org/hivemq); WebSocketTests targets 127.0.0.1,
           # which on the emulator is the device itself (only :9001 is adb-reversed to the fuzzingserver).
-          script: ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
+          script: |
+            set +e
+            # STREAM logcat to a file BEFORE the tests run — do NOT rely on a post-mortem `logcat -d`.
+            # A process-wide OOM (the case-9 read-buffer-pool OOM) crashes the instrumented app on a
+            # background dispatcher and the runner tears the emulator down ~1s after BUILD FAILED, so a
+            # post-run dump races the teardown and can capture nothing (an earlier run uploaded an EMPTY
+            # diagnostics artifact for exactly this reason). A background stream started up front already
+            # holds the ART OOM stack + `malloc_space fragmentation` detail by the time the crash hits.
+            mkdir -p android-diagnostics
+            adb logcat -c 2>/dev/null || true
+            adb logcat -v threadtime > android-diagnostics/logcat.txt 2>&1 &
+            logcat_pid=$!
+            ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
+            code=$?
+            # Best-effort post-mortem snapshots (never fail the job on these).
+            adb shell dumpsys meminfo com.ditchoom.websocket.test > android-diagnostics/meminfo.txt 2>&1 || true
+            adb root >/dev/null 2>&1 || true
+            adb pull /data/tombstones android-diagnostics/tombstones 2>/dev/null || true
+            # Preserve gradle's instrumented-test report: it echoes the ART "Logcat of last crash" OOM
+            # stack (how this run's OOM was actually recovered) even if on-device capture came up empty.
+            cp -R build/reports/androidTests android-diagnostics/androidTests-report 2>/dev/null || true
+            kill "$logcat_pid" 2>/dev/null || true
+            exit $code
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -406,3 +513,11 @@ jobs:
           name: autobahn-report-android
           path: .docker/reports/clients
           retention-days: 7
+      - name: Upload Android diagnostics (logcat / tombstones / meminfo)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-android-diagnostics
+          path: android-diagnostics
+          retention-days: 7
+          if-no-files-found: ignore

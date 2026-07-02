@@ -234,6 +234,16 @@ tasks.withType<Test>().configureEach {
     if (runIntegrationTests) {
         // Stress tests with 1MB+ compressed payloads need adequate heap
         maxHeapSize = "1g"
+        // CI post-mortem: dump the heap on ANY OutOfMemoryError — including direct-buffer-memory
+        // OOM (that's what Autobahn 9.6.1 hit) — so a failed run uploads a .hprof to diagnose with,
+        // instead of needing a local repro. The workflow uploads build/oom-dumps on failure.
+        val oomDir =
+            layout.buildDirectory
+                .dir("oom-dumps")
+                .get()
+                .asFile
+        jvmArgs("-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=$oomDir")
+        doFirst { oomDir.mkdirs() }
     } else {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
