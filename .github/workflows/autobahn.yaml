@@ -29,6 +29,12 @@ env:
   # Only the RFC conformance cases (categories 1-13). AutobahnStress* is factory-matrix coverage
   # whose pass/fail is judged by the JUnit assertion, not per-case fuzzingserver validation.
   AUTOBAHN_FILTER: "com.ditchoom.websocket.AutobahnCase*"
+  # Every leg builds the in-repo multi-arch testsuite image (.docker/autobahn) natively in-job
+  # (buildx + GHA layer cache → ~30-60s warm) instead of pulling the amd64-only
+  # crossbario/autobahn-testsuite from Docker Hub. This keeps arm64 runners QEMU-free, makes the
+  # suite hermetic (a PR changing .docker/autobahn is tested against its own image), and avoids
+  # depending on GHCR package visibility. start_fuzzingserver.sh + AutobahnDockerTask read this.
+  AUTOBAHN_IMAGE: autobahn-testsuite:local
 
 jobs:
   # ----------------------------------------------------------------------------- Gradle: JVM / JS
@@ -43,6 +49,15 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: gradle
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (JVM)
         run: ./gradlew jvmTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
@@ -64,6 +79,15 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
           cache: gradle
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (jsNode)
         run: ./gradlew jsNodeTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
@@ -90,6 +114,15 @@ jobs:
           java-version: '21'
           cache: gradle
       - uses: browser-actions/setup-chrome@v1
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (jsBrowser)
         run: ./gradlew jsBrowserTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
@@ -144,6 +177,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test-binary-linuxX64
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (linuxX64)
@@ -165,8 +207,8 @@ jobs:
     needs: build-native
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
-    # Non-blocking: the amd64-only fuzzingserver runs under QEMU emulation here, which is slow for
-    # the heavy compression cases. The arm64 TEST BINARY runs natively; only the server is emulated.
+    # Both the test binary AND the fuzzingserver (in-repo multi-arch image) now run natively —
+    # no QEMU. Kept non-blocking until the native-image path has a few green runs; then flip.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -174,8 +216,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: test-binary-linuxArm64
-      - name: Set up QEMU (run amd64 fuzzingserver on arm64)
-        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (linuxArm64)
@@ -200,8 +249,10 @@ jobs:
   apple:
     name: "Apple (macOS)"
     # Intel runner: GitHub's hosted ARM macOS runners (macos-14, M1) lack nested virtualization, so
-    # Colima can't start the fuzzingserver there. macos-15-intel runs Colima natively (HVF), so it can
-    # host the amd64 crossbario/autobahn-testsuite image and we test the macosX64 target on it.
+    # Colima can't start the fuzzingserver there. macos-15-intel runs Colima natively (HVF); the
+    # in-repo testsuite image is built natively (amd64) inside Colima and we test macosX64 on it.
+    # (On Apple-silicon dev machines the same image runs natively arm64 under Docker or Apple's
+    # `container` CLI — see .docker/autobahn/Dockerfile.)
     runs-on: macos-15-intel
     timeout-minutes: 60
     # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
@@ -224,6 +275,10 @@ jobs:
           brew install colima docker
           # Native x86_64 on the Intel runner — no --arch emulation needed.
           colima start --cpu 3 --memory 6
+      - name: Build Autobahn testsuite image (native amd64 via Colima)
+        # Plain docker build: no buildx/GHA-cache plumbing inside Colima; ~3-4 min, and this leg's
+        # wall clock is dominated by the Kotlin/Native compile anyway.
+        run: docker build -t autobahn-testsuite:local .docker/autobahn
       - name: Run Autobahn (macosX64)
         run: ./gradlew macosX64Test -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Validate results (macOS agent)
@@ -259,6 +314,15 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
       - name: Run Autobahn (Android emulator)
         uses: reactivecircus/android-emulator-runner@v2
         with:
