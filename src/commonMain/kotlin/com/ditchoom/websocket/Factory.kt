@@ -71,22 +71,11 @@ suspend fun <B> connectWebSocket(
         val requestBuffer = handshakeRequest.toBuffer()
         transport.write(requestBuffer, connectionOptions.writeTimeout)
 
-        // Build auto-filling stream processor.
-        //
-        // Route the codec + (de)compressor through this pool (not the raw factory) so the large,
-        // per-message buffers — assembly, decompression output/chunks, compress scratch, frame
-        // buffers — are *reused* instead of freshly allocated and freed each message. On Android
-        // that is load-bearing: `BufferFactory.Default` there is a non-movable `byte[]` on the ART
-        // heap (ByteBuffer.allocateDirect => VMRuntime.newNonMovableArray), so churning fresh 1–16MB
-        // buffers per message fragments the non-moving space until no contiguous block remains → OOM.
-        // Pooling allocates each size once and reuses it, so there is nothing left to fragment. The
-        // codec's existing `freeIfNeeded()` calls return buffers to the pool (verified: alloc+free on
-        // a pooled factory yields pool hits), and `close()` clears the pool. MultiThreaded because the
-        // read loop (receive) and user `send()` calls share this pool across dispatchers.
+        // Build auto-filling stream processor
         val pool =
             bufferFactory as? com.ditchoom.buffer.pool.BufferPool
                 ?: com.ditchoom.buffer.pool
-                    .BufferPool(com.ditchoom.buffer.pool.ThreadingMode.MultiThreaded, factory = bufferFactory)
+                    .BufferPool(factory = bufferFactory)
         val autoFillingStream =
             StreamProcessor
                 .builder(pool)
@@ -114,7 +103,7 @@ suspend fun <B> connectWebSocket(
 
         when (validationResult) {
             is ValidationResult.Success -> {
-                val compression = buildCompressionConfig(response, connectionOptions, pool)
+                val compression = buildCompressionConfig(response, connectionOptions, bufferFactory)
 
                 val outgoingEnabled = compression is CompressionConfig.Enabled && compression.compressor != null
                 val clientNoCtx =
@@ -125,7 +114,7 @@ suspend fun <B> connectWebSocket(
                         transport = transport,
                         stream = autoFillingStream,
                         compression = compression,
-                        bufferFactory = pool,
+                        bufferFactory = bufferFactory,
                         binaryCodec = binaryCodec,
                         readTimeout = connectionOptions.readTimeout,
                         writeTimeout = connectionOptions.writeTimeout,

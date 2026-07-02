@@ -3,7 +3,7 @@ package com.ditchoom.websocket
 import agentName
 import autobahnHost
 import com.ditchoom.buffer.BufferFactory
-import com.ditchoom.buffer.deterministic
+import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.codec.Codec
@@ -78,7 +78,7 @@ internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
     awaitClose: Boolean = true,
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
     agentSuffix: String = "",
 ): Connection<WebSocketMessage<Unit>> {
     val connectionOptions =
@@ -115,7 +115,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
     agentSuffix: String = "",
 ) {
     val connectionOptions =
@@ -169,7 +169,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
     agentSuffix: String = "",
 ) {
     val connectionOptions =
@@ -214,7 +214,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
 internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     case: Int,
     requestCompression: Boolean = false,
-    bufferFactory: BufferFactory = BufferFactory.deterministic(),
+    bufferFactory: BufferFactory = BufferFactory.Default,
     agentSuffix: String = "",
 ) {
     val connectionOptions =
@@ -274,7 +274,7 @@ internal suspend fun sendBinaryWithPayloadLengthOf(
         if (length < 1) {
             EMPTY_BUFFER
         } else {
-            val b = BufferFactory.deterministic().allocate(length)
+            val b = BufferFactory.Default.allocate(length)
             repeat(length) {
                 b.writeByte(0xfe.toByte())
             }
