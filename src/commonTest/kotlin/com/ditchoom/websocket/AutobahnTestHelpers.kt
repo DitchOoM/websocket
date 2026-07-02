@@ -16,9 +16,6 @@ import com.ditchoom.socket.TransportConfig
 import com.ditchoom.socket.transport.TcpTransport
 import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
@@ -130,27 +127,39 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     val mark = TimeSource.Monotonic.markNow()
     val ws = connectForTest(connectionOptions)
     val connectTime = mark.elapsedNow()
+    var echoTime = kotlin.time.Duration.ZERO
     try {
         var msgIdx = 0
         val perMsgMark = TimeSource.Monotonic.markNow()
-        ws.receive().filter { it is WebSocketMessage.Text }.take(count).collect {
-            val recvTime = perMsgMark.elapsedNow()
-            val m = it as WebSocketMessage.Text
-            ws.send(WebSocketMessage.Text(m.payload))
-            val writeTime = perMsgMark.elapsedNow()
-            if (count > 100 && (msgIdx < 5 || msgIdx % 100 == 0 || msgIdx == count - 1)) {
-                println(
-                    "  MSG[$msgIdx] recv=${recvTime.inWholeMilliseconds}ms write=${writeTime.inWholeMilliseconds}ms len=${m.payload.length}",
-                )
+        // Echo the expected messages, then KEEP COLLECTING until the server closes (the
+        // fuzzingserver ends every case by closing the connection). Dropping the TCP
+        // connection a fixed delay after our own close frame races the server: on slow
+        // servers (e.g. the chopped-send 9.5/9.6 cases on the CPython Alpine image, whose
+        // sync chop loop blocks the reactor for seconds) the server hasn't read the echo
+        // yet, and the teardown discards it — wstest records the case as FAILED even
+        // though the echo was correct. Waiting for the server's close is also what RFC
+        // 6455 §7.1.1 prescribes for the closing handshake.
+        withTimeoutOrNull(15.seconds) {
+            ws.receive().collect {
+                if (it is WebSocketMessage.Text && msgIdx < count) {
+                    val recvTime = perMsgMark.elapsedNow()
+                    ws.send(WebSocketMessage.Text(it.payload))
+                    val writeTime = perMsgMark.elapsedNow()
+                    if (count > 100 && (msgIdx < 5 || msgIdx % 100 == 0 || msgIdx == count - 1)) {
+                        println(
+                            "  MSG[$msgIdx] recv=${recvTime.inWholeMilliseconds}ms write=${writeTime.inWholeMilliseconds}ms len=${it.payload.length}",
+                        )
+                    }
+                    msgIdx++
+                    if (msgIdx == count) echoTime = mark.elapsedNow() - connectTime
+                }
             }
-            msgIdx++
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
         // Autobahn correctness is validated by validateAutobahnResults.
     }
-    val echoTime = mark.elapsedNow() - connectTime
-    kotlinx.coroutines.delay(100)
+    if (echoTime == kotlin.time.Duration.ZERO) echoTime = mark.elapsedNow() - connectTime
     try {
         ws.close()
     } catch (_: Exception) {
@@ -185,19 +194,28 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     // Binary echo needs access to raw bytes; BinaryPassThroughCodec surfaces them as ReadBuffer.
     val ws = connectForTest(connectionOptions, BinaryPassThroughCodec)
     val connectTime = mark.elapsedNow()
+    var echoTime = kotlin.time.Duration.ZERO
     try {
-        ws.receive().filter { it is WebSocketMessage.Binary<*> }.take(count).collect {
-            @Suppress("UNCHECKED_CAST")
-            val m = it as WebSocketMessage.Binary<ReadBuffer>
-            // Library owns m.payload for the duration of this collect block; it frees
-            // the buffer once we return. send() copies/writes the bytes immediately.
-            ws.send(WebSocketMessage.Binary(m.payload))
+        var msgIdx = 0
+        // See echoMessageAndClose: echo, then wait for the SERVER to close so slow
+        // servers still receive the echo before the connection goes away.
+        withTimeoutOrNull(15.seconds) {
+            ws.receive().collect {
+                if (it is WebSocketMessage.Binary<*> && msgIdx < count) {
+                    @Suppress("UNCHECKED_CAST")
+                    val m = it as WebSocketMessage.Binary<ReadBuffer>
+                    // Library owns m.payload for the duration of this collect block; it frees
+                    // the buffer once we return. send() copies/writes the bytes immediately.
+                    ws.send(WebSocketMessage.Binary(m.payload))
+                    msgIdx++
+                    if (msgIdx == count) echoTime = mark.elapsedNow() - connectTime
+                }
+            }
         }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
     }
-    val echoTime = mark.elapsedNow() - connectTime
-    kotlinx.coroutines.delay(100)
+    if (echoTime == kotlin.time.Duration.ZERO) echoTime = mark.elapsedNow() - connectTime
     try {
         ws.close()
     } catch (_: Exception) {
@@ -227,12 +245,20 @@ internal suspend fun CoroutineScope.echoMessageWhenFoundText(
         )
     val ws = connectForTest(connectionOptions)
     try {
-        val msg = ws.receive().first { it is WebSocketMessage.Text } as WebSocketMessage.Text
-        ws.send(WebSocketMessage.Text(msg.payload))
+        var echoed = false
+        // See echoMessageAndClose: echo, then wait for the SERVER to close so slow
+        // servers still receive the echo before the connection goes away.
+        withTimeoutOrNull(15.seconds) {
+            ws.receive().collect {
+                if (it is WebSocketMessage.Text && !echoed) {
+                    ws.send(WebSocketMessage.Text(it.payload))
+                    echoed = true
+                }
+            }
+        }
     } catch (_: Exception) {
         // Server may close the connection as part of the test case behavior.
     }
-    kotlinx.coroutines.delay(100)
     try {
         ws.close()
     } catch (_: Exception) {

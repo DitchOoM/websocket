@@ -11,6 +11,7 @@ import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadResult
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
 import com.ditchoom.buffer.stream.StreamProcessor
@@ -22,6 +23,14 @@ import com.ditchoom.websocket.handshake.HandshakeResponseParser
 import com.ditchoom.websocket.handshake.HandshakeValidator
 import com.ditchoom.websocket.handshake.ValidationResult
 import kotlinx.coroutines.CoroutineScope
+
+/**
+ * Socket reads at or below this size are copied into a right-sized buffer instead of
+ * appending the (full-pool-sized) read buffer to the frame stream. See the refill
+ * lambda in [connectWebSocket]. 4 KiB keeps the copy cost trivial while covering the
+ * pathological small-segment patterns (Autobahn chops at 64-2048 octets).
+ */
+private const val COMPACT_READ_THRESHOLD = 4096
 
 /**
  * Connects a WebSocket over the given [ByteStream] and returns a ready-to-use
@@ -81,7 +90,28 @@ suspend fun <B> connectWebSocket(
                 .builder(pool)
                 .buildSuspendingWithAutoFill { stream ->
                     when (val result = transport.read(connectionOptions.readTimeout)) {
-                        is ReadResult.Data -> stream.append(result.buffer)
+                        is ReadResult.Data -> {
+                            val buffer = result.buffer
+                            // Compact tiny reads before appending. The stream retains every appended
+                            // chunk until the frame is parsed, and each socket read hands us a full
+                            // pool-sized buffer (hundreds of KB) no matter how few bytes it carries.
+                            // A peer trickling small TCP segments (Autobahn's 9.5/9.6 chopped-send
+                            // cases deliver 1 MiB as 16k x 64-octet writes; a malicious server could
+                            // do the same deliberately) would otherwise pin thousands of pool buffers
+                            // within a single message and exhaust direct memory. Copying the few
+                            // bytes into a right-sized buffer frees the pool buffer for immediate
+                            // reuse. The copy comes from the seed factory because the pool is
+                            // single-bucket: pool.acquire would hand back another full-size buffer.
+                            if (buffer.remaining() <= COMPACT_READ_THRESHOLD) {
+                                val compact = bufferFactory.allocate(buffer.remaining())
+                                compact.write(buffer)
+                                compact.resetForRead()
+                                buffer.freeIfNeeded()
+                                stream.append(compact)
+                            } else {
+                                stream.append(buffer)
+                            }
+                        }
                         is ReadResult.End -> throw EndOfStreamException()
                         is ReadResult.Reset -> throw EndOfStreamException("Connection reset")
                     }
