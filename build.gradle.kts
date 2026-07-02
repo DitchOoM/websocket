@@ -237,7 +237,11 @@ tasks.withType<Test>().configureEach {
         // CI post-mortem: dump the heap on ANY OutOfMemoryError — including direct-buffer-memory
         // OOM (that's what Autobahn 9.6.1 hit) — so a failed run uploads a .hprof to diagnose with,
         // instead of needing a local repro. The workflow uploads build/oom-dumps on failure.
-        val oomDir = project.layout.buildDirectory.dir("oom-dumps").get().asFile
+        val oomDir =
+            layout.buildDirectory
+                .dir("oom-dumps")
+                .get()
+                .asFile
         jvmArgs("-XX:+HeapDumpOnOutOfMemoryError", "-XX:HeapDumpPath=$oomDir")
         doFirst { oomDir.mkdirs() }
     } else {
