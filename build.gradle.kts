@@ -32,7 +32,6 @@ repositories {
     mavenLocal()
     mavenCentral()
     google()
-    maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
 kotlin {
@@ -122,9 +121,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.socket) // For integration tests (real TCP transport)
         }
-        jvmTest.dependencies {
-            implementation(libs.kotlinx.coroutines.debug)
-        }
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
@@ -142,10 +138,6 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                // atomicfu runtime is needed because the atomicfu compiler plugin
-                // doesn't transform Android unit test bytecode — kotlinx-coroutines
-                // references AtomicFU at runtime
-                implementation(libs.atomicfu)
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
