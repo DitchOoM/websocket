@@ -32,7 +32,6 @@ repositories {
     mavenLocal()
     mavenCentral()
     google()
-    maven { setUrl("https://maven.pkg.jetbrains.space/kotlin/p/kotlin/kotlin-js-wrappers/") }
 }
 
 kotlin {
@@ -122,9 +121,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.socket) // For integration tests (real TCP transport)
         }
-        jvmTest.dependencies {
-            implementation(libs.kotlinx.coroutines.debug)
-        }
         jsMain.dependencies {
             implementation(libs.kotlin.web)
             implementation(libs.kotlin.js)
@@ -142,10 +138,6 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation(kotlin("test"))
-                // atomicfu runtime is needed because the atomicfu compiler plugin
-                // doesn't transform Android unit test bytecode — kotlinx-coroutines
-                // references AtomicFU at runtime
-                implementation(libs.atomicfu)
             }
         }
         androidUnitTest.dependsOn(commonJvmTest)
@@ -309,17 +301,43 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
 
 android {
     compileSdk = 36
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    // AGP 9 + legacy-DSL opt-out: the `sourceSets[...]` Kotlin accessor casts to the
+    // removed old API. Reach the source set via the new DSL interface instead.
+    (this as com.android.build.api.dsl.LibraryExtension)
+        .sourceSets
+        .getByName("main")
+        .manifest
+        .srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
         // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
         // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
         // -PinstrumentedTestsMinSdk34 when building the instrumentation test APK.
         minSdk = if (project.hasProperty("instrumentedTestsMinSdk34")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    namespace = "$group.${rootProject.name}"
 
-        // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
-        // profilingTestPatterns / integrationTestPatterns filters applied above
-        // via tasks.withType<Test> do not affect it. Filter at the runner instead.
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+// AGP's connectedDebugAndroidTest is not a gradle Test task, so the profilingTestPatterns /
+// integrationTestPatterns filters applied via tasks.withType<Test> do not affect it. Filter at
+// the instrumentation runner instead. Under AGP 9, `testInstrumentationRunnerArguments` set in
+// the legacy defaultConfig {} DSL is silently dropped (observed in CI: ProfilingTest executed on
+// the emulator and OOM'd it), so set the args through the stable variant API.
+androidComponents {
+    onVariants { variant ->
+        val androidTest = (variant as? com.android.build.api.variant.HasAndroidTest)?.androidTest ?: return@onVariants
         val profilingClasses =
             listOf(
                 "com.ditchoom.websocket.ProfilingTest",
@@ -352,20 +370,7 @@ android {
                 if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
             }
         if (notClasses.isNotEmpty()) {
-            testInstrumentationRunnerArguments["notClass"] = notClasses.joinToString(",")
-        }
-    }
-    namespace = "$group.${rootProject.name}"
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-            withJavadocJar()
+            androidTest.instrumentationRunnerArguments.put("notClass", notClasses.joinToString(","))
         }
     }
 }

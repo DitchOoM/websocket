@@ -1,20 +1,18 @@
 
 [versions]
-kotlin = "2.3.21"
-androidGradlePlugin = "8.13.2"
-dokka = "2.1.0"
-ktlint = "14.0.1"
-mavenPublish = "0.35.0"
-atomicfu = "0.29.0"
-kotlinxCoroutines = "1.10.2"
-kotlinWrappers = "2025.12.6"
-kotlinxBenchmark = "0.4.15"
-buffer = "6.2.0"
-bufferCompression = "6.2.0"
-bufferCodec = "6.2.0"
+kotlin = "2.4.0"
+androidGradlePlugin = "9.2.1"
+dokka = "2.2.0"
+ktlint = "14.2.0"
+mavenPublish = "0.36.0"
+kotlinxCoroutines = "1.11.0"
+kotlinWrappers = "2026.6.0"
+kotlinxBenchmark = "0.4.17"
+buffer = "6.5.0"
+bufferCompression = "6.5.0"
+bufferCodec = "6.5.0"
 ksp = "2.3.9"
-socket = "3.8.2"
-androidxCore = "1.17.0"
+socket = "3.8.8"
 androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
 androidxTestCore = "1.7.0"
@@ -27,13 +25,10 @@ buffer-codec = { module = "com.ditchoom:buffer-codec", version.ref = "bufferCode
 buffer-codec-processor = { module = "com.ditchoom:buffer-codec-processor", version.ref = "bufferCodec" }
 buffer-flow = { module = "com.ditchoom:buffer-flow", version.ref = "buffer" }
 socket = { module = "com.ditchoom:socket", version.ref = "socket" }
-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
-kotlinx-coroutines-debug = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-debug", version.ref = "kotlinxCoroutines" }
 kotlin-web = { module = "org.jetbrains.kotlin-wrappers:kotlin-web", version.ref = "kotlinWrappers" }
 kotlin-js = { module = "org.jetbrains.kotlin-wrappers:kotlin-js", version.ref = "kotlinWrappers" }
-androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidxTestRules" }
 androidx-test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "androidxTestCore" }
