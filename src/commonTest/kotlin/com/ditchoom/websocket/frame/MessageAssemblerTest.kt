@@ -3,7 +3,9 @@ package com.ditchoom.websocket.frame
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.Charset
 import com.ditchoom.buffer.Default
+import com.ditchoom.buffer.PlatformBuffer
 import com.ditchoom.buffer.ReadBuffer
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.toReadBuffer
 import com.ditchoom.websocket.Opcode
 import kotlin.test.Test
@@ -420,6 +422,59 @@ class MessageAssemblerTest {
         assertIs<AssemblyResult.CompleteMessage>(result)
         assertEquals(Opcode.Text, result.message.opcode)
         assertEquals("Hello World", result.message.payload.readString(11, Charset.UTF8))
+    }
+
+    // ========================================================================
+    // Use-after-free regression (websocket #19 / deterministic default)
+    //
+    // The frame stream hands the assembler fragment payloads that are *slices* over
+    // pooled/native chunk memory. A LATER stream read can free the parent chunk
+    // (DefaultStreamProcessor.readBuffer's multi-chunk copy path calls
+    // freeConsumedChunk → freeNativeMemory) while an earlier fragment's slice is still
+    // queued. The old assembler retained those slices and copied them lazily at the
+    // final fragment, so it read freed native memory — a segfault on deterministic()
+    // (NativeBuffer), masked on Default (no-op free). The fix copies each fragment into
+    // assembler-owned memory at arrival, before any later free can invalidate it.
+    // ========================================================================
+
+    @Test
+    fun fragmentPayloadIsCopiedBeforeItsSourceBufferIsFreed() {
+        val factory = BufferFactory.deterministic()
+        val assembler = MessageAssembler(bufferFactory = factory)
+
+        // Fragment 1's payload is a slice over a native `parent` buffer — exactly how the
+        // frame stream aliases a chunk. "HELLO" lives in parent's native memory.
+        val parent = factory.allocate(64)
+        parent.writeString("HELLO", Charset.UTF8)
+        parent.resetForRead()
+        parent.setLimit(5)
+        val frag1Payload = parent.slice()
+
+        val frag1 =
+            header(Opcode.Text, frag1Payload.remaining().toLong(), fin = false)
+                .toTextFrame(BufferPayload(frag1Payload))
+        assertIs<AssemblyResult.NeedMoreFrames>(assembler.addFrame(frag1))
+
+        // Simulate the stream freeing the parent chunk (freeConsumedChunk) before the final
+        // fragment arrives, then reusing that native block with different bytes. On the old
+        // lazy-copy assembler, frag1's retained slice now points at this poison; the fix has
+        // already copied "HELLO" into assembler-owned memory, so it is unaffected.
+        (parent as PlatformBuffer).freeNativeMemory()
+        val poison = factory.allocate(64) as PlatformBuffer
+        repeat(64) { poison.writeByte('X'.code.toByte()) }
+
+        val frag2 =
+            header(Opcode.Continuation, 5, fin = true)
+                .toContinuationFrame(BufferPayload("WORLD".toReadBuffer(Charset.UTF8)))
+        val result = assembler.addFrame(frag2)
+
+        assertIs<AssemblyResult.CompleteMessage>(result)
+        assertEquals(
+            "HELLOWORLD",
+            result.message.payload.readString(10, Charset.UTF8),
+            "First fragment must be copied at arrival, not read from freed source memory",
+        )
+        poison.freeNativeMemory()
     }
 
     // ========================================================================
