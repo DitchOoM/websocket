@@ -501,7 +501,10 @@ jobs:
             adb logcat -c 2>/dev/null || true
             adb logcat -v threadtime > android-diagnostics/logcat.txt 2>&1 &
             logcat_pid=$!
-            ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
+            # NOTE: under AGP 9 this command-line notClass REPLACES the build-script exclusions
+            # (they merged under AGP 8), so the profiling classes must be repeated here — without
+            # them ProfilingTest runs on the emulator and OOMs the managed heap.
+            ./gradlew :connectedDebugAndroidTest -PintegrationTests -PinstrumentedTestsMinSdk34 -Pandroid.testInstrumentationRunnerArguments.notClass=com.ditchoom.websocket.ProfilingTest,com.ditchoom.websocket.TimingProfilingTest,com.ditchoom.websocket.PublicWssValidationTest,com.ditchoom.websocket.WebSocketTests --no-build-cache
             code=$?
             # Best-effort post-mortem snapshots (never fail the job on these).
             adb shell dumpsys meminfo com.ditchoom.websocket.test > android-diagnostics/meminfo.txt 2>&1 || true
