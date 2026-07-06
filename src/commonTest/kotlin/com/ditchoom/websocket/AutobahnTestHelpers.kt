@@ -11,6 +11,7 @@ import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadPolicy
 import com.ditchoom.buffer.flow.WritePolicy
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.socket.IoTuning
 import com.ditchoom.socket.TlsConfig
 import com.ditchoom.socket.TransportConfig
@@ -224,9 +225,15 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             if (it is WebSocketMessage.Binary<*> && msgIdx < count) {
                 @Suppress("UNCHECKED_CAST")
                 val m = it as WebSocketMessage.Binary<ReadBuffer>
-                // Library owns m.payload for the duration of this collect block; it frees
-                // the buffer once we return. send() copies/writes the bytes immediately.
+                // BinaryPassThroughCodec hands the consumer an independent, consumer-owned
+                // buffer (see its KDoc: it "outlives the codec scope"). The library does NOT
+                // free delivered payloads — B is generic, so a raw ReadBuffer must be freed by
+                // whoever chose the passthrough codec. send() copies the bytes synchronously,
+                // so we free immediately after (see Case961DirectBufferProbeTest). Skipping this
+                // leaks one direct buffer per message under the default deterministic() factory
+                // → the Autobahn cat-12 ~1 GiB direct-memory OOM.
                 ws.send(WebSocketMessage.Binary(m.payload))
+                m.payload.freeIfNeeded()
                 msgIdx++
                 if (msgIdx == count) {
                     echoTime = mark.elapsedNow() - connectTime
