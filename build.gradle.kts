@@ -314,10 +314,30 @@ android {
         // -PinstrumentedTestsMinSdk34 when building the instrumentation test APK.
         minSdk = if (project.hasProperty("instrumentedTestsMinSdk34")) 34 else 23
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    namespace = "$group.${rootProject.name}"
 
-        // AGP's connectedDebugAndroidTest is not a gradle Test task, so the
-        // profilingTestPatterns / integrationTestPatterns filters applied above
-        // via tasks.withType<Test> do not affect it. Filter at the runner instead.
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+}
+
+// AGP's connectedDebugAndroidTest is not a gradle Test task, so the profilingTestPatterns /
+// integrationTestPatterns filters applied via tasks.withType<Test> do not affect it. Filter at
+// the instrumentation runner instead. Under AGP 9, `testInstrumentationRunnerArguments` set in
+// the legacy defaultConfig {} DSL is silently dropped (observed in CI: ProfilingTest executed on
+// the emulator and OOM'd it), so set the args through the stable variant API.
+androidComponents {
+    onVariants { variant ->
+        val androidTest = (variant as? com.android.build.api.variant.HasAndroidTest)?.androidTest ?: return@onVariants
         val profilingClasses =
             listOf(
                 "com.ditchoom.websocket.ProfilingTest",
@@ -350,20 +370,7 @@ android {
                 if (!project.hasProperty("integrationTests")) addAll(integrationClasses)
             }
         if (notClasses.isNotEmpty()) {
-            testInstrumentationRunnerArguments["notClass"] = notClasses.joinToString(",")
-        }
-    }
-    namespace = "$group.${rootProject.name}"
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
-            withJavadocJar()
+            androidTest.instrumentationRunnerArguments.put("notClass", notClasses.joinToString(","))
         }
     }
 }

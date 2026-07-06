@@ -357,9 +357,10 @@ jobs:
     # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
     # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
     runs-on: macos-15-intel
-    # 60 min: the intel runner is slow — Colima ~3 min + image build ~8.5 min (uncached) + the
-    # compression-heavy suite. 30 and 45 both timed out mid-suite.
-    timeout-minutes: 60
+    # 90 min: the intel runner is slow — Colima ~3 min + image build ~8.5 min (uncached) + the
+    # compression-heavy suite at ~15-30s per 9.x case. 30/45/60 all timed out mid-suite (60
+    # reached case ~480 of 517).
+    timeout-minutes: 90
     # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
     continue-on-error: true
     steps:
