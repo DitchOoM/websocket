@@ -2,7 +2,7 @@
 
 import groovy.util.Node
 import groovy.xml.XmlParser
-import java.net.URL
+import java.net.URI
 
 class Version(
     val major: UInt,
@@ -40,9 +40,9 @@ private var latestVersion: Version? = Version(0u, 0u, 0u, true)
 
 @Suppress("UNCHECKED_CAST")
 fun getLatestVersion(): Version {
-    val latestVersion = latestVersion
-    if (latestVersion != null && !latestVersion.isVersionZero()) {
-        return latestVersion
+    val cached = latestVersion
+    if (cached != null && !cached.isVersionZero()) {
+        return cached
     }
     // Resolve the base version ONCE per build and share it via rootProject.extra: this script is
     // applied per module (own classloader, own state), so without sharing, every module fetches
@@ -53,7 +53,7 @@ fun getLatestVersion(): Version {
     val sharedKey = "ditchoomResolvedBaseVersion"
     if (rootProject.extra.has(sharedKey)) {
         val shared = Version(rootProject.extra[sharedKey] as String, false)
-        this.latestVersion = shared
+        latestVersion = shared
         return shared
     }
     val result =
@@ -61,7 +61,7 @@ fun getLatestVersion(): Version {
             // Always resolve the base version from the ROOT artifact so every module (root + submodules)
             // converges on one version lineage — matches socket/buffer. Querying a per-module artifact made
             // never-published submodules (websocket-tcp) 404 → start their own 0.0.0→1.0.0 lineage.
-            val xml = URL("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").readText()
+            val xml = URI("https://repo1.maven.org/maven2/com/ditchoom/${rootProject.name}/maven-metadata.xml").toURL().readText()
             val versioning = XmlParser().parseText(xml)["versioning"] as List<Node>
             val latestStringList = versioning.first()["latest"] as List<Node>
             Version((latestStringList.first().value() as List<*>).first().toString(), false)
@@ -70,7 +70,7 @@ fun getLatestVersion(): Version {
         }
     // Share even the fetch-failed fallback: a mixed success/failure split across modules is still drift.
     rootProject.extra.set(sharedKey, "${result.major}.${result.minor}.${result.patch}")
-    this.latestVersion = result
+    latestVersion = result
     return result
 }
 
@@ -87,4 +87,4 @@ fun getNextVersion(snapshot: Boolean): Version {
     return v.incrementPatch()
 }
 
-project.extra.set("getNextVersion", this::getNextVersion)
+project.extra.set("getNextVersion", ::getNextVersion)

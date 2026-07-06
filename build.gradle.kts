@@ -309,7 +309,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
 
 android {
     compileSdk = 36
-    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    // AGP 9 + legacy-DSL opt-out: the `sourceSets[...]` Kotlin accessor casts to the
+    // removed old API. Reach the source set via the new DSL interface instead.
+    (this as com.android.build.api.dsl.LibraryExtension)
+        .sourceSets
+        .getByName("main")
+        .manifest
+        .srcFile("src/androidMain/AndroidManifest.xml")
     defaultConfig {
         // Library minSdk is 23 (androidx.core 1.18+ requires >= 23). Tests bump to 34 so D8 emits
         // a dex version allowing spaces in identifiers (Kotlin backtick test names) — enabled via
