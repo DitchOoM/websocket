@@ -358,10 +358,12 @@ jobs:
     # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
     # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
     runs-on: macos-15-intel
-    # 90 min: the intel runner is slow — Colima ~3 min + image build ~8.5 min (uncached) + the
-    # compression-heavy suite at ~15-30s per 9.x case. 30/45/60 all timed out mid-suite (60
-    # reached case ~480 of 517).
-    timeout-minutes: 90
+    # 120 min: the intel runner is slow, and the suite is dominated by the compression cases —
+    # per-case profiling shows cats 12+13 (permessage-deflate on large payloads) are ~94% of the
+    # Apple runtime, at up to ~70s per case (vs ~10s on JVM). Full suite ~69 min of test time plus
+    # Colima ~3 min + image build ~8.5 min (uncached), so 90 min left almost no headroom and tipped
+    # over on slower runners; 120 restores margin while the native deflate path is optimized.
+    timeout-minutes: 120
     # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
     continue-on-error: true
     steps:
@@ -404,10 +406,36 @@ jobs:
           key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
-      - name: Run Autobahn (macosX64)
+      - name: Run Autobahn (macosX64) with periodic CPU sampling
         run: |
           chmod +x test.kexe
-          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+          mkdir -p apple-profile
+          # Run the suite in the background so a sampler can profile it. `sample` captures a
+          # call-stack CPU profile of the kexe; a snapshot every ~60s over the ~70min run shows
+          # which native functions dominate (expected: the permessage-deflate / zlib path, which
+          # per-case timing already localizes to cats 9/12/13). Best-effort — never fail the job.
+          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER" &
+          KEXE_PID=$!
+          (
+            while kill -0 "$KEXE_PID" 2>/dev/null; do
+              /usr/bin/sample "$KEXE_PID" 15 -file "apple-profile/sample-$(date +%s).txt" >/dev/null 2>&1 || true
+              sleep 45
+            done
+          ) &
+          SAMPLER_PID=$!
+          wait "$KEXE_PID"; RC=$?
+          kill "$SAMPLER_PID" 2>/dev/null || true
+          # Fold the samples into one call-graph summary for quick inspection.
+          cat apple-profile/sample-*.txt > apple-profile/all-samples.txt 2>/dev/null || true
+          exit $RC
+      - name: Upload Apple CPU profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-apple-cpu-profile
+          path: apple-profile
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Validate results (macOS agent)
         run: python3 .github/scripts/validate_autobahn.py macOS
       - name: Upload report
