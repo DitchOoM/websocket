@@ -6,49 +6,61 @@ sidebar_position: 2
 
 # Apple Platforms
 
-## Implementation
+Apple targets have **two** ways to connect, and both return the same
+`Connection<WebSocketMessage<B>>` — so the rest of your code is identical to every other platform.
 
-On Apple platforms, the library provides two WebSocket implementations:
+## Option 1 — RFC 6455 engine over a socket (`websocket-tcp`)
 
-1. **`DefaultWebSocketClient`** (default) - Full RFC 6455 implementation with compression support
-2. **`NativeWebSocketConnection`** - Apple Network.framework (`NWConnection` + `nw_protocol_websocket`) for lightweight connections
-
-## Default Client
-
-The standard `WebSocketClient.allocate()` returns `DefaultWebSocketClient`, which provides the full feature set including `permessage-deflate` compression:
+`connectTcpWebSocket` runs this library's own RFC 6455 engine on top of a `socket` transport
+(Network.framework `NWConnection`). This is the portable choice — the same call works on JVM,
+Android, Linux, and Node.js — and it gives you full control over permessage-deflate.
 
 ```kotlin
-val client = WebSocketClient.allocate(options)
-client.connect()
-```
+import com.ditchoom.websocket.tcp.connectTcpWebSocket
 
-## Native WebSocket Connection
-
-For lightweight use cases that don't need compression, use the platform-native implementation directly:
-
-```kotlin
-val native = connectNativeWebSocket(
-    url = "wss://example.com/ws",
-    tls = true,
-    verifyCertificates = true,
-    autoReplyPing = true,
-    subprotocols = listOf("mqtt"),
-    timeoutSeconds = 30,
-)
-
-// Lower-level API using opcodes
-val message = native.receiveMessage()
-when (message.opcode) {
-    NativeWebSocketConnection.OPCODE_TEXT -> // text
-    NativeWebSocketConnection.OPCODE_BINARY -> // binary
-    NativeWebSocketConnection.OPCODE_CLOSE -> // close
+connectTcpWebSocket(options).use { ws ->
+    ws.send(WebSocketMessage.Text("hello"))
+    val reply = ws.receive().first()
 }
-
-native.close()
 ```
 
-The native implementation uses Apple's Network.framework which handles TLS, HTTP upgrade, and frame parsing at the OS level.
+## Option 2 — system WebSocket (`websocket-apple`)
+
+`connectAppleNativeWebSocket` is backed by `NSURLSessionWebSocketTask`, so the **system** handles TLS,
+proxies, and permessage-deflate. It has the smallest binary (no `socket` dependency) and integrates
+with URLSession configuration — ideal for an app already living in the Apple networking stack.
+
+```kotlin
+import com.ditchoom.websocket.apple.connectAppleNativeWebSocket
+
+val ws = connectAppleNativeWebSocket(
+    connectionOptions = options,
+    // optional: handle TLS auth challenges (client certs, pinning)
+    authChallengeHandler = { challenge -> resolveCredential(challenge) },
+)
+ws.use { /* send / receive as usual */ }
+```
+
+Both take an optional `binaryCodec: Codec<B>` and `parentScope: CoroutineScope?`, exactly like
+`connectTcpWebSocket`.
+
+## Which to choose
+
+| | `connectTcpWebSocket` (`websocket-tcp`) | `connectAppleNativeWebSocket` (`websocket-apple`) |
+|---|---|---|
+| Backing | RFC 6455 engine over `NWConnection` | `NSURLSessionWebSocketTask` |
+| TLS / proxy / deflate | this library | the OS |
+| Binary size | larger (pulls in `socket`) | smallest |
+| Portability | identical call on all platforms | Apple-only |
+| Best for | shared multiplatform code, deflate control | Apple-native apps, URLSession integration |
 
 ## Compression
 
-Apple platforms support `permessage-deflate` with context takeover via zlib but do not support custom window bits through the DefaultWebSocketClient. The native `NWConnection` implementation delegates compression to the OS.
+Apple supports `permessage-deflate` with context takeover, but not custom window bits. With
+`websocket-apple` the OS owns compression entirely; with `websocket-tcp` this library negotiates and
+runs it via zlib.
+
+> There is also a lower-level `connectNativeWebSocket` primitive (raw `NWConnection` +
+> `nw_protocol_websocket`) that returns a platform-native `NativeWebSocketConnection` rather than a
+> `Connection<…>`. It underlies the Apple path and is not the recommended entry point — prefer the
+> two `Connection`-returning functions above.

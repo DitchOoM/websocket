@@ -6,51 +6,68 @@ sidebar_position: 1
 
 # MQTT over WebSocket
 
-The WebSocket library powers the transport layer for [`com.ditchoom:mqtt-client`](https://github.com/DitchOoM/mqtt), enabling MQTT communication over WebSocket connections.
+MQTT brokers commonly accept connections over WebSocket: MQTT control packets ride **binary**
+WebSocket frames, negotiated with the `mqtt` subprotocol. Two ways to wire it up.
 
-## Basic Setup
+## As a byte transport (recommended)
+
+An MQTT client just needs a bidirectional byte stream. `WebSocketTransport` (from `websocket-tcp`)
+*is* a `socket` `Transport`, so a socket-based MQTT client can run over WebSocket by swapping its
+transport — no MQTT-specific WebSocket glue:
 
 ```kotlin
-val wsOptions = WebSocketConnectionOptions(
-    name = "broker.example.com",
-    port = 80,
+import com.ditchoom.websocket.tcp.WebSocketTransport
+
+val transport = WebSocketTransport(
     websocketEndpoint = "/mqtt",
-    protocols = listOf("mqtt"),  // MQTT subprotocol
+    protocols = listOf("mqtt"),         // Sec-WebSocket-Protocol
+    underlying = TcpTransport(),         // TLS follows config.tls
 )
 
-val client = WebSocketClient.allocate(wsOptions)
-client.connect()
-
-// Binary frames carry MQTT packets
-client.incomingBinaryMessages.collect { buffer ->
-    val mqttPacket = decodeMqttPacket(buffer)
-    handlePacket(mqttPacket)
-}
+// Hand `transport` to a socket-based client (e.g. com.ditchoom:mqtt-client).
+// Each write() becomes one binary WebSocket frame; each read() yields the next payload.
 ```
 
-## With TLS
+This is how [`com.ditchoom:mqtt-client`](https://github.com/DitchOoM/mqtt) speaks MQTT over WebSocket:
+the same packet codec, a different transport rung. See
+[WebSocket as a transport](../recipes/websocket-as-transport.md).
+
+## Directly, with a binary codec
+
+If you want to handle frames yourself, connect with `BinaryPassThroughCodec` so binary frames arrive
+as raw `ReadBuffer`s you can decode into MQTT packets:
 
 ```kotlin
-val wsOptions = WebSocketConnectionOptions(
+import com.ditchoom.websocket.codecs.BinaryPassThroughCodec
+
+val options = WebSocketConnectionOptions(
     name = "broker.example.com",
     port = 443,
     tls = true,
     websocketEndpoint = "/mqtt",
     protocols = listOf("mqtt"),
 )
+
+connectTcpWebSocket(options, binaryCodec = BinaryPassThroughCodec).use { ws ->
+    ws.send(WebSocketMessage.Binary(encodeConnectPacket()))     // a ReadBuffer of MQTT bytes
+
+    ws.receive().collect { message ->
+        if (message is WebSocketMessage.Binary) {
+            handlePacket(decodeMqttPacket(message.payload))     // payload: ReadBuffer
+        }
+    }
+}
 ```
 
-## Subprotocol Negotiation
+Better still, supply a real MQTT `Codec<MqttPacket>` as `binaryCodec` and let `receive()` hand you
+decoded packets directly — see [Typed messages with codecs](../recipes/typed-messages-with-codecs.md).
 
-MQTT brokers typically require the `mqtt` or `mqttv3.1` subprotocol to be specified in the WebSocket handshake. The `protocols` parameter adds the `Sec-WebSocket-Protocol` header:
+## Subprotocol negotiation
+
+The `protocols` list becomes the `Sec-WebSocket-Protocol` header. Most brokers require it:
 
 ```kotlin
-// MQTT 3.1.1
-protocols = listOf("mqttv3.1")
-
-// MQTT 5.0
-protocols = listOf("mqtt")
-
-// Accept either
-protocols = listOf("mqtt", "mqttv3.1")
+protocols = listOf("mqtt")               // MQTT 5.0 / 3.1.1 over WS (RFC-registered name)
+protocols = listOf("mqttv3.1")           // legacy brokers
+protocols = listOf("mqtt", "mqttv3.1")   // offer both; server picks
 ```
