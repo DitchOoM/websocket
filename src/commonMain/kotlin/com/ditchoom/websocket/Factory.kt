@@ -88,11 +88,26 @@ suspend fun <B> connectWebSocket(
         // (surfaced by AllocatorLeakTests on Android API 29 once small-read compaction raised
         // read-side pool traffic).
         val pool =
-            bufferFactory as? com.ditchoom.buffer.pool.BufferPool
-                ?: com.ditchoom.buffer.pool.BufferPool(
-                    threadingMode = com.ditchoom.buffer.pool.ThreadingMode.MultiThreaded,
-                    factory = bufferFactory,
-                )
+            when (bufferFactory) {
+                is com.ditchoom.buffer.pool.BufferPool -> {
+                    // Reuse a consumer-supplied pool (never nest). It MUST be thread-safe: the read
+                    // loop acquires/releases stream chunks while send() — on the caller's coroutine,
+                    // a different worker thread — concurrently takes scratch buffers from the same pool.
+                    require(
+                        bufferFactory.threadingMode == com.ditchoom.buffer.pool.ThreadingMode.MultiThreaded,
+                    ) {
+                        "A BufferPool passed as WebSocketConnectionOptions.bufferFactory must be MultiThreaded — " +
+                            "the read loop and send() use it concurrently from different coroutines. Use " +
+                            "BufferPool(threadingMode = ThreadingMode.MultiThreaded, ...)."
+                    }
+                    bufferFactory
+                }
+                else ->
+                    com.ditchoom.buffer.pool.BufferPool(
+                        threadingMode = com.ditchoom.buffer.pool.ThreadingMode.MultiThreaded,
+                        factory = bufferFactory,
+                    )
+            }
         val autoFillingStream =
             StreamProcessor
                 .builder(pool)

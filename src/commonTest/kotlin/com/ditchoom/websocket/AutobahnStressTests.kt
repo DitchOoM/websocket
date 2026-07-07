@@ -5,6 +5,7 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.managed
 import com.ditchoom.buffer.pool.BufferPool
+import com.ditchoom.buffer.pool.ThreadingMode
 import com.ditchoom.buffer.shared
 import kotlin.test.Test
 
@@ -111,6 +112,9 @@ class AutobahnStressSharedTests : AbstractAutobahnStressTests() {
 }
 
 class AutobahnStressPooledTests : AbstractAutobahnStressTests() {
-    override val bufferFactory: BufferFactory = BufferPool(factory = BufferFactory.managed())
+    // MultiThreaded: a pool shared as the connection bufferFactory is used concurrently by the read
+    // loop and send() from different coroutines, so the library requires it to be thread-safe.
+    override val bufferFactory: BufferFactory =
+        BufferPool(threadingMode = ThreadingMode.MultiThreaded, factory = BufferFactory.managed())
     override val factoryName: String = "Pooled"
 }
