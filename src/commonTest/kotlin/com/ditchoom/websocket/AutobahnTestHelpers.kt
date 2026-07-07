@@ -7,9 +7,11 @@ import com.ditchoom.buffer.Default
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
 import com.ditchoom.buffer.codec.Codec
+import com.ditchoom.buffer.deterministic
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadPolicy
 import com.ditchoom.buffer.flow.WritePolicy
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.socket.IoTuning
 import com.ditchoom.socket.TlsConfig
 import com.ditchoom.socket.TransportConfig
@@ -72,12 +74,19 @@ internal suspend fun connectForTest(connectionOptions: WebSocketConnectionOption
  * Prepares a connection for an autobahn case and optionally waits for the server to close.
  * Protocol-conformance cases don't examine binary payloads, so we connect without a binary
  * codec (binary frames surface as `Binary(Unit)` and are ignored).
+ *
+ * The [bufferFactory] default is [BufferFactory.deterministic] — the same library default as
+ * [WebSocketConnectionOptions.bufferFactory] — NOT `BufferFactory.Default`. On Android the
+ * `allocateDirect`-backed Default factory fragments both ART spaces after ~26 min of full-suite
+ * churn and OOMs every late case (see ANDROID_ART_ALLOCATOR.md / the managed-heap OOM diagnosis);
+ * the deterministic default allocates off both ART spaces and passes the suite on a wrecked heap.
+ * Keep these tracking the library default so conformance runs exercise what real consumers get.
  */
 internal suspend fun CoroutineScope.prepareConnection(
     case: Int,
     requestCompression: Boolean = false,
     awaitClose: Boolean = true,
-    bufferFactory: BufferFactory = BufferFactory.Default,
+    bufferFactory: BufferFactory = BufferFactory.deterministic(),
     agentSuffix: String = "",
 ): Connection<WebSocketMessage<Unit>> {
     val connectionOptions =
@@ -114,7 +123,7 @@ internal suspend fun CoroutineScope.echoMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
-    bufferFactory: BufferFactory = BufferFactory.Default,
+    bufferFactory: BufferFactory = BufferFactory.deterministic(),
     agentSuffix: String = "",
 ) {
     val connectionOptions =
@@ -189,7 +198,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
     count: Int = 1,
     requestCompression: Boolean = false,
     compressionOptions: CompressionOptions = CompressionOptions(),
-    bufferFactory: BufferFactory = BufferFactory.Default,
+    bufferFactory: BufferFactory = BufferFactory.deterministic(),
     agentSuffix: String = "",
 ) {
     val connectionOptions =
@@ -216,9 +225,15 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
             if (it is WebSocketMessage.Binary<*> && msgIdx < count) {
                 @Suppress("UNCHECKED_CAST")
                 val m = it as WebSocketMessage.Binary<ReadBuffer>
-                // Library owns m.payload for the duration of this collect block; it frees
-                // the buffer once we return. send() copies/writes the bytes immediately.
+                // BinaryPassThroughCodec hands the consumer an independent, consumer-owned
+                // buffer (see its KDoc: it "outlives the codec scope"). The library does NOT
+                // free delivered payloads — B is generic, so a raw ReadBuffer must be freed by
+                // whoever chose the passthrough codec. send() copies the bytes synchronously,
+                // so we free immediately after (see Case961DirectBufferProbeTest). Skipping this
+                // leaks one direct buffer per message under the default deterministic() factory
+                // → the Autobahn cat-12 ~1 GiB direct-memory OOM.
                 ws.send(WebSocketMessage.Binary(m.payload))
+                m.payload.freeIfNeeded()
                 msgIdx++
                 if (msgIdx == count) {
                     echoTime = mark.elapsedNow() - connectTime
@@ -248,7 +263,7 @@ internal suspend fun CoroutineScope.echoBinaryMessageAndClose(
 internal suspend fun CoroutineScope.echoMessageWhenFoundText(
     case: Int,
     requestCompression: Boolean = false,
-    bufferFactory: BufferFactory = BufferFactory.Default,
+    bufferFactory: BufferFactory = BufferFactory.deterministic(),
     agentSuffix: String = "",
 ) {
     val connectionOptions =

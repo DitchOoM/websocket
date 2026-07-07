@@ -50,7 +50,9 @@ data class WebSocketConnectionOptions(
      * Alternatives only worth considering for measurement or tuning:
      * - [BufferFactory.managed] — heap-backed; avoids direct-memory accounting but
      *   forces JDK internal copy on NIO reads/writes (breaks zero-copy).
-     * - A pre-constructed [BufferPool] — to share a pool across multiple connections.
+     * - A pre-constructed [BufferPool] — to share a pool across multiple connections. It MUST be
+     *   `ThreadingMode.MultiThreaded`: the read loop and `send()` use it concurrently from different
+     *   coroutines. Passing a single-threaded pool fails fast with an `IllegalArgumentException`.
      */
     val bufferFactory: BufferFactory = BufferFactory.deterministic(),
 ) {

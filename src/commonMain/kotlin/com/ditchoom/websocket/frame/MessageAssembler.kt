@@ -3,9 +3,10 @@ package com.ditchoom.websocket.frame
 import com.ditchoom.buffer.BufferFactory
 import com.ditchoom.buffer.ReadBuffer
 import com.ditchoom.buffer.ReadBuffer.Companion.EMPTY_BUFFER
-import com.ditchoom.buffer.freeAll
+import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.managed
 import com.ditchoom.websocket.Opcode
+import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import kotlin.jvm.JvmInline
 
 /**
@@ -31,7 +32,23 @@ internal class MessageAssembler(
 ) {
     private var firstFrameOpcode: Opcode? = null
     private var firstFrameRsv1: Boolean = false
-    private val fragmentBuffers = mutableListOf<ReadBuffer>()
+
+    /**
+     * Assembler-owned accumulation buffer for the in-progress fragmented message.
+     *
+     * Each data fragment's payload is **copied into this buffer the moment the frame
+     * arrives** (see [appendFragment]); the source wire buffer is then released
+     * immediately. This is a deliberate departure from aliasing the wire buffers and
+     * copying lazily at the end: buffers handed out by the frame stream are only slices
+     * over pool/native chunk memory, and a *later* read can free the parent chunk (e.g.
+     * `DefaultStreamProcessor.readBuffer` drains and frees a chunk on the multi-chunk
+     * copy path) while we still hold an earlier fragment's slice. On `deterministic()`
+     * (raw-malloc `NativeBuffer`, whose slices share the parent's pointer and whose
+     * `write` is an unchecked memcpy) that stale read segfaults; `Default` masked it only
+     * because its `freeNativeMemory` is a no-op. Copying eagerly makes the assembler's
+     * data independent of any wire-buffer lifetime.
+     */
+    private var accumulator: GrowableWriteBuffer? = null
     private var totalPayloadSize = 0
 
     /**
@@ -75,12 +92,16 @@ internal class MessageAssembler(
 
     /**
      * Resets the assembler state, discarding any partial message.
+     *
+     * Frees the accumulation buffer if one is still owned here (partial message discarded
+     * on error / EOF). After a successful assembly, [finishAssembly] detaches the buffer
+     * before calling this, so the payload handed to the caller is never freed.
      */
     fun reset() {
-        fragmentBuffers.freeAll()
+        accumulator?.underlying?.freeIfNeeded()
+        accumulator = null
         firstFrameOpcode = null
         firstFrameRsv1 = false
-        fragmentBuffers.clear()
         totalPayloadSize = 0
     }
 
@@ -161,7 +182,9 @@ internal class MessageAssembler(
         }
 
         if (byte1.fin) {
-            // Complete message in a single frame (common case)
+            // Complete message in a single frame (common case). Zero-copy: the wire-buffer
+            // view is returned directly and ownership transfers to the caller, which frees
+            // it after running the user codec.
             return AssemblyResult.CompleteMessage(
                 AssembledMessage(
                     opcode = byte1.opcode,
@@ -171,13 +194,31 @@ internal class MessageAssembler(
             )
         }
 
-        // Start of fragmented message
+        // Start of fragmented message: begin an assembler-owned accumulation buffer and
+        // copy the first fragment in (freeing the wire buffer). Size it to the first
+        // fragment so a large opening fragment allocates once; small fragments start at
+        // the growable's floor and double as continuations arrive.
         firstFrameOpcode = byte1.opcode
         firstFrameRsv1 = byte1.rsv1
-        fragmentBuffers.add(payload)
-        totalPayloadSize += payloadLen
+        accumulator = GrowableWriteBuffer(bufferFactory, initialSize = payloadLen.coerceAtLeast(INITIAL_ACCUMULATOR_SIZE))
+        appendFragment(payload, payloadLen)
 
         return AssemblyResult.NeedMoreFrames
+    }
+
+    /**
+     * Copies a data fragment's payload into the assembler-owned [accumulator] and releases
+     * the source wire buffer immediately. The copy happens synchronously as the frame is
+     * received — while its backing is still valid — so nothing the frame stream does on a
+     * later read can invalidate the assembled bytes.
+     */
+    private fun appendFragment(
+        payload: ReadBuffer,
+        payloadLen: Int,
+    ) {
+        if (payloadLen > 0) accumulator!!.write(payload)
+        payload.freeIfNeeded()
+        totalPayloadSize += payloadLen
     }
 
     private fun handleContinuation(frame: WsFrame.Continuation<BufferPayload>): AssemblyResult {
@@ -189,56 +230,49 @@ internal class MessageAssembler(
             )
         }
 
-        fragmentBuffers.add(frame.payload.buffer)
-        totalPayloadSize += frame.payloadLength.toInt()
+        appendFragment(frame.payload.buffer, frame.payloadLength.toInt())
 
         if (!frame.byte1.fin) {
             return AssemblyResult.NeedMoreFrames
         }
 
-        // Final fragment — assemble. assembleMessage frees the per-frame source buffers
-        // before returning, so the caller only ever owns `result.message.payload`.
-        val message = assembleMessage()
-        fragmentBuffers.clear()
-        reset()
-        return AssemblyResult.CompleteMessage(message)
+        // Final fragment — the accumulator already holds every fragment's bytes (copied at
+        // arrival), so no source wire buffer is read here. The caller owns the returned payload.
+        return AssemblyResult.CompleteMessage(finishAssembly())
     }
 
     /**
-     * Builds the [AssembledMessage]:
-     * - **Single fragment**: the lone wire-buffer view is the payload — ownership transfers
-     *   to the caller (no free here; the caller frees after running the user codec).
-     * - **Multi-fragment**: allocates a combined buffer, copies each fragment in, then
-     *   **frees the source wire buffers** before returning. The caller only sees and owns
-     *   the combined buffer.
-     * - **Zero-length**: returns [EMPTY_BUFFER]; any retained zero-length wire-buffer views
-     *   are freed here for symmetry.
+     * Finalizes the in-progress fragmented message. The [accumulator] already owns a
+     * contiguous copy of every fragment's payload; this flips it to read mode and transfers
+     * ownership to the caller (which frees it after running the user codec). For a
+     * zero-length message the accumulator is freed and [EMPTY_BUFFER] is returned.
+     *
+     * The accumulator reference is detached before [reset] so the transferred buffer is
+     * never freed by the reset.
      */
-    private fun assembleMessage(): AssembledMessage {
-        val payload =
-            when {
-                fragmentBuffers.size == 1 -> fragmentBuffers[0]
-                totalPayloadSize == 0 -> {
-                    fragmentBuffers.freeAll()
-                    EMPTY_BUFFER
-                }
-                else -> combineBuffers().also { fragmentBuffers.freeAll() }
+    private fun finishAssembly(): AssembledMessage {
+        val opcode = firstFrameOpcode!!
+        val rsv1 = firstFrameRsv1
+        val acc = accumulator!!
+        val payload: ReadBuffer =
+            if (totalPayloadSize == 0) {
+                acc.underlying.freeIfNeeded()
+                EMPTY_BUFFER
+            } else {
+                acc.underlying.also { it.resetForRead() }
             }
-
+        accumulator = null
+        reset()
         return AssembledMessage(
-            opcode = firstFrameOpcode!!,
+            opcode = opcode,
             payload = payload,
-            compressed = firstFrameRsv1,
+            compressed = rsv1,
         )
     }
 
-    private fun combineBuffers(): ReadBuffer {
-        val combined = bufferFactory.allocate(totalPayloadSize)
-        for (buf in fragmentBuffers) {
-            combined.write(buf)
-        }
-        combined.resetForRead()
-        return combined
+    private companion object {
+        /** Floor for a fragmented message's accumulation buffer; grows by doubling. */
+        const val INITIAL_ACCUMULATOR_SIZE = 256
     }
 }
 
