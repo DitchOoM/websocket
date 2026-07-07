@@ -16,6 +16,14 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Recipes',
+      items: [
+        'recipes/typed-messages-with-codecs',
+        'recipes/websocket-as-transport',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Guides',
       items: [
         'guides/mqtt-over-websocket',

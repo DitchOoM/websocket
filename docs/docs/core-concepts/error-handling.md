@@ -6,101 +6,92 @@ sidebar_position: 2
 
 # Error Handling
 
-## Exception Hierarchy
-
-All WebSocket-specific errors are subtypes of the sealed `WebSocketException` class:
+All WebSocket-specific failures are subtypes of the sealed `WebSocketException`, so you can catch at
+exactly the granularity you need without reaching for socket-level types:
 
 ```
 WebSocketException (sealed)
-├── TransportFailed      - TCP/TLS failure
-├── HandshakeRejected    - HTTP upgrade rejected
-├── ProtocolViolation    - RFC 6455 violation
-└── ConnectionClosed     - WebSocket close with code/reason
+├── TransportFailed      - TCP/TLS failure (original socket exception in .cause)
+├── HandshakeRejected    - HTTP upgrade rejected (.statusCode)
+├── ProtocolViolation    - peer broke RFC 6455
+└── ConnectionClosed     - closed with a WebSocket code/reason (.code, .reason)
 ```
 
-This lets you catch errors at the right granularity without importing socket-level types:
+`connect*` and `send` are the throwing surfaces:
 
 ```kotlin
 try {
-    client.connect()
-    // ... use client ...
+    connectTcpWebSocket(options).use { ws ->
+        ws.send(WebSocketMessage.Text("hello"))
+        ws.receive().collect { /* ... */ }
+    }
 } catch (e: WebSocketException.TransportFailed) {
-    // Network issue: DNS failure, connection refused, TLS error
-    // Original socket exception available in e.cause
+    // Network/TLS: DNS failure, connection refused, certificate error, timeout.
+    // The underlying socket exception is in e.cause.
 } catch (e: WebSocketException.HandshakeRejected) {
-    // Server returned non-101 status or invalid handshake
-    // HTTP status code available in e.statusCode
+    // Server answered the upgrade with a non-101 status or an invalid handshake.
 } catch (e: WebSocketException) {
-    // Catch-all for any WebSocket error
+    // Catch-all for any WebSocket error.
 }
 ```
 
 ## TransportFailed
 
-Wraps socket-level errors (DNS, TCP, TLS). The original `SocketException` is in `cause`:
+Wraps a socket-level failure (DNS, TCP, TLS). Inspect `e.cause` for the concrete `socket` exception:
 
 ```kotlin
 catch (e: WebSocketException.TransportFailed) {
-    when (val cause = e.cause) {
-        is SocketUnknownHostException -> // DNS resolution failed
-        is SocketConnectionException.Refused -> // Server not listening
-        is SSLHandshakeFailedException -> // TLS certificate error
-        is SocketTimeoutException -> // Connection timed out
+    when (e.cause) {
+        // e.g. SocketUnknownHostException     -> DNS resolution failed
+        // e.g. SSLHandshakeFailedException    -> TLS certificate/handshake error
+        // e.g. a connection-refused / timeout -> server not listening / slow network
+        else -> log(e.cause)
     }
 }
 ```
 
 ## HandshakeRejected
 
-The server responded to the HTTP upgrade but the response was invalid:
+The server responded to the HTTP upgrade, but not with a valid `101`. `statusCode` is the HTTP
+status when there was one, or `null` for a malformed handshake (bad `Sec-WebSocket-Accept`, missing
+headers):
 
 ```kotlin
 catch (e: WebSocketException.HandshakeRejected) {
     when (e.statusCode) {
-        401 -> // Authentication required
-        403 -> // Forbidden
-        404 -> // Endpoint not found
-        null -> // Invalid handshake (wrong accept key, missing headers)
+        401 -> // authentication required
+        403 -> // forbidden
+        404 -> // endpoint not found
+        null -> // invalid handshake
+        else -> // other non-101 response
     }
 }
 ```
 
 ## ProtocolViolation
 
-The server sent data that violates RFC 6455:
-
-- Invalid UTF-8 in a text frame
-- Reserved opcode used
-- Fragmentation protocol violation
-- Control frame too large (> 125 bytes)
+The peer sent something that violates RFC 6455 — invalid UTF-8 in a text frame, a reserved opcode, a
+fragmentation violation, or an oversized control frame (> 125 bytes). Retrying won't help; it's an
+implementation mismatch.
 
 ## ConnectionClosed
 
-The connection was closed with a WebSocket close code:
+Thrown by `send` when the connection is already closed. It carries the WebSocket close `code` and
+`reason` when the peer initiated the close:
 
 ```kotlin
 catch (e: WebSocketException.ConnectionClosed) {
     when (e.code?.toInt()) {
-        1000 -> // Normal closure
-        1001 -> // Going away
-        1002 -> // Protocol error
-        1003 -> // Unsupported data
-        1006 -> // Abnormal closure (no close frame)
-        1011 -> // Server error
+        1000 -> // normal closure
+        1001 -> // going away
+        1002 -> // protocol error
+        1006 -> // abnormal closure (no close frame)
+        1011 -> // server error
+        else -> // other / null
     }
 }
 ```
 
-## Disconnected State
-
-The `ConnectionState.Disconnected` state carries the same error information:
-
-```kotlin
-client.connectionState.collect { state ->
-    if (state is ConnectionState.Disconnected) {
-        val error = state.t  // Throwable? (often a WebSocketException)
-        val code = state.code  // UShort? (WebSocket close code)
-        val reason = state.reason  // String? (close reason)
-    }
-}
-```
+You also observe a graceful peer close as a `WebSocketMessage.Close(code, reason)` emitted from
+`receive()` before the flow completes — see [Connection Lifecycle](connection-lifecycle.md). Use the
+exception path for `send`-after-close and the message path for orderly shutdown.

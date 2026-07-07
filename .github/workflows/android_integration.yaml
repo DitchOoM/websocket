@@ -2,7 +2,10 @@ name: "Android Emulator Integration Test"
 on:
   pull_request:
     paths-ignore:
-      - '*.md'
+      - '**/*.md'
+      - 'docs/**'
+      - '.gitignore'
+      - '.editorconfig'
     types:
       - synchronize
       - opened
