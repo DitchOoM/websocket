@@ -378,7 +378,29 @@ jobs:
           # Native x86_64 on the Intel runner — no --arch emulation needed. The runner has 4
           # vCPUs: give the VM 2 so the test binary keeps 2 (--cpu 3 left the kexe a single
           # core and the suite blew the job timeout).
-          colima start --cpu 2 --memory 4
+          #
+          # --vm-type vz + --network-address: use Apple's Virtualization.framework and give the VM
+          # a host-reachable vmnet IP. The kexe then talks to the fuzzingserver over that IP
+          # instead of localhost:9001, bypassing Colima's userland port-forward (gvisor/slirp
+          # translation). A CPU profile (PR #21) showed the Apple leg is ~96% blocked in
+          # __psynch/mach_msg/workqueue — I/O wait through that forward, not compression
+          # (zlib ~0.1%) — so this is the actual bottleneck. vz's reachable IP uses native vmnet,
+          # so no socket_vmnet/sudoers dance is needed (that's a QEMU-only requirement).
+          colima start --cpu 2 --memory 4 --vm-type vz --network-address
+      - name: Resolve Colima VM IP
+        id: colima-ip
+        run: |
+          # With --network-address the VM gets a host-reachable vmnet IP (colima list's `address`
+          # field), and docker-published ports (-p 9001:9001) are reachable on it. Point the kexe
+          # there. Fall back to localhost if the field is empty (e.g. address didn't come up), which
+          # still works via Colima's userland forward — just without the latency win.
+          ip=$(colima list --json | jq -r 'select(.name=="default") | .address' 2>/dev/null || true)
+          if [ -z "$ip" ] || [ "$ip" = "null" ]; then
+            echo "::warning::colima address empty; falling back to localhost (no vmnet latency win)"
+            ip=localhost
+          fi
+          echo "host=$ip" >> "$GITHUB_OUTPUT"
+          echo "Resolved AUTOBAHN_HOST=$ip"
       # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
       # tarball keyed on the image inputs: a hit turns the ~8 min build into a ~15s load.
       # Explicit restore/save (not actions/cache) so the tarball is saved even when the job
@@ -407,6 +429,11 @@ jobs:
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
       - name: Run Autobahn (macosX64) with periodic CPU sampling
+        env:
+          # Reach the fuzzingserver over the VM's vmnet IP (resolved above), not localhost — this
+          # bypasses Colima's userland port-forward, the leg's real I/O-wait bottleneck. AgentName.kt
+          # reads AUTOBAHN_HOST (defaults localhost).
+          AUTOBAHN_HOST: ${{ steps.colima-ip.outputs.host }}
         run: |
           chmod +x test.kexe
           mkdir -p apple-profile
