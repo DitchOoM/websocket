@@ -1,0 +1,204 @@
+# Apple Autobahn performance probe (manual).
+#
+# Purpose: answer ONE question deterministically — is the macOS Autobahn leg slow because it is
+# computing, or because it is waiting? The full leg takes ~70 min on macos-15-intel versus ~22 min
+# on Linux/JVM for the same commonMain code, and we do not know why.
+#
+# Why not reuse the profiler in autobahn.yaml: `/usr/bin/sample` walks EVERY thread, on-CPU or not.
+# Threads parked in a dispatch queue show up in __psynch_cvwait/mach_msg forever, so an idle process,
+# a network-blocked process, and a process with one busy thread among many idle ones all render as
+# "~96% blocked in __psynch". It cannot distinguish them, so it cannot answer the question.
+#
+# What this measures instead:
+#   1. wall vs CPU time (`/usr/bin/time -l`). user+sys ~= real means compute-bound (deflate, masking,
+#      UTF-8 validation) and no networking change will help. user+sys << real means blocked, and the
+#      cost is latency somewhere in the transport.
+#   2. a packet capture, summarized as an inter-packet gap histogram. If (1) says "blocked", gaps
+#      clustered near 40ms are delayed-ACK stalls; a flat spread of small gaps is per-round-trip
+#      overhead. This is measured, not inferred.
+#
+# One heavy category (~18 cases) instead of all 517, so the loop is minutes rather than ~78.
+name: Autobahn Apple Debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_filter:
+        description: "Test filter to run (one heavy category keeps the loop short)"
+        required: true
+        default: "com.ditchoom.websocket.AutobahnCase13CompressionTests.category13_1"
+      capture_packets:
+        description: "Capture and summarize a pcap (adds ~1 min, needs sudo tcpdump)"
+        type: boolean
+        default: true
+
+env:
+  AUTOBAHN_IMAGE: autobahn-testsuite:local
+
+jobs:
+  # Same split as autobahn.yaml: link on Apple silicon (fast), run the x86_64 kexe on the Intel
+  # runner (the only hosted macOS runner that can host Colima, and the one whose timings we care
+  # about — measuring on a different box would answer a different question).
+  build:
+    name: "Build macosX64 test binary"
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 21
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
+      - name: Link macosX64 test binary
+        run: ./gradlew linkDebugTestMacosX64 --no-build-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-macosX64-debug
+          path: build/bin/macosX64/debugTest/test.kexe
+          retention-days: 1
+
+  probe:
+    name: "Probe (macOS Intel)"
+    needs: build
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-binary-macosX64-debug
+
+      - name: Start Docker (Colima)
+        run: |
+          brew install colima docker
+          # Plain start, matching the production leg — we are reproducing its conditions, not
+          # trying to beat them. Introducing --network-address here would change what we measure.
+          colima start --cpu 2 --memory 4
+
+      # Read-only: same key as autobahn.yaml, so this reuses that cache without ever writing to it.
+      - name: Restore Autobahn image cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/autobahn-image.tar
+          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
+      - name: Build or load Autobahn testsuite image
+        run: |
+          if [ -f /tmp/autobahn-image.tar ]; then
+            docker load -i /tmp/autobahn-image.tar
+          else
+            docker build -t autobahn-testsuite:local .docker/autobahn
+          fi
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+
+      - name: Start packet capture
+        if: inputs.capture_packets
+        run: |
+          # The kexe reaches the fuzzingserver via Colima's port-forward listening on 127.0.0.1:9001,
+          # so the client side of the conversation is on lo0. Headers only (-s 128): we need
+          # timestamps, seq/ack and flags, never payload. tcpdump still reports true segment length.
+          sudo tcpdump -i lo0 -s 128 -w "$RUNNER_TEMP/cap.pcap" 'tcp port 9001' >/dev/null 2>&1 &
+          echo "TCPDUMP_PID=$!" >> "$GITHUB_ENV"
+          sleep 2   # let the capture attach before the first SYN
+
+      - name: Run one heavy category under /usr/bin/time
+        id: measure
+        run: |
+          chmod +x test.kexe
+          # BSD /usr/bin/time has no -o, so tee the merged streams and parse the trailer.
+          # PIPESTATUS keeps the kexe's exit code rather than tee's.
+          set +e
+          { /usr/bin/time -l ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}"; } 2>&1 \
+            | tee "$RUNNER_TEMP/run.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "kexe exit=$rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          # A failing suite still yields a valid timing/latency measurement, which is the point of
+          # this job. Never fail here — the Summarize step is what we came for.
+          exit 0
+
+      - name: Stop packet capture
+        if: always() && inputs.capture_packets
+        run: |
+          sudo kill "${TCPDUMP_PID:-0}" 2>/dev/null || true
+          sleep 1
+          sudo chown "$(id -u)" "$RUNNER_TEMP/cap.pcap" 2>/dev/null || true
+
+      - name: Summarize
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/run.log"
+          echo "## Apple Autobahn probe" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Filter: \`${{ inputs.case_filter }}\` — kexe exit ${{ steps.measure.outputs.rc }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # `time -l` trailer: "   12.34 real   1.20 user   0.30 sys"
+          line=$(grep -E '[0-9.]+ +real +[0-9.]+ +user +[0-9.]+ +sys' "$log" | tail -1 || true)
+          if [ -z "$line" ]; then
+            echo "no timing line found — did the kexe run?" >> "$GITHUB_STEP_SUMMARY"
+          else
+            real=$(echo "$line" | awk '{print $1}')
+            user=$(echo "$line" | awk '{print $3}')
+            sys=$(echo  "$line" | awk '{print $5}')
+            awk -v r="$real" -v u="$user" -v s="$sys" '
+              BEGIN {
+                cpu = u + s
+                pct = (r > 0) ? 100 * cpu / r : 0
+                printf "| metric | seconds |\n|---|---|\n"
+                printf "| wall (real) | %.2f |\n| cpu (user+sys) | %.2f |\n", r, cpu
+                printf "\nCPU is **%.1f%%** of wall clock.\n\n", pct
+                # The whole point: split the search space in half, and say so unambiguously.
+                if (pct >= 70)      v = "**COMPUTE-BOUND.** The transport is not the bottleneck. Profile the deflate / masking / UTF-8 paths; the port-forward and vmnet work is a dead end."
+                else if (pct <= 30) v = "**BLOCKED / LATENCY-BOUND.** It is waiting, not computing. Read the gap histogram below to find out on what."
+                else                v = "**MIXED** — neither dominates. Widen to a second category before drawing conclusions."
+                printf "%s\n", v
+              }' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ -f "$RUNNER_TEMP/cap.pcap" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Inter-packet gaps on :9001" >> "$GITHUB_STEP_SUMMARY"
+            # -ttt prints the delta from the previous packet. Bucketing those deltas tells us
+            # whether the waiting (if any) is a few pathological stalls or uniform round-trip cost.
+            # A pile in the 20-50ms bucket is the delayed-ACK signature.
+            sudo tcpdump -r "$RUNNER_TEMP/cap.pcap" -ttt -n 2>/dev/null \
+              | awk '{
+                  # -ttt renders the delta as hh:mm:ss.uuuuuu; fold all three fields, or a gap
+                  # past a minute reads as its seconds remainder (65s would total as 5s).
+                  split($1, t, ":"); d = t[1] * 3600 + t[2] * 60 + t[3]
+                  n++
+                  if      (d < 0.001) b["<1ms"]++
+                  else if (d < 0.010) b["1-10ms"]++
+                  else if (d < 0.020) b["10-20ms"]++
+                  else if (d < 0.050) b["20-50ms (delayed-ACK range)"]++
+                  else if (d < 0.200) b["50-200ms"]++
+                  else                b[">=200ms"]++
+                  total += d
+                }
+                END {
+                  printf "| gap bucket | packets |\n|---|---|\n"
+                  order = "<1ms|1-10ms|10-20ms|20-50ms (delayed-ACK range)|50-200ms|>=200ms"
+                  m = split(order, keys, "|")
+                  for (i = 1; i <= m; i++) printf "| %s | %d |\n", keys[i], b[keys[i]] + 0
+                  printf "\n%d packets, %.2fs of summed gaps.\n", n, total
+                }' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-probe-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/run.log
+            ${{ runner.temp }}/cap.pcap
+          if-no-files-found: warn
+          retention-days: 7
