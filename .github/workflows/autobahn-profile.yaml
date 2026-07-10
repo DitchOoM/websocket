@@ -1,0 +1,391 @@
+# Autobahn cross-platform sampling profiler (manual).
+#
+# The macOS-vs-Linux/JVM performance gap root cause is already settled (server-bound: the
+# Python 2.7 wstest fuzzingserver spends ~20ms/message in a Linux VM — see the apple-debug
+# workflow's header and the project memory). This workflow answers the NEXT question: where does
+# time actually go INSIDE the ditchoom stack (buffer / socket / websocket) during a real Autobahn
+# run, per platform, so we can drive targeted perf fixes from openable traces rather than from the
+# coarse AUTOBAHN_TIMING wall-clock lines.
+#
+# Each leg runs ONE heavy category (default: the cat-13 compression batch — 18 cases x 1000 msgs,
+# minutes long, lots of deflate/masking/UTF-8 signal) under a real sampling profiler and uploads a
+# trace you open OFFLINE:
+#   * JVM   — JDK Flight Recorder (settings=profile) -> autobahn.jfr   (IntelliJ Profiler / JMC)
+#   * Linux — perf record -g --call-graph dwarf      -> perf.data + folded + flamegraph.svg
+#   * Apple — xctrace "Time Profiler"                 -> autobahn.trace (Instruments.app)
+#   * JS    — node --cpu-prof                         -> *.cpuprofile   (Chrome DevTools / speedscope)
+#   * Server— py-spy against the wstest container     -> server.svg     (confirms the Python cost)
+#
+# Every leg also emits the AUTOBAHN_TIMING lines as a CSV — the cheap per-case complement to the
+# flamegraph. Manual dispatch only; nothing here runs on PRs.
+name: "Autobahn Profiling"
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which platform(s) to profile"
+        type: choice
+        required: true
+        default: jvm
+        options: [jvm, linux, apple, js, server, all]
+      case_filter:
+        description: "Test filter (one heavy category keeps the run to minutes)"
+        required: true
+        default: "com.ditchoom.websocket.AutobahnCase13CompressionTests.category13_1"
+
+# The in-repo Alpine/CPython testsuite image (.docker/autobahn). Built per-job. CPython (not the
+# historical crossbario PyPy image) is what makes the server leg's py-spy able to read frames.
+env:
+  AUTOBAHN_IMAGE: autobahn-testsuite:local
+
+jobs:
+  # --------------------------------------------------------------------------------- JVM / JFR
+  # Proven first: ubuntu native docker (Gradle's AutobahnDockerTask auto-starts the server, so the
+  # leg is self-contained) + JFR injected into the FORKED test-worker JVM via a profiling-only
+  # init-script. That init-script is where all the profiling lives — the committed build is
+  # untouched, so PR runs carry zero overhead.
+  jvm-jfr:
+    name: "JVM (JFR)"
+    if: ${{ inputs.platform == 'jvm' || inputs.platform == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
+      - name: Run Autobahn (JVM) under JFR
+        # --init-script attaches -XX:StartFlightRecording to the Test worker (see the script). Root
+        # task only (leading ':') — see autobahn.yaml's JVM job for why. Tee stdout for the CSV.
+        run: |
+          set -o pipefail
+          ./gradlew :jvmTest -PintegrationTests --tests "${{ inputs.case_filter }}" \
+            --no-build-cache --init-script .github/scripts/profile-jfr.init.gradle.kts \
+            2>&1 | tee jvm-run.log
+      - name: AUTOBAHN_TIMING -> CSV
+        if: always()
+        run: python3 .github/scripts/autobahn_timing_to_csv.py jvm-run.log -o jvm-autobahn-timing.csv || true
+      - name: Upload JFR + timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-jvm-${{ github.run_id }}
+          path: |
+            build/profiles/autobahn.jfr
+            jvm-autobahn-timing.csv
+            jvm-run.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------------------------------------------- Linux / perf
+  # Build the kexe inline (self-contained on-demand leg), start the server, and sample the run with
+  # perf. --call-graph dwarf avoids needing frame pointers; the debug kexe carries DWARF so stacks
+  # symbolicate to ditchoom frames. Raw perf.data is always uploaded even if flamegraph folding
+  # fails, so a runner without a working FlameGraph clone still yields an openable profile.
+  linux-perf:
+    name: "Linux x64 (perf)"
+    if: ${{ inputs.platform == 'linux' || inputs.platform == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+      - name: Link linuxX64 test binary
+        run: ./gradlew linkDebugTestLinuxX64 --no-build-cache
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+      - name: Install perf + FlameGraph
+        run: |
+          sudo apt-get update
+          # linux-tools-common gives the `perf` wrapper; the kernel-matched package provides the
+          # real binary. On hosted runners the exact -$(uname -r) package is often absent, so fall
+          # back to -generic and don't fail the job — perf record still works with either.
+          sudo apt-get install -y linux-tools-common linux-tools-generic "linux-tools-$(uname -r)" || \
+            sudo apt-get install -y linux-tools-common linux-tools-generic || true
+          perf --version || echo "WARNING: perf not fully installed"
+          git clone --depth 1 https://github.com/brendangregg/FlameGraph.git "$RUNNER_TEMP/FlameGraph"
+      - name: Run Autobahn (linuxX64) under perf
+        run: |
+          set -o pipefail
+          sudo sysctl -w kernel.perf_event_paranoid=1 >/dev/null 2>&1 || true
+          sudo sysctl -w kernel.kptr_restrict=0 >/dev/null 2>&1 || true
+          chmod +x test.kexe
+          # perf writes perf.data; tee the kexe stdout for the CSV. Best-effort perf (|| true) so a
+          # perf-unavailable runner still runs the suite and yields the timing CSV.
+          sudo perf record -g --call-graph dwarf -o perf.data -- \
+            ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" 2>&1 | tee linux-run.log || \
+            ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" 2>&1 | tee linux-run.log
+          sudo chown "$(id -u)" perf.data 2>/dev/null || true
+      - name: Fold perf.data -> flamegraph
+        if: always()
+        run: |
+          FG="$RUNNER_TEMP/FlameGraph"
+          if [ -f perf.data ] && command -v perf >/dev/null 2>&1; then
+            sudo perf script -i perf.data 2>/dev/null > perf.script || true
+            "$FG/stackcollapse-perf.pl" perf.script > perf.folded 2>/dev/null || true
+            "$FG/flamegraph.pl" perf.folded > linux-flamegraph.svg 2>/dev/null || true
+          fi
+      - name: AUTOBAHN_TIMING -> CSV
+        if: always()
+        run: python3 .github/scripts/autobahn_timing_to_csv.py linux-run.log -o linux-autobahn-timing.csv || true
+      - name: Upload perf profile + timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-linux-${{ github.run_id }}
+          path: |
+            perf.data
+            perf.folded
+            linux-flamegraph.svg
+            linux-autobahn-timing.csv
+            linux-run.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # --------------------------------------------------------------------------------- Apple / xctrace
+  # Replaces the retired /usr/bin/time+cgroup+tcpdump probe (autobahn-apple-debug.yaml, now removed)
+  # with a real sampling profiler. Compile the macosX64 kexe on a fast arm64 runner, then profile on
+  # the Intel runner (the only hosted mac where Colima can host the fuzzingserver — arm64 hosted macs
+  # can't nest a VM; see project memory).
+  build-macos:
+    name: "Build macosX64 test binary"
+    if: ${{ inputs.platform == 'apple' || inputs.platform == 'all' }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-macos-
+      - name: Link macosX64 test binary
+        run: ./gradlew linkDebugTestMacosX64 --no-build-cache
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-macosX64-profile
+          path: build/bin/macosX64/debugTest/test.kexe
+          retention-days: 1
+
+  apple-xctrace:
+    name: "Apple (xctrace)"
+    if: ${{ inputs.platform == 'apple' || inputs.platform == 'all' }}
+    needs: build-macos
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-binary-macosX64-profile
+      - name: Start Docker (Colima)
+        run: |
+          brew install colima docker
+          colima start --cpu 2 --memory 4
+      - name: Restore Autobahn image cache
+        id: autobahn-image-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/autobahn-image.tar
+          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
+      - name: Build or load Autobahn testsuite image
+        run: |
+          if [ -f /tmp/autobahn-image.tar ]; then
+            docker load -i /tmp/autobahn-image.tar
+          else
+            docker build -t autobahn-testsuite:local .docker/autobahn
+            docker save autobahn-testsuite:local -o /tmp/autobahn-image.tar
+          fi
+      - name: Save Autobahn image cache
+        if: always() && steps.autobahn-image-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/autobahn-image.tar
+          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+      - name: Run Autobahn (macosX64) under xctrace Time Profiler
+        run: |
+          set -o pipefail
+          chmod +x test.kexe
+          # xctrace --launch drives any Mach-O (not just .app). The .trace is a bundle (directory);
+          # zip it for upload. Tee the child's stdout for the CSV via --output-…? xctrace owns the
+          # child's stdio, so run it and capture the console it echoes.
+          xcrun xctrace record --template "Time Profiler" --output autobahn.trace \
+            --launch -- ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" \
+            2>&1 | tee apple-run.log
+      - name: Zip .trace bundle
+        if: always()
+        run: |
+          if [ -d autobahn.trace ]; then ditto -c -k --sequesterRsrc autobahn.trace autobahn.trace.zip; fi
+      - name: AUTOBAHN_TIMING -> CSV
+        if: always()
+        run: python3 .github/scripts/autobahn_timing_to_csv.py apple-run.log -o apple-autobahn-timing.csv || true
+      - name: Upload trace + timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-apple-${{ github.run_id }}
+          path: |
+            autobahn.trace.zip
+            apple-autobahn-timing.csv
+            apple-run.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ------------------------------------------------------------------------------------ JS / --cpu-prof
+  # jsNodeTest auto-starts the server (self-contained). --cpu-prof is requested via NODE_OPTIONS so
+  # it applies to the mocha test-runner node process; each node process writes a .cpuprofile on exit
+  # into the prof dir. If a Node build ever rejects --cpu-prof in NODE_OPTIONS, this is the leg to
+  # revisit (configure the Kotlin/JS node args instead) — it's why JS is proven after JVM.
+  js-cpuprof:
+    name: "JS Node (--cpu-prof)"
+    if: ${{ inputs.platform == 'js' || inputs.platform == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
+      - name: Run Autobahn (jsNode) under --cpu-prof
+        env:
+          NODE_OPTIONS: >-
+            --cpu-prof --cpu-prof-dir=${{ github.workspace }}/cpuprof
+            --cpu-prof-name=autobahn.cpuprofile
+        run: |
+          set -o pipefail
+          mkdir -p "${{ github.workspace }}/cpuprof"
+          ./gradlew :jsNodeTest -PintegrationTests --tests "${{ inputs.case_filter }}" \
+            --no-build-cache 2>&1 | tee js-run.log
+      - name: AUTOBAHN_TIMING -> CSV
+        if: always()
+        run: python3 .github/scripts/autobahn_timing_to_csv.py js-run.log -o js-autobahn-timing.csv || true
+      - name: Upload cpuprofile(s) + timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-js-${{ github.run_id }}
+          path: |
+            cpuprof/**
+            js-autobahn-timing.csv
+            js-run.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------------- Server / py-spy
+  # Profile the Python 2.7 wstest server itself while a native client drives load. py-spy runs on the
+  # HOST (ubuntu) targeting the container's PID 1 via `docker inspect .State.Pid` — host-side ptrace
+  # needs no --cap-add and no change to start_fuzzingserver.sh. Requires the CPython (Alpine) image,
+  # which is exactly autobahn-testsuite:local; py-spy cannot read the crossbario PyPy image.
+  server-pyspy:
+    name: "Server (py-spy)"
+    if: ${{ inputs.platform == 'server' || inputs.platform == 'all' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+          cache: gradle
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: konan-linux-
+      - name: Link linuxX64 test binary (load generator)
+        run: ./gradlew linkDebugTestLinuxX64 --no-build-cache
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Autobahn testsuite image (native arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .docker/autobahn
+          load: true
+          tags: autobahn-testsuite:local
+          cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
+      - name: Start fuzzingserver
+        run: bash .github/scripts/start_fuzzingserver.sh
+      - name: Install py-spy
+        run: pipx install py-spy || pip install --user py-spy
+      - name: Profile server while client drives load
+        run: |
+          set -o pipefail
+          PID=$(docker inspect -f '{{.State.Pid}}' fuzzingserver)
+          echo "wstest host PID = $PID"
+          # Sample for the whole run: start py-spy in the background against the container's PID 1
+          # (the python2.7 wstest), then generate load with the native client.
+          sudo "$(command -v py-spy)" record --pid "$PID" --subprocesses --rate 250 \
+            --format flamegraph --output server.svg &
+          SPY=$!
+          chmod +x test.kexe
+          ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" 2>&1 | tee server-run.log || true
+          # Stop py-spy cleanly so it flushes the SVG (SIGINT, not kill -9).
+          sudo kill -INT "$SPY" 2>/dev/null || true
+          for _ in $(seq 1 20); do [ -s server.svg ] && break; sleep 1; done
+          sudo chown "$(id -u)" server.svg 2>/dev/null || true
+      - name: AUTOBAHN_TIMING -> CSV
+        if: always()
+        run: python3 .github/scripts/autobahn_timing_to_csv.py server-run.log -o server-autobahn-timing.csv || true
+      - name: Upload server flamegraph + timing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: profile-server-${{ github.run_id }}
+          path: |
+            server.svg
+            server-autobahn-timing.csv
+            server-run.log
+          if-no-files-found: warn
+          retention-days: 14
