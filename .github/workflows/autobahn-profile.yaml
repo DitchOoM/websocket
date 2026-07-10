@@ -145,9 +145,12 @@ jobs:
           sudo sysctl -w kernel.perf_event_paranoid=1 >/dev/null 2>&1 || true
           sudo sysctl -w kernel.kptr_restrict=0 >/dev/null 2>&1 || true
           chmod +x test.kexe
-          # perf writes perf.data; tee the kexe stdout for the CSV. Best-effort perf (|| true) so a
-          # perf-unavailable runner still runs the suite and yields the timing CSV.
-          sudo perf record -g --call-graph dwarf -o perf.data -- \
+          # --call-graph fp (frame pointer), NOT dwarf: the stock hosted-runner perf lacks the
+          # libunwind/elfutils support to unwind dwarf stacks at `perf script` time (the dwarf run
+          # produced a 2.5 GB perf.data that folded to nothing). K/N debug binaries keep frame
+          # pointers, so fp gives real stacks AND a ~100x smaller perf.data. -F 999 caps the rate.
+          # Best-effort perf (|| fallback) so a perf-unavailable runner still runs the suite + CSV.
+          sudo perf record -F 999 --call-graph fp -o perf.data -- \
             ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" 2>&1 | tee linux-run.log || \
             ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}" 2>&1 | tee linux-run.log
           sudo chown "$(id -u)" perf.data 2>/dev/null || true
@@ -156,9 +159,17 @@ jobs:
         run: |
           FG="$RUNNER_TEMP/FlameGraph"
           if [ -f perf.data ] && command -v perf >/dev/null 2>&1; then
-            sudo perf script -i perf.data 2>/dev/null > perf.script || true
-            "$FG/stackcollapse-perf.pl" perf.script > perf.folded 2>/dev/null || true
-            "$FG/flamegraph.pl" perf.folded > linux-flamegraph.svg 2>/dev/null || true
+            # Keep stderr (perf script warnings are the tell when a fold comes back empty) and always
+            # emit a readable text profile as a guaranteed fallback next to the svg.
+            sudo perf script -i perf.data > perf.script 2> perf-script.err || true
+            "$FG/stackcollapse-perf.pl" perf.script > perf.folded 2>> perf-script.err || true
+            "$FG/flamegraph.pl" perf.folded > linux-flamegraph.svg 2>> perf-script.err || true
+            sudo perf report -i perf.data --stdio -n --no-children 2>/dev/null > linux-perf-report.txt || true
+            if [ -s perf.folded ]; then
+              echo "flamegraph: $(wc -l < perf.folded) folded stacks"
+            else
+              echo "WARNING: perf.folded is EMPTY — flamegraph unusable. See perf-script.err / linux-perf-report.txt." >&2
+            fi
           fi
       - name: AUTOBAHN_TIMING -> CSV
         if: always()
@@ -172,6 +183,8 @@ jobs:
             perf.data
             perf.folded
             linux-flamegraph.svg
+            linux-perf-report.txt
+            perf-script.err
             linux-autobahn-timing.csv
             linux-run.log
           if-no-files-found: warn
