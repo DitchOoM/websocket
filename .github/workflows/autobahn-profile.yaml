@@ -113,7 +113,11 @@ jobs:
           key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-linux-
       - name: Link linuxX64 test binary
-        run: ./gradlew linkDebugTestLinuxX64 --no-build-cache
+        # linkDebugTestLinuxX64 emits build/bin/linuxX64/debugTest/test.kexe; stage it at the repo
+        # root so the run step's ./test.kexe matches the production leg's download-artifact layout.
+        run: |
+          ./gradlew linkDebugTestLinuxX64 --no-build-cache
+          cp build/bin/linuxX64/debugTest/test.kexe test.kexe
       - uses: docker/setup-buildx-action@v3
       - name: Build Autobahn testsuite image (native arch)
         uses: docker/build-push-action@v6
@@ -345,7 +349,10 @@ jobs:
           key: konan-linux-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-linux-
       - name: Link linuxX64 test binary (load generator)
-        run: ./gradlew linkDebugTestLinuxX64 --no-build-cache
+        # Stage the kexe at the repo root — see the linux-perf leg's note.
+        run: |
+          ./gradlew linkDebugTestLinuxX64 --no-build-cache
+          cp build/bin/linuxX64/debugTest/test.kexe test.kexe
       - uses: docker/setup-buildx-action@v3
       - name: Build Autobahn testsuite image (native arch)
         uses: docker/build-push-action@v6
