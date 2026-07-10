@@ -378,15 +378,7 @@ jobs:
           # Native x86_64 on the Intel runner — no --arch emulation needed. The runner has 4
           # vCPUs: give the VM 2 so the test binary keeps 2 (--cpu 3 left the kexe a single
           # core and the suite blew the job timeout).
-          #
-          # --vm-type vz + --network-address: use Apple's Virtualization.framework and give the VM
-          # a host-reachable vmnet IP. The kexe then talks to the fuzzingserver over that IP
-          # instead of localhost:9001, bypassing Colima's userland port-forward (gvisor/slirp
-          # translation). A CPU profile (PR #21) showed the Apple leg is ~96% blocked in
-          # __psynch/mach_msg/workqueue — I/O wait through that forward, not compression
-          # (zlib ~0.1%) — so this is the actual bottleneck. vz's reachable IP uses native vmnet,
-          # so no socket_vmnet/sudoers dance is needed (that's a QEMU-only requirement).
-          colima start --cpu 2 --memory 4 --vm-type vz --network-address
+          colima start --cpu 2 --memory 4
       # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
       # tarball keyed on the image inputs: a hit turns the ~8 min build into a ~15s load.
       # Explicit restore/save (not actions/cache) so the tarball is saved even when the job
@@ -414,48 +406,7 @@ jobs:
           key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
       - name: Start fuzzingserver
         run: bash .github/scripts/start_fuzzingserver.sh
-      # Must run AFTER "Start fuzzingserver": the host is chosen by speaking to the port the kexe
-      # will use, and colima reports an `address` that is not necessarily routable from the host.
-      - name: Resolve and verify Autobahn host
-        id: colima-ip
-        run: |
-          # With --network-address the VM gets a host-reachable vmnet IP (colima list's `address`
-          # field), and docker-published ports (-p 9001:9001) bind 0.0.0.0 inside the VM, so they
-          # are reachable on it. Prefer that IP: it bypasses Colima's userland port-forward, the
-          # leg's real I/O-wait bottleneck. But only after proving it actually serves 9001 —
-          # otherwise fall back to localhost, which always works via the forward (just slower).
-          probe() {
-            # wstest answers a plain GET with a 4xx, so accept any HTTP status — a bare `curl -f`
-            # would reject the healthy server. Only "no response at all" (000) counts as failure.
-            # Mirrors the accept logic in .github/scripts/start_fuzzingserver.sh.
-            code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://$1:9001" 2>/dev/null || echo 000)
-            case "$code" in 2??|3??|4??) return 0 ;; *) return 1 ;; esac
-          }
-
-          ip=$(colima list --json | jq -r 'select(.name=="default") | .address' 2>/dev/null || true)
-          if [ -z "$ip" ] || [ "$ip" = "null" ]; then
-            echo "::warning::colima reported no VM address; using localhost (no vmnet latency win)"
-            ip=localhost
-          elif ! probe "$ip"; then
-            echo "::warning::colima VM address $ip does not serve 9001; using localhost (no vmnet latency win)"
-            ip=localhost
-          fi
-
-          # localhost is the fallback, not a guarantee — if it is also unreachable the suite would
-          # fail 36/36 on connect and bury the cause in stack traces. Fail loudly here instead.
-          if ! probe "$ip"; then
-            echo "::error::fuzzingserver unreachable at $ip:9001 from the runner" >&2
-            exit 1
-          fi
-
-          echo "host=$ip" >> "$GITHUB_OUTPUT"
-          echo "Resolved AUTOBAHN_HOST=$ip"
       - name: Run Autobahn (macosX64) with periodic CPU sampling
-        env:
-          # Reach the fuzzingserver over the VM's vmnet IP (resolved above), not localhost — this
-          # bypasses Colima's userland port-forward, the leg's real I/O-wait bottleneck. AgentName.kt
-          # reads AUTOBAHN_HOST (defaults localhost).
-          AUTOBAHN_HOST: ${{ steps.colima-ip.outputs.host }}
         run: |
           chmod +x test.kexe
           mkdir -p apple-profile
