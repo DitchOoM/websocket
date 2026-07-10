@@ -134,14 +134,20 @@ jobs:
             chosen=docker
           fi
 
-          # 3) Colima — the usual way to get a Linux docker daemon on a hosted mac. Expected to
-          #    start on Intel (VT-x) and to FAIL on arm64 hosted runners (no nested virt); that
-          #    failure is itself the answer to "can we ever run this natively on ARM here?".
-          if [ "$chosen" = none ]; then
+          # 3) Colima — the usual way to get a Linux docker daemon on a hosted mac. Only on x86_64:
+          #    run 29114666160 confirmed `colima start` dies with "error starting vm" on arm64
+          #    hosted runners (no nested virt), and that crash took the runner down with it (job
+          #    failed on a shutdown signal rather than reporting cleanly). We now KNOW the answer,
+          #    so don't provoke the crash — on arm64, report `none` and let the capability report
+          #    above stand as the finding.
+          if [ "$chosen" = none ] && [ "$(uname -m)" = "x86_64" ]; then
             brew install colima docker >/dev/null 2>&1 || true
             if command -v colima >/dev/null 2>&1 && colima start --cpu 2 --memory 4; then
               chosen=docker
             fi
+          elif [ "$chosen" = none ]; then
+            echo "arm64 hosted runner: colima cannot nest a VM here (confirmed run 29114666160); not attempting." \
+              >> "$GITHUB_STEP_SUMMARY"
           fi
 
           echo "RUNTIME=$chosen" >> "$GITHUB_ENV"
@@ -158,6 +164,36 @@ jobs:
           # multi-arch, so `container` gets arm64 and colima/docker gets the runner's arch).
           "$RUNTIME" build -t autobahn-testsuite:local .docker/autobahn
           bash .github/scripts/start_fuzzingserver.sh
+
+      # Split the ~14ms per-round-trip cost the pcap showed into transport vs server, before any
+      # load: curl reports time_connect (TCP SYN->SYNACK = one round trip THROUGH the port-forward,
+      # pure transport) and time_starttransfer (adds wstest producing its 400 = a near-zero-compute
+      # server response). Their difference isolates the transport floor from server think-time. If
+      # the transport floor alone is ~14ms, a native/host-network path is the lever; if it is ~1ms,
+      # the 14ms seen under load is server zlib and only a faster/native server helps. wstest keeps
+      # the WS connection persistent, so its per-message round trip == this one-round-trip connect.
+      - name: Measure transport RTT floor
+        id: rtt
+        if: steps.runtime.outputs.runtime != 'none'
+        run: |
+          # 100 samples; median is robust to the odd scheduling hiccup. curl answers a plain GET
+          # with wstest's 400 — deliberately minimal server work, so time_starttransfer-time_connect
+          # is close to the server's fixed per-request overhead, not its zlib cost.
+          : > "$RUNNER_TEMP/rtt.txt"
+          for _ in $(seq 1 100); do
+            curl -s -o /dev/null -w '%{time_connect} %{time_starttransfer}\n' \
+              "http://localhost:9001" 2>/dev/null >> "$RUNNER_TEMP/rtt.txt" || true
+          done
+          # Median without gawk's asort (macOS ships BWK awk): sort each column, take the middle.
+          median() { sort -n | awk '{a[NR]=$1} END{ if(NR) printf "%.5f", a[int((NR+1)/2)] }'; }
+          cm=$(awk '{print $1}'      "$RUNNER_TEMP/rtt.txt" | median)
+          sm=$(awk '{print $2-$1}'   "$RUNNER_TEMP/rtt.txt" | median)
+          # ms, two decimals, for display + the Summarize step.
+          cm_ms=$(awk -v v="${cm:-0}" 'BEGIN{printf "%.2f", v*1000}')
+          sm_ms=$(awk -v v="${sm:-0}" 'BEGIN{printf "%.2f", v*1000}')
+          echo "connect_ms=$cm_ms server_ms=$sm_ms"
+          echo "connect_ms=$cm_ms" >> "$GITHUB_OUTPUT"
+          echo "server_ms=$sm_ms" >> "$GITHUB_OUTPUT"
 
       - name: Start packet capture
         if: steps.runtime.outputs.runtime != 'none' && inputs.capture_packets
@@ -214,6 +250,8 @@ jobs:
           SERVER_BEFORE: ${{ steps.measure.outputs.server_before }}
           SERVER_AFTER: ${{ steps.measure.outputs.server_after }}
           RUNTIME_SEL: ${{ steps.runtime.outputs.runtime }}
+          RTT_CONNECT: ${{ steps.rtt.outputs.connect_ms }}
+          RTT_SERVER: ${{ steps.rtt.outputs.server_ms }}
         run: |
           log="$RUNNER_TEMP/run.log"
           {
@@ -271,6 +309,25 @@ jobs:
                   else if (ratio <= 15) print "**Server is nearly idle** while the client waits — the wait is in the TRANSPORT (port-forward), not the server. Read the gap histogram."
                   else                  print "**Shared** — server is busy but not dominant. Both server cost and transport latency contribute."
                 }
+              }' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # --- Q2b: transport RTT floor vs server response, from the pre-load curl probe ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${RTT_CONNECT:-}" ]; then
+            echo "Transport RTT floor not measured." >> "$GITHUB_STEP_SUMMARY"
+          else
+            awk -v c="$RTT_CONNECT" -v s="$RTT_SERVER" '
+              BEGIN {
+                printf "### Transport RTT floor (pre-load, curl x100 median)\n"
+                printf "| leg | ms |\n|---|---|\n"
+                printf "| TCP connect (transport, through port-forward) | %.2f |\n", c
+                printf "| server response add'"'"'l (wstest 400) | %.2f |\n\n", s
+                # The pcap put ~69%% of wall in ~14ms per-round-trip gaps. This says how much of
+                # that 14ms is the port-forward itself vs the server.
+                if (c >= 8)      print "**Transport-dominated round trip.** The port-forward alone costs ~" c "ms per round trip — most of the per-message ~14ms the pcap showed. A host-network path (native loopback, no userland forward) is the lever; the Python-2.7 native-server rewrite is not required to capture the bulk of it."
+                else if (c <= 3) print "**Transport is cheap** (~" c "ms). The ~14ms per-round-trip under load is therefore server think-time (zlib in the VM), so only a faster/native server helps — and on macOS that means the Python-2.7 stack. A host-network path would NOT move the needle much."
+                else             print "**Mixed** (~" c "ms transport). Both a host-network path and a faster server would help; measure a heavier probe before committing."
               }' >> "$GITHUB_STEP_SUMMARY"
           fi
 
