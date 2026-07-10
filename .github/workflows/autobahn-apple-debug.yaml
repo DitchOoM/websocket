@@ -1,23 +1,32 @@
 # Apple Autobahn performance probe (manual).
 #
-# Purpose: answer ONE question deterministically — is the macOS Autobahn leg slow because it is
-# computing, or because it is waiting? The full leg takes ~70 min on macos-15-intel versus ~22 min
-# on Linux/JVM for the same commonMain code, and we do not know why.
+# Answers two questions the production leg cannot, deterministically and cheaply:
 #
-# Why not reuse the profiler in autobahn.yaml: `/usr/bin/sample` walks EVERY thread, on-CPU or not.
-# Threads parked in a dispatch queue show up in __psynch_cvwait/mach_msg forever, so an idle process,
-# a network-blocked process, and a process with one busy thread among many idle ones all render as
-# "~96% blocked in __psynch". It cannot distinguish them, so it cannot answer the question.
+#   Q1  Is the macOS leg slow because it COMPUTES or because it WAITS?  The full leg takes ~66 min
+#       (plain colima) vs ~22 min on Linux/JVM for the same commonMain code. autobahn.yaml's
+#       /usr/bin/sample profiler can't tell: it counts every thread on-CPU or not, so idle
+#       dispatch-queue threads park in __psynch_cvwait forever and read as "~96% blocked". An idle
+#       process, a network-blocked one, and one-busy-thread-among-many all render identically.
 #
-# What this measures instead:
-#   1. wall vs CPU time (`/usr/bin/time -l`). user+sys ~= real means compute-bound (deflate, masking,
-#      UTF-8 validation) and no networking change will help. user+sys << real means blocked, and the
-#      cost is latency somewhere in the transport.
-#   2. a packet capture, summarized as an inter-packet gap histogram. If (1) says "blocked", gaps
-#      clustered near 40ms are delayed-ACK stalls; a flat spread of small gaps is per-round-trip
-#      overhead. This is measured, not inferred.
+#   Q2  When it waits, is it waiting on the TRANSPORT (Colima's userland port-forward) or on the
+#       SERVER (the amd64 fuzzingserver, which on macOS runs inside a Linux VM doing Python-zlib
+#       work per compression case — a structural cost Linux runners don't pay, since there the
+#       container is native)?  The wall-vs-CPU split alone can't separate "transport is slow" from
+#       "server is slow and the client is politely waiting on it".
 #
-# One heavy category (~18 cases) instead of all 517, so the loop is minutes rather than ~78.
+# How:
+#   * /usr/bin/time -l on the kexe            -> client wall vs CPU  (Q1)
+#   * cgroup CPU counter of the container      -> server CPU-seconds  (Q2 attribution)
+#   * a pcap of :9001, gap histogram           -> if transport-bound, names the stall (delayed-ACK)
+#
+# Runtime cascade (per request): try Apple's `container` (arm64-native, no nested Colima VM) first,
+# then a reachable docker daemon, then colima. Each runner first prints a capability report
+# (sw_vers / arch / which runtime / can it start) so we learn empirically what hosted runners
+# actually provide instead of asserting it. Matrix runs BOTH the Intel path (known to work, gives
+# the guaranteed measurement) and an ARM runner (macos-latest — the only place `container` could
+# exist, and where a native-arm image would sidestep the amd64 VM entirely).
+#
+# One heavy category (~18 cases) not all 517, so the loop is minutes. Manual dispatch only.
 name: Autobahn Apple Debug
 
 on:
@@ -36,11 +45,10 @@ env:
   AUTOBAHN_IMAGE: autobahn-testsuite:local
 
 jobs:
-  # Same split as autobahn.yaml: link on Apple silicon (fast), run the x86_64 kexe on the Intel
-  # runner (the only hosted macOS runner that can host Colima, and the one whose timings we care
-  # about — measuring on a different box would answer a different question).
+  # Build both slices once on Apple silicon (fast linker), so each probe leg downloads the kexe
+  # matching its runner's arch — an x86_64 kexe won't run on an arm64 runner and vice versa.
   build:
-    name: "Build macosX64 test binary"
+    name: "Build macos test binaries"
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -55,73 +63,141 @@ jobs:
           path: ~/.konan
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
-      - name: Link macosX64 test binary
-        run: ./gradlew linkDebugTestMacosX64 --no-build-cache
+      - name: Link macosX64 + macosArm64 test binaries
+        run: ./gradlew linkDebugTestMacosX64 linkDebugTestMacosArm64 --no-build-cache
       - uses: actions/upload-artifact@v4
         with:
           name: test-binary-macosX64-debug
           path: build/bin/macosX64/debugTest/test.kexe
           retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-binary-macosArm64-debug
+          path: build/bin/macosArm64/debugTest/test.kexe
+          retention-days: 1
 
   probe:
-    name: "Probe (macOS Intel)"
+    name: "Probe (${{ matrix.runner }})"
     needs: build
-    runs-on: macos-15-intel
-    timeout-minutes: 45
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel   # x86_64: Colima works (VT-x). The guaranteed measurement.
+            arch: X64
+          - runner: macos-latest     # arm64: where `container` might exist / native image could run.
+            arch: Arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: test-binary-macosX64-debug
+          name: test-binary-macos${{ matrix.arch }}-debug
 
-      - name: Start Docker (Colima)
+      # Empirical, not asserted: dump exactly what this runner provides. This is half the point of
+      # the ARM leg — settle "does hosted macOS have Apple `container` yet / can it nest a VM" with
+      # facts, not with my recollection of macOS-version requirements.
+      - name: Capability report
+        id: caps
         run: |
-          brew install colima docker
-          # Plain start, matching the production leg — we are reproducing its conditions, not
-          # trying to beat them. Introducing --network-address here would change what we measure.
-          colima start --cpu 2 --memory 4
+          {
+            echo "### ${{ matrix.runner }} (${{ matrix.arch }})"
+            echo '```'
+            sw_vers || true
+            echo "arch: $(uname -m)"
+            for r in container docker colima podman; do
+              p=$(command -v "$r" 2>/dev/null || echo "-")
+              echo "$r: $p"
+            done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      # Read-only: same key as autobahn.yaml, so this reuses that cache without ever writing to it.
-      - name: Restore Autobahn image cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/autobahn-image.tar
-          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
-      - name: Build or load Autobahn testsuite image
+      # container -> docker(reachable daemon) -> colima. Export CONTAINER_RUNTIME for
+      # start_fuzzingserver.sh; leave RUNTIME/started in $GITHUB_ENV for later steps.
+      - name: Select and start container runtime
+        id: runtime
         run: |
-          if [ -f /tmp/autobahn-image.tar ]; then
-            docker load -i /tmp/autobahn-image.tar
-          else
-            docker build -t autobahn-testsuite:local .docker/autobahn
+          set -x
+          chosen=none
+
+          # 1) Apple's native runtime: arm64-native image in a lightweight per-container VM, no
+          #    nested Colima. Needs macOS 26+; `container system start` boots its helper.
+          if command -v container >/dev/null 2>&1; then
+            if container system start >/dev/null 2>&1 && container system status >/dev/null 2>&1; then
+              chosen=container
+            fi
           fi
-      - name: Start fuzzingserver
-        run: bash .github/scripts/start_fuzzingserver.sh
+
+          # 2) An already-reachable docker daemon (e.g. if the runner ever ships one).
+          if [ "$chosen" = none ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            chosen=docker
+          fi
+
+          # 3) Colima — the usual way to get a Linux docker daemon on a hosted mac. Expected to
+          #    start on Intel (VT-x) and to FAIL on arm64 hosted runners (no nested virt); that
+          #    failure is itself the answer to "can we ever run this natively on ARM here?".
+          if [ "$chosen" = none ]; then
+            brew install colima docker >/dev/null 2>&1 || true
+            if command -v colima >/dev/null 2>&1 && colima start --cpu 2 --memory 4; then
+              chosen=docker
+            fi
+          fi
+
+          echo "RUNTIME=$chosen" >> "$GITHUB_ENV"
+          echo "runtime=$chosen" >> "$GITHUB_OUTPUT"
+          if [ "$chosen" != none ]; then
+            echo "CONTAINER_RUNTIME=$chosen" >> "$GITHUB_ENV"
+          fi
+          echo "- runtime selected: **$chosen**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build Autobahn image and start fuzzingserver
+        if: steps.runtime.outputs.runtime != 'none'
+        run: |
+          # Build with the selected runtime so the image is native to it (the in-repo image is
+          # multi-arch, so `container` gets arm64 and colima/docker gets the runner's arch).
+          "$RUNTIME" build -t autobahn-testsuite:local .docker/autobahn
+          bash .github/scripts/start_fuzzingserver.sh
 
       - name: Start packet capture
-        if: inputs.capture_packets
+        if: steps.runtime.outputs.runtime != 'none' && inputs.capture_packets
         run: |
-          # The kexe reaches the fuzzingserver via Colima's port-forward listening on 127.0.0.1:9001,
-          # so the client side of the conversation is on lo0. Headers only (-s 128): we need
-          # timestamps, seq/ack and flags, never payload. tcpdump still reports true segment length.
+          # Client<->server rides lo0 for the colima port-forward. Headers only (-s 128): we need
+          # timestamps/seq/ack/flags, never payload. Best-effort; never fail the job.
           sudo tcpdump -i lo0 -s 128 -w "$RUNNER_TEMP/cap.pcap" 'tcp port 9001' >/dev/null 2>&1 &
           echo "TCPDUMP_PID=$!" >> "$GITHUB_ENV"
-          sleep 2   # let the capture attach before the first SYN
+          sleep 2
 
-      - name: Run one heavy category under /usr/bin/time
+      - name: Run one heavy category (client time + server CPU)
         id: measure
+        if: steps.runtime.outputs.runtime != 'none'
         run: |
+          # Cumulative container CPU before/after: cgroup v2 usage_usec (µs), else v1 cpuacct (ns).
+          read_server_cpu() {
+            local v
+            v=$("$RUNTIME" exec fuzzingserver cat /sys/fs/cgroup/cpu.stat 2>/dev/null \
+                  | awk '/^usage_usec/{printf "%.3f", $2/1000000}')
+            if [ -n "$v" ]; then echo "$v"; return; fi
+            v=$("$RUNTIME" exec fuzzingserver cat /sys/fs/cgroup/cpuacct/cpuacct.usage 2>/dev/null \
+                  | awk '{printf "%.3f", $1/1000000000}')
+            echo "${v:-}"
+          }
+
+          before=$(read_server_cpu); echo "server_cpu_before=$before"
+          echo "server_before=$before" >> "$GITHUB_OUTPUT"
+
           chmod +x test.kexe
-          # BSD /usr/bin/time has no -o, so tee the merged streams and parse the trailer.
-          # PIPESTATUS keeps the kexe's exit code rather than tee's.
           set +e
           { /usr/bin/time -l ./test.kexe "--ktest_gradle_filter=${{ inputs.case_filter }}"; } 2>&1 \
             | tee "$RUNNER_TEMP/run.log"
           rc=${PIPESTATUS[0]}
           set -e
-          echo "kexe exit=$rc"
+
+          after=$(read_server_cpu); echo "server_cpu_after=$after"
+          echo "server_after=$after" >> "$GITHUB_OUTPUT"
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          # A failing suite still yields a valid timing/latency measurement, which is the point of
-          # this job. Never fail here — the Summarize step is what we came for.
+          echo "kexe exit=$rc"
+          # A failing suite still yields a valid timing/attribution measurement — that is the point.
           exit 0
 
       - name: Stop packet capture
@@ -133,15 +209,32 @@ jobs:
 
       - name: Summarize
         if: always()
+        env:
+          RC: ${{ steps.measure.outputs.rc }}
+          SERVER_BEFORE: ${{ steps.measure.outputs.server_before }}
+          SERVER_AFTER: ${{ steps.measure.outputs.server_after }}
+          RUNTIME_SEL: ${{ steps.runtime.outputs.runtime }}
         run: |
           log="$RUNNER_TEMP/run.log"
-          echo "## Apple Autobahn probe" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Filter: \`${{ inputs.case_filter }}\` — kexe exit ${{ steps.measure.outputs.rc }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "## Probe result — ${{ matrix.runner }} (runtime: ${RUNTIME_SEL})"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # `time -l` trailer: "   12.34 real   1.20 user   0.30 sys"
+          if [ "$RUNTIME_SEL" = none ]; then
+            echo "No container runtime could start on this runner — nothing to measure. The capability report above is the finding: this runner cannot host the fuzzingserver." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ ! -f "$log" ]; then
+            echo "Runtime started but no run log — server bring-up likely failed. See job log." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Filter: \`${{ inputs.case_filter }}\` — kexe exit ${RC:-?}" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Q1: client wall vs CPU. `time -l` trailer: "  124.53 real  11.02 user  3.48 sys" ---
           line=$(grep -E '[0-9.]+ +real +[0-9.]+ +user +[0-9.]+ +sys' "$log" | tail -1 || true)
+          real=""
           if [ -z "$line" ]; then
             echo "no timing line found — did the kexe run?" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -150,25 +243,41 @@ jobs:
             sys=$(echo  "$line" | awk '{print $5}')
             awk -v r="$real" -v u="$user" -v s="$sys" '
               BEGIN {
-                cpu = u + s
-                pct = (r > 0) ? 100 * cpu / r : 0
-                printf "| metric | seconds |\n|---|---|\n"
+                cpu = u + s; pct = (r > 0) ? 100 * cpu / r : 0
+                printf "| client metric | seconds |\n|---|---|\n"
                 printf "| wall (real) | %.2f |\n| cpu (user+sys) | %.2f |\n", r, cpu
-                printf "\nCPU is **%.1f%%** of wall clock.\n\n", pct
-                # The whole point: split the search space in half, and say so unambiguously.
-                if (pct >= 70)      v = "**COMPUTE-BOUND.** The transport is not the bottleneck. Profile the deflate / masking / UTF-8 paths; the port-forward and vmnet work is a dead end."
-                else if (pct <= 30) v = "**BLOCKED / LATENCY-BOUND.** It is waiting, not computing. Read the gap histogram below to find out on what."
-                else                v = "**MIXED** — neither dominates. Widen to a second category before drawing conclusions."
+                printf "\nClient CPU is **%.1f%%** of client wall.\n\n", pct
+                if (pct >= 70)      v = "**COMPUTE-BOUND (client).** The client itself is doing the work — profile deflate / masking / UTF-8. Transport and server are not the bottleneck."
+                else if (pct <= 30) v = "**Client is WAITING**, not computing. The server-CPU attribution below says on what."
+                else                v = "**MIXED** — neither dominates on the client. Widen to a second category before concluding."
                 printf "%s\n", v
               }' >> "$GITHUB_STEP_SUMMARY"
           fi
 
+          # --- Q2: server-side CPU attribution ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${SERVER_BEFORE:-}" ] || [ -z "${SERVER_AFTER:-}" ]; then
+            echo "Server CPU counter unavailable (no cgroup cpu.stat/cpuacct via \`$RUNTIME exec\`)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            awk -v b="$SERVER_BEFORE" -v a="$SERVER_AFTER" -v r="${real:-0}" '
+              BEGIN {
+                sc = a - b
+                printf "### Server (fuzzingserver container) CPU\n"
+                printf "| | seconds |\n|---|---|\n| server CPU burned during run | %.2f |\n", sc
+                if (r > 0) {
+                  ratio = 100 * sc / r
+                  printf "| client wall | %.2f |\n\nServer used **%.1f%%** of the client wall clock.\n\n", r, ratio
+                  if (ratio >= 60)      print "**SERVER-BOUND.** The fuzzingserver (amd64 Python-zlib in a Linux VM) is where the time goes. A client/transport change cannot help; a native-arm or lighter server can. This is the macOS-vs-Linux structural gap."
+                  else if (ratio <= 15) print "**Server is nearly idle** while the client waits — the wait is in the TRANSPORT (port-forward), not the server. Read the gap histogram."
+                  else                  print "**Shared** — server is busy but not dominant. Both server cost and transport latency contribute."
+                }
+              }' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # --- transport detail: inter-packet gaps ---
           if [ -f "$RUNNER_TEMP/cap.pcap" ]; then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "### Inter-packet gaps on :9001" >> "$GITHUB_STEP_SUMMARY"
-            # -ttt prints the delta from the previous packet. Bucketing those deltas tells us
-            # whether the waiting (if any) is a few pathological stalls or uniform round-trip cost.
-            # A pile in the 20-50ms bucket is the delayed-ACK signature.
             sudo tcpdump -r "$RUNNER_TEMP/cap.pcap" -ttt -n 2>/dev/null \
               | awk '{
                   # -ttt renders the delta as hh:mm:ss.uuuuuu; fold all three fields, or a gap
@@ -196,7 +305,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apple-probe-${{ github.run_id }}
+          name: apple-probe-${{ matrix.arch }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/run.log
             ${{ runner.temp }}/cap.pcap
