@@ -161,10 +161,12 @@ jobs:
           if [ -f perf.data ] && command -v perf >/dev/null 2>&1; then
             # Keep stderr (perf script warnings are the tell when a fold comes back empty) and always
             # emit a readable text profile as a guaranteed fallback next to the svg.
-            sudo perf script -i perf.data > perf.script 2> perf-script.err || true
+            # -f: perf record ran as root then the data was chown'd to the runner user, so perf's
+            # "owned by current user or root" check rejects it under sudo without --force.
+            sudo perf script -f -i perf.data > perf.script 2> perf-script.err || true
             "$FG/stackcollapse-perf.pl" perf.script > perf.folded 2>> perf-script.err || true
             "$FG/flamegraph.pl" perf.folded > linux-flamegraph.svg 2>> perf-script.err || true
-            sudo perf report -i perf.data --stdio -n --no-children 2>/dev/null > linux-perf-report.txt || true
+            sudo perf report -f -i perf.data --stdio -n --no-children 2>/dev/null > linux-perf-report.txt || true
             if [ -s perf.folded ]; then
               echo "flamegraph: $(wc -l < perf.folded) folded stacks"
             else
