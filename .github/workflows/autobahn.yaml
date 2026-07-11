@@ -40,11 +40,26 @@ env:
 jobs:
   # ----------------------------------------------------------------------------- Gradle: JVM / JS
   jvm:
-    name: "JVM"
+    name: "JVM (JDK ${{ matrix.java }})"
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exercise the com.ditchoom:buffer multi-release JAR on both JVM backends against the full
+        # RFC 6455 suite: JDK 17 loads DirectJvmBuffer (ByteBuffer.allocateDirect), JDK 21 loads
+        # FfmAutoBuffer (FFM/Arena.ofAuto). Add more versions here to widen runtime coverage.
+        java: ['17', '21']
     steps:
       - uses: actions/checkout@v4
+      # Test-runtime JDK (the matrix value) — installed FIRST so setup-java exports its
+      # JAVA_HOME_<n>_<arch>, which Gradle's toolchain auto-detection uses to satisfy -PtestJdk below.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: ${{ matrix.java }}
+      # Compile/Gradle JDK — installed LAST so JAVA_HOME=21: Gradle and AGP 9 (need 17+) run on 21,
+      # and jvmToolchain(21) compiles on 21. Only the jvmTest worker forks on ${{ matrix.java }}.
       - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -59,16 +74,18 @@ jobs:
           tags: autobahn-testsuite:local
           cache-from: type=gha,scope=autobahn-image-${{ runner.arch }}
           cache-to: type=gha,mode=max,scope=autobahn-image-${{ runner.arch }}
-      - name: Run Autobahn (JVM)
+      - name: Run Autobahn (JVM, JDK ${{ matrix.java }})
         # Root task only (leading ':'): the Autobahn suites live in the root module. An unqualified
         # task also runs :websocket-tcp:jvmTest, whose tests never match the filter — Gradle then
         # fails that task with "No tests found for given includes".
-        run: ./gradlew :jvmTest -PintegrationTests --tests "$AUTOBAHN_FILTER" --no-build-cache
+        # -PtestJdk forks the test worker on the matrix JDK (see build.gradle.kts) while compilation
+        # stays on the jvmToolchain(21).
+        run: ./gradlew :jvmTest -PintegrationTests -PtestJdk=${{ matrix.java }} --tests "$AUTOBAHN_FILTER" --no-build-cache
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: autobahn-report-jvm
+          name: autobahn-report-jvm-jdk${{ matrix.java }}
           path: .docker/reports/clients
           retention-days: 7
       # On failure, upload post-mortem traces: heap dumps (incl. direct-buffer OOM), JVM crash logs,
@@ -77,7 +94,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: autobahn-jvm-diagnostics
+          name: autobahn-jvm-diagnostics-jdk${{ matrix.java }}
           path: |
             **/build/oom-dumps/**
             **/build/reports/tests/**

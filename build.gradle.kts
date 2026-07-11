@@ -1,4 +1,6 @@
 import org.gradle.api.tasks.testing.Test
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.Socket
 import java.security.SecureRandom
@@ -240,6 +242,22 @@ tasks.withType<Test>().configureEach {
         filter {
             integrationTestPatterns.forEach { excludeTestsMatching(it) }
         }
+    }
+}
+
+// Pin the jvmTest RUNTIME JDK independently of the compile toolchain (jvmToolchain(21)) via
+// -PtestJdk=N. The com.ditchoom:buffer dependency is a multi-release JAR: JDK <21 loads
+// DirectJvmBuffer (ByteBuffer.allocateDirect), JDK 21+ loads FfmAutoBuffer (FFM/Arena.ofAuto).
+// The Autobahn JVM job runs a matrix over these so RFC 6455 conformance is verified on BOTH
+// buffer backends. Gradle keeps compiling with JDK 21; only the test worker forks on the chosen
+// JDK, which CI makes discoverable via setup-java (JAVA_HOME_<n>_* toolchain auto-detection).
+providers.gradleProperty("testJdk").orNull?.let { requested ->
+    val launcher =
+        extensions.getByType<JavaToolchainService>().launcherFor {
+            languageVersion.set(JavaLanguageVersion.of(requested.trim().toInt()))
+        }
+    tasks.matching { it.name == "jvmTest" }.configureEach {
+        (this as Test).javaLauncher.set(launcher)
     }
 }
 
