@@ -63,7 +63,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":"))
-            implementation(libs.socket)
+            // `api`: WebSocketTransport implements socket's Transport and takes TransportConfig.
+            api(libs.socket)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
