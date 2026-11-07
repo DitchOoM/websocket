@@ -45,6 +45,12 @@ kotlin {
         commonMain.dependencies {
             implementation("com.ditchoom:websocket:$websocketVersion")
         }
+        // websocket-tcp has no browser target, so it is resolved per target family.
+        listOf(appleMain, jvmMain, jsMain, linuxMain).forEach { sourceSet ->
+            sourceSet.dependencies {
+                implementation("com.ditchoom:websocket-tcp:$websocketVersion")
+            }
+        }
     }
 }
 

@@ -49,82 +49,85 @@ jobs:
             echo "Copied $target_name"
           done
 
-          # Merge root module metadata
-          LINUX_MODULE="$LINUX_BASE/websocket/$version/websocket-$version.module"
-          APPLE_MODULE="$APPLE_BASE/websocket/$version/websocket-$version.module"
-          MERGED_MODULE="$MERGED/websocket/$version/websocket-$version.module"
+          # Merge each multiplatform root module's metadata: the Linux and Apple builds each publish
+          # a root .module and metadata JAR naming only their own targets.
+          for module in websocket websocket-tcp; do
+            LINUX_MODULE="$LINUX_BASE/$module/$version/$module-$version.module"
+            APPLE_MODULE="$APPLE_BASE/$module/$version/$module-$version.module"
+            MERGED_MODULE="$MERGED/$module/$version/$module-$version.module"
 
-          if [ -f "$LINUX_MODULE" ] && [ -f "$APPLE_MODULE" ]; then
-            jq -s '
-              .[0].variants = (
-                [.[0].variants[], .[1].variants[]]
-                | group_by(.name)
-                | map(.[0])
-              )
-              | .[0]
-            ' "$LINUX_MODULE" "$APPLE_MODULE" > "${MERGED_MODULE}.tmp"
-            mv "${MERGED_MODULE}.tmp" "$MERGED_MODULE"
-            echo "Merged .module: $(jq '.variants | length' "$MERGED_MODULE") variants"
-          fi
-
-          # Merge metadata JAR (kotlin-project-structure-metadata.json + klib dirs)
-          LINUX_JAR="$LINUX_BASE/websocket/$version/websocket-$version.jar"
-          APPLE_JAR="$APPLE_BASE/websocket/$version/websocket-$version.jar"
-          MERGED_JAR="$MERGED/websocket/$version/websocket-$version.jar"
-
-          if [ -f "$LINUX_JAR" ] && [ -f "$APPLE_JAR" ]; then
-            WORK="/tmp/merge-metadata-jar"
-            mkdir -p "$WORK/linux" "$WORK/apple" "$WORK/merged"
-
-            unzip -qo "$LINUX_JAR" -d "$WORK/linux"
-            unzip -qo "$APPLE_JAR" -d "$WORK/apple"
-
-            # Start with Linux as base
-            cp -r "$WORK/linux/"* "$WORK/merged/"
-
-            # Copy Apple klib directories
-            if [ -d "$WORK/apple" ]; then
-              for klib_dir in "$WORK/apple"/*/; do
-                dir_name=$(basename "$klib_dir")
-                [ "$dir_name" = "META-INF" ] && continue
-                if [ ! -d "$WORK/merged/$dir_name" ]; then
-                  cp -r "$klib_dir" "$WORK/merged/$dir_name"
-                  echo "Copied klib dir: $dir_name"
-                fi
-              done
-            fi
-
-            # Merge kotlin-project-structure-metadata.json
-            LINUX_PSM="$WORK/linux/META-INF/kotlin-project-structure-metadata.json"
-            APPLE_PSM="$WORK/apple/META-INF/kotlin-project-structure-metadata.json"
-            MERGED_PSM="$WORK/merged/META-INF/kotlin-project-structure-metadata.json"
-
-            if [ -f "$LINUX_PSM" ] && [ -f "$APPLE_PSM" ]; then
+            if [ -f "$LINUX_MODULE" ] && [ -f "$APPLE_MODULE" ]; then
               jq -s '
-                .[0].projectStructure.variants = (
-                  [.[0].projectStructure.variants[], .[1].projectStructure.variants[]]
-                  | group_by(.name)
-                  | map(.[0])
-                )
-                | .[0].projectStructure.sourceSets = (
-                  [.[0].projectStructure.sourceSets[], .[1].projectStructure.sourceSets[]]
+                .[0].variants = (
+                  [.[0].variants[], .[1].variants[]]
                   | group_by(.name)
                   | map(.[0])
                 )
                 | .[0]
-              ' "$LINUX_PSM" "$APPLE_PSM" > "${MERGED_PSM}.tmp"
-              mv "${MERGED_PSM}.tmp" "$MERGED_PSM"
-              echo "Merged kotlin-project-structure-metadata.json:"
-              echo "  variants: $(jq '.projectStructure.variants | length' "$MERGED_PSM")"
-              echo "  sourceSets: $(jq '.projectStructure.sourceSets | length' "$MERGED_PSM")"
+              ' "$LINUX_MODULE" "$APPLE_MODULE" > "${MERGED_MODULE}.tmp"
+              mv "${MERGED_MODULE}.tmp" "$MERGED_MODULE"
+              echo "Merged $module .module: $(jq '.variants | length' "$MERGED_MODULE") variants"
             fi
 
-            # Re-create the merged JAR
-            (cd "$WORK/merged" && zip -qr "$MERGED_JAR" .)
-            echo "Rebuilt metadata JAR"
+            # Merge metadata JAR (kotlin-project-structure-metadata.json + klib dirs)
+            LINUX_JAR="$LINUX_BASE/$module/$version/$module-$version.jar"
+            APPLE_JAR="$APPLE_BASE/$module/$version/$module-$version.jar"
+            MERGED_JAR="$MERGED/$module/$version/$module-$version.jar"
 
-            rm -rf "$WORK"
-          fi
+            if [ -f "$LINUX_JAR" ] && [ -f "$APPLE_JAR" ]; then
+              WORK="/tmp/merge-metadata-jar"
+              mkdir -p "$WORK/linux" "$WORK/apple" "$WORK/merged"
+
+              unzip -qo "$LINUX_JAR" -d "$WORK/linux"
+              unzip -qo "$APPLE_JAR" -d "$WORK/apple"
+
+              # Start with Linux as base
+              cp -r "$WORK/linux/"* "$WORK/merged/"
+
+              # Copy Apple klib directories
+              if [ -d "$WORK/apple" ]; then
+                for klib_dir in "$WORK/apple"/*/; do
+                  dir_name=$(basename "$klib_dir")
+                  [ "$dir_name" = "META-INF" ] && continue
+                  if [ ! -d "$WORK/merged/$dir_name" ]; then
+                    cp -r "$klib_dir" "$WORK/merged/$dir_name"
+                    echo "Copied klib dir: $dir_name"
+                  fi
+                done
+              fi
+
+              # Merge kotlin-project-structure-metadata.json
+              LINUX_PSM="$WORK/linux/META-INF/kotlin-project-structure-metadata.json"
+              APPLE_PSM="$WORK/apple/META-INF/kotlin-project-structure-metadata.json"
+              MERGED_PSM="$WORK/merged/META-INF/kotlin-project-structure-metadata.json"
+
+              if [ -f "$LINUX_PSM" ] && [ -f "$APPLE_PSM" ]; then
+                jq -s '
+                  .[0].projectStructure.variants = (
+                    [.[0].projectStructure.variants[], .[1].projectStructure.variants[]]
+                    | group_by(.name)
+                    | map(.[0])
+                  )
+                  | .[0].projectStructure.sourceSets = (
+                    [.[0].projectStructure.sourceSets[], .[1].projectStructure.sourceSets[]]
+                    | group_by(.name)
+                    | map(.[0])
+                  )
+                  | .[0]
+                ' "$LINUX_PSM" "$APPLE_PSM" > "${MERGED_PSM}.tmp"
+                mv "${MERGED_PSM}.tmp" "$MERGED_PSM"
+                echo "Merged kotlin-project-structure-metadata.json:"
+                echo "  variants: $(jq '.projectStructure.variants | length' "$MERGED_PSM")"
+                echo "  sourceSets: $(jq '.projectStructure.sourceSets | length' "$MERGED_PSM")"
+              fi
+
+              # Re-create the merged JAR
+              (cd "$WORK/merged" && zip -qr "$MERGED_JAR" .)
+              echo "Rebuilt metadata JAR"
+
+              rm -rf "$WORK"
+            fi
+          done
 
       - name: Upload merged artifacts
         uses: actions/upload-artifact@v4
@@ -167,41 +170,34 @@ jobs:
           FAILED=false
 
           # ── 1. Root module metadata — platform variants ──
-          MODULE="$MERGED/websocket/${version}/websocket-${version}.module"
-          if [ ! -f "$MODULE" ]; then
-            echo "FAIL: root .module file not found"
-            exit 1
-          fi
-
-          VARIANTS=$(jq -r '.variants[].name' "$MODULE")
-
-          # ApiElements-published: jvm, js, linuxX64, linuxArm64 + 11 Apple
-          for v in jvm js \
-            linuxX64 linuxArm64 \
-            macosArm64 macosX64 \
-            iosArm64 iosSimulatorArm64 iosX64 \
-            tvosArm64 tvosSimulatorArm64 tvosX64 \
-            watchosArm64 watchosSimulatorArm64 watchosX64; do
-            if echo "$VARIANTS" | grep -q "^${v}ApiElements-published$"; then
-              echo "ApiElements OK: $v"
-            else
-              echo "FAIL: missing ${v}ApiElements-published variant"
+          APPLE_TARGETS="macosArm64 macosX64 iosArm64 iosSimulatorArm64 iosX64 tvosArm64 tvosSimulatorArm64 tvosX64 watchosArm64 watchosSimulatorArm64 watchosX64"
+          # "<module>:<non-Apple targets>"; every module also publishes the 11 Apple targets.
+          for entry in "websocket:jvm js linuxX64 linuxArm64" "websocket-tcp:jvm js linuxX64 linuxArm64"; do
+            module="${entry%%:*}"
+            MODULE="$MERGED/${module}/${version}/${module}-${version}.module"
+            if [ ! -f "$MODULE" ]; then
+              echo "FAIL: $module root .module file not found"
               FAILED=true
+              continue
             fi
-          done
-
-          # MetadataElements-published: Apple targets (enables IDE resolution for
-          # intermediate source sets like iosMain, tvosMain, watchosMain, appleMain)
-          for v in macosArm64 macosX64 \
-            iosArm64 iosSimulatorArm64 iosX64 \
-            tvosArm64 tvosSimulatorArm64 tvosX64 \
-            watchosArm64 watchosSimulatorArm64 watchosX64; do
-            if echo "$VARIANTS" | grep -q "^${v}MetadataElements-published$"; then
-              echo "MetadataElements OK: $v"
-            else
-              echo "FAIL: missing ${v}MetadataElements-published variant"
-              FAILED=true
-            fi
+            VARIANTS=$(jq -r '.variants[].name' "$MODULE")
+            for v in ${entry#*:} $APPLE_TARGETS; do
+              if echo "$VARIANTS" | grep -q "^${v}ApiElements-published$"; then
+                echo "$module ApiElements OK: $v"
+              else
+                echo "FAIL: $module missing ${v}ApiElements-published variant"
+                FAILED=true
+              fi
+            done
+            # MetadataElements-published lets intermediate source sets (appleMain, iosMain, ...) resolve.
+            for v in $APPLE_TARGETS; do
+              if echo "$VARIANTS" | grep -q "^${v}MetadataElements-published$"; then
+                echo "$module MetadataElements OK: $v"
+              else
+                echo "FAIL: $module missing ${v}MetadataElements-published variant"
+                FAILED=true
+              fi
+            done
           done
 
           # ── 2. Apple klib presence ──
