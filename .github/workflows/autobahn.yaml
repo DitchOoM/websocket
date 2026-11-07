@@ -4,12 +4,13 @@ name: "Autobahn Conformance"
 # independent, parallel job so one slow/failing target doesn't serialize the rest.
 #
 # Two execution models (chosen per platform):
-#   * Gradle jobs (JVM, JS-Node, JS-Browser, Apple, Android): `<task> -PintegrationTests` — the
+#   * Gradle jobs (JVM, JS-Node, JS-Browser, Android): `<task> -PintegrationTests` — the
 #     build auto-starts the fuzzingserver (AutobahnDockerTask) and validates the platform's agent
 #     via a `finalizedBy validateAutobahnResults<Platform>` finalizer.
 #   * Native jobs (Linux x64/arm64): the test binary is compiled ONCE in `build-native`, uploaded,
 #     then each arch job downloads the kexe, starts the fuzzingserver, runs only Autobahn cases,
-#     and validates with .github/scripts/validate_autobahn.py.
+#     and validates with .github/scripts/validate_autobahn.py. Apple (macOS arm64) builds and runs
+#     its kexe on one runner against a natively installed fuzzingserver (no VM or container).
 #
 # Every job uploads its fuzzingserver report (.docker/reports/clients) as an artifact.
 
@@ -317,15 +318,36 @@ jobs:
           if-no-files-found: ignore
 
   # ----------------------------------------------------------------------------------- Apple
-  # Compile-once/run-separately, mirroring the Linux native legs: the kexe is cross-compiled on a
-  # fast (arm64) macOS runner in parallel with everything else, and the run leg only needs Colima +
-  # the prebuilt binary — no JDK/Gradle/Konan on the Docker-hosting runner.
-  build-macos-test:
-    name: "Build macosX64 test binary"
+  # No VM/container: the fuzzingserver runs natively on the arm64 runner (CPython 2.7.18 built by
+  # .github/scripts/setup_autobahn_native.sh, cached), and the macosArm64 kexe is built and run on
+  # the same runner against it over localhost.
+  apple-arm64-native:
+    name: "Apple (macOS arm64, native)"
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Locate native testsuite prefix
+        run: echo "AUTOBAHN_PY27=$HOME/autobahn-py27" >> "$GITHUB_ENV"
+      # The install's C extensions link its bundled OpenSSL by absolute path, so it is cached
+      # (and must be restored) at the same fixed prefix. Explicit restore/save so a cold build is
+      # kept even if the suite later fails or times out.
+      - name: Restore native Autobahn testsuite cache
+        id: autobahn-py27-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/autobahn-py27
+          key: autobahn-py27-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.docker/autobahn/requirements.txt', '.github/scripts/setup_autobahn_native.sh') }}
+      - name: Build native Autobahn testsuite (CPython 2.7.18)
+        id: build-py27
+        if: steps.autobahn-py27-cache.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_autobahn_native.sh "$AUTOBAHN_PY27"
+      - name: Save native Autobahn testsuite cache
+        if: always() && steps.build-py27.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/autobahn-py27
+          key: autobahn-py27-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.docker/autobahn/requirements.txt', '.github/scripts/setup_autobahn_native.sh') }}
       - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -337,100 +359,51 @@ jobs:
           path: ~/.konan
           key: konan-macos-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: konan-macos-
-      - name: Link macosX64 test binary
-        run: ./gradlew linkDebugTestMacosX64 --no-build-cache
-      - name: Upload macosX64 kexe
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-binary-macosX64
-          path: build/bin/macosX64/debugTest/test.kexe
-          retention-days: 1
-
-  # macOS GitHub runners have no Docker daemon, so we bring one up via Colima to host the
-  # fuzzingserver, then run the prebuilt kexe directly and validate the "macOS" agent with
-  # the same script the Linux legs use.
-  apple:
-    name: "Apple (macOS)"
-    needs: build-macos-test
-    # Intel runner: GitHub's hosted ARM macOS runners (macos-14/15, M1/M2) lack nested
-    # virtualization, so Colima can't start the fuzzingserver there. macos-15-intel runs Colima
-    # natively (HVF); the in-repo testsuite image runs natively (amd64) inside it, and the
-    # macosX64 kexe runs natively on the runner. (On Apple-silicon dev machines the same image
-    # runs natively arm64 under Docker or Apple's `container` CLI — see .docker/autobahn/.)
-    runs-on: macos-15-intel
-    # 90 min: the intel runner is slow — Colima ~3 min + image build ~8.5 min (uncached) + the
-    # compression-heavy suite at ~15-30s per 9.x case. 30/45/60 all timed out mid-suite (60
-    # reached case ~480 of 517).
-    timeout-minutes: 90
-    # Kept non-blocking until this Intel-runner path is proven stable in CI; flip to blocking after.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4   # for .docker/config + validation scripts
-      - name: Download test binary
-        uses: actions/download-artifact@v4
-        with:
-          name: test-binary-macosX64
-      - name: Start Docker (Colima)
+      - name: Link macosArm64 test binary
+        run: ./gradlew linkDebugTestMacosArm64 --no-build-cache
+      - name: Start fuzzingserver (native)
         run: |
-          brew install colima docker
-          # Native x86_64 on the Intel runner — no --arch emulation needed. The runner has 4
-          # vCPUs: give the VM 2 so the test binary keeps 2 (--cpu 3 left the kexe a single
-          # core and the suite blew the job timeout).
-          colima start --cpu 2 --memory 4
-      # Colima has no buildx/GHA-cache integration, so cache the built image as a docker-save
-      # tarball keyed on the image inputs: a hit turns the ~8 min build into a ~15s load.
-      # Explicit restore/save (not actions/cache) so the tarball is saved even when the job
-      # later fails or times out — the combined action's post-step skips on cancellation,
-      # which kept this leg rebuilding from scratch every round.
-      - name: Restore Autobahn image cache
-        id: autobahn-image-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/autobahn-image.tar
-          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
-      - name: Build or load Autobahn testsuite image (native amd64 via Colima)
-        run: |
-          if [ -f /tmp/autobahn-image.tar ]; then
-            docker load -i /tmp/autobahn-image.tar
-          else
-            docker build -t autobahn-testsuite:local .docker/autobahn
-            docker save autobahn-testsuite:local -o /tmp/autobahn-image.tar
-          fi
-      - name: Save Autobahn image cache
-        if: always() && steps.autobahn-image-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/autobahn-image.tar
-          key: autobahn-image-colima-amd64-${{ hashFiles('.docker/autobahn/**') }}
-      - name: Start fuzzingserver
-        run: bash .github/scripts/start_fuzzingserver.sh
-      - name: Run Autobahn (macosX64)
-        run: |
-          chmod +x test.kexe
-          ./test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
+          mkdir -p .docker/reports/clients
+          # Run from .docker so the config's relative outdir (./reports/clients) lands in
+          # .docker/reports/clients — the same place the container bind-mount puts it.
+          cd .docker
+          nohup "$AUTOBAHN_PY27/bin/wstest" -m fuzzingserver -s config/fuzzingserver.json \
+            > reports/fuzzingserver.log 2>&1 &
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://localhost:9001 || echo 000)
+            case "$code" in
+              2??|3??|4??) echo "fuzzingserver is ready (HTTP $code)"; exit 0 ;;
+            esac
+            sleep 1
+          done
+          echo "fuzzingserver did not become ready" >&2
+          cat reports/fuzzingserver.log >&2
+          exit 1
+      - name: Run Autobahn (macosArm64)
+        run: ./build/bin/macosArm64/debugTest/test.kexe "--ktest_gradle_filter=$AUTOBAHN_FILTER"
       - name: Validate results (macOS agent)
+        env:
+          AUTOBAHN_REPORTS_DIR: .docker/reports
         run: python3 .github/scripts/validate_autobahn.py macOS
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: autobahn-report-apple
-          path: .docker/reports/clients
+          name: autobahn-report-apple-arm64-native
+          path: |
+            .docker/reports/clients
+            .docker/reports/fuzzingserver.log
           retention-days: 7
-      # On failure: Gradle test reports hold the Kotlin/Native crash backtrace + per-test stdout;
-      # grab any core dumps too (best-effort — /cores needs the ulimit above).
-      - name: Upload Apple diagnostics (backtrace / core dumps)
+      - name: Upload Apple arm64 diagnostics (core dumps)
         if: failure()
         run: |
           mkdir -p apple-diagnostics
           sudo cp /cores/* apple-diagnostics/ 2>/dev/null || true
-          cp -R build/reports/tests apple-diagnostics/reports 2>/dev/null || true
-          cp -R build/test-results apple-diagnostics/test-results 2>/dev/null || true
-      - name: Upload Apple diagnostics artifact
+      - name: Upload Apple arm64 diagnostics artifact
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: autobahn-apple-diagnostics
+          name: autobahn-apple-arm64-native-diagnostics
           path: apple-diagnostics
           retention-days: 7
           if-no-files-found: ignore
