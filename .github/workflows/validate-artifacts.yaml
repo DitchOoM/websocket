@@ -172,7 +172,7 @@ jobs:
           # ── 1. Root module metadata — platform variants ──
           APPLE_TARGETS="macosArm64 macosX64 iosArm64 iosSimulatorArm64 iosX64 tvosArm64 tvosSimulatorArm64 tvosX64 watchosArm64 watchosSimulatorArm64 watchosX64"
           # "<module>:<non-Apple targets>"; every module also publishes the 11 Apple targets.
-          for entry in "websocket:jvm js linuxX64 linuxArm64" "websocket-tcp:jvm js linuxX64"; do
+          for entry in "websocket:jvm js linuxX64 linuxArm64" "websocket-tcp:jvm js linuxX64 linuxArm64"; do
             module="${entry%%:*}"
             MODULE="$MERGED/${module}/${version}/${module}-${version}.module"
             if [ ! -f "$MODULE" ]; then
