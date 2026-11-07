@@ -34,7 +34,12 @@ jobs:
         uses: browser-actions/setup-chrome@v1
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          # The action's default package list also asks for the legacy `tools` package, which the SDK
+          # repository no longer carries: sdkmanager then exits 1 and fails the job. AGP installs the
+          # platform it compiles against itself.
+          packages: platform-tools
 
       - name: Cache Konan
         uses: actions/cache@v4

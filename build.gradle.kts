@@ -169,6 +169,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().con
         dependsOn("kspCommonMainKotlinMetadata")
     }
 }
+// The per-target KSP tasks (kspKotlinJvm, kspDebugKotlinAndroid, kspKotlinIosArm64, ...) read that srcDir too.
+// With KSP 2.3.13 they are not KotlinCompilationTasks, so the block above misses them and Gradle fails the
+// build on the implicit dependency. Order them after the common metadata run explicitly.
+tasks
+    .matching { it.name.startsWith("ksp") && it.name.contains("Kotlin") && it.name != "kspCommonMainKotlinMetadata" }
+    .configureEach { dependsOn("kspCommonMainKotlinMetadata") }
 // Gradle 8.14 strict mode flags tasks that read build/generated/ksp/metadata/commonMain/kotlin
 // without an explicit dependency on the KSP task that produces it. Cover the downstream tasks
 // that consume commonMain sources: source JARs + ktlint check/format variants on commonMain/commonTest.
@@ -300,7 +306,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
     // AGP 9 + legacy-DSL opt-out: the `sourceSets[...]` Kotlin accessor casts to the
     // removed old API. Reach the source set via the new DSL interface instead.
     (this as com.android.build.api.dsl.LibraryExtension)

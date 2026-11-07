@@ -11,6 +11,7 @@ import com.ditchoom.buffer.compression.create
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
 import com.ditchoom.buffer.flow.ReadResult
+import com.ditchoom.buffer.flow.writeFully
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
 import com.ditchoom.buffer.stream.EndOfStreamException
@@ -78,7 +79,7 @@ suspend fun <B> connectWebSocket(
 
         // Send handshake request
         val requestBuffer = handshakeRequest.toBuffer()
-        transport.write(requestBuffer, connectionOptions.writeTimeout)
+        transport.writeFully(requestBuffer, connectionOptions.writeTimeout)
 
         // Build auto-filling stream processor. The pool MUST be thread-safe: the read loop
         // (codec coroutine) acquires/releases stream chunks while send() — invoked from the

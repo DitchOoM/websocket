@@ -13,6 +13,7 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
+import com.ditchoom.buffer.flow.writeFully
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
 import com.ditchoom.buffer.stream.AutoFillingSuspendingStreamProcessor
@@ -684,9 +685,7 @@ internal class WebSocketCodec<B>(
 
     private suspend fun writeToTransport(buffer: ReadBuffer) {
         try {
-            while (buffer.hasRemaining()) {
-                transport.write(buffer, writeTimeout)
-            }
+            transport.writeFully(buffer, writeTimeout)
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {

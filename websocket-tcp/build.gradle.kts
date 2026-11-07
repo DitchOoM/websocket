@@ -63,7 +63,8 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":"))
-            implementation(libs.socket)
+            // `api`: WebSocketTransport implements socket's Transport and takes TransportConfig.
+            api(libs.socket)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
@@ -74,7 +75,7 @@ kotlin {
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
     // AGP 9 + legacy-DSL opt-out: the `sourceSets[...]` Kotlin accessor casts to the
     // removed old API. Reach the source set via the new DSL interface instead.
     (this as com.android.build.api.dsl.LibraryExtension)
