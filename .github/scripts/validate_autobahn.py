@@ -6,7 +6,9 @@ that run a prebuilt Kotlin/Native test binary directly (no Gradle to run the fin
 
   usage: validate_autobahn.py <AGENT>   e.g. validate_autobahn.py LinuxX64
 
-Requires the `fuzzingserver` docker container to be running on localhost:9001.
+Requires the fuzzingserver to be running on localhost:9001. By default the report is read from
+the `fuzzingserver` docker container; set AUTOBAHN_REPORTS_DIR to read <dir>/clients/index.json
+from the host instead (natively-run wstest, no container).
 """
 import base64
 import json
@@ -44,6 +46,19 @@ def flush(agent, host="localhost", port=9001):
 
 
 def read_index():
+    reports_dir = os.environ.get("AUTOBAHN_REPORTS_DIR")
+    if reports_dir:
+        path = os.path.join(reports_dir, "clients", "index.json")
+        # The flush is async on the server side: give it a few seconds to write the file.
+        for _ in range(20):
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                break
+            time.sleep(0.5)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (OSError, ValueError) as e:
+            sys.exit(f"could not read {path}: {e}")
     out = subprocess.run(
         ["docker", "exec", "fuzzingserver", "cat", "/reports/clients/index.json"],
         capture_output=True,
