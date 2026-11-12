@@ -13,6 +13,8 @@ import com.ditchoom.websocket.WebSocketMessage
 import com.ditchoom.websocket.codecs.EmptyCodec
 import com.ditchoom.websocket.connectWebSocket
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * Opens a TCP connection and establishes a WebSocket over it using the
@@ -47,12 +49,23 @@ suspend fun <B> connectTcpWebSocket(
                     io = IoTuning(tcpNoDelay = true),
                 ),
         )
-    return connectWebSocket(
-        transport = transport,
-        connectionOptions = connectionOptions,
-        binaryCodec = binaryCodec,
-        parentScope = parentScope,
-    )
+    return try {
+        connectWebSocket(
+            transport = transport,
+            connectionOptions = connectionOptions,
+            binaryCodec = binaryCodec,
+            parentScope = parentScope,
+        )
+    } catch (t: Throwable) {
+        // The handshake failed, so no connection took ownership of the transport.
+        withContext(NonCancellable) {
+            try {
+                transport.close()
+            } catch (_: Exception) {
+            }
+        }
+        throw t
+    }
 }
 
 /** No-binary overload — binary frames surface as `Binary(Unit)`. */

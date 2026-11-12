@@ -11,8 +11,19 @@ import com.ditchoom.buffer.flow.WritePolicy
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.withTimeout
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+
+/** What the scripted peer does after receiving the client's Close frame. */
+enum class PeerAfterClose {
+    /** Acks with its own Close frame and hangs up, as a conforming server does. */
+    AcksAndHangsUp,
+
+    /** Neither answers nor hangs up. */
+    Silent,
+}
 
 /**
  * Mock [ByteStream] for protocol-level testing without network I/O.
@@ -20,8 +31,20 @@ import kotlin.time.Duration.Companion.seconds
  * Enqueue server responses via [enqueueRead] / [enqueueReadBytes] and
  * inspect client writes via [writtenBuffers].
  */
-class MockWebSocketTransport : ByteStream {
+
+@OptIn(ExperimentalAtomicApi::class)
+class MockWebSocketTransport(
+    private val peerAfterClose: PeerAfterClose = PeerAfterClose.AcksAndHangsUp,
+) : ByteStream {
     private var open = true
+    private val closes = AtomicInt(0)
+
+    /** How many times [close] has been called. */
+    val closeCount: Int get() = closes.load()
+
+    /** When true every [write] fails, as on a transport whose peer reset the connection. */
+    @kotlin.concurrent.Volatile
+    var failWrites = false
     private val readQueue = Channel<Result<ReadBuffer>>(Channel.UNLIMITED)
     val writtenBuffers = mutableListOf<ReadBuffer>()
 
@@ -67,11 +90,11 @@ class MockWebSocketTransport : ByteStream {
         timeout: Duration,
     ): BytesWritten {
         if (!open) throw Exception("Mock transport is closed")
+        if (failWrites) throw Exception("Mock write failure")
         val bytes = buffer.remaining()
         val copy = BufferFactory.Default.allocate(bytes)
         copy.write(buffer)
         copy.resetForRead()
-        writtenBuffers.add(copy)
         // Model a real server's RFC 6455 §7.1.1 close handshake: when the client sends a Close frame,
         // ack it with a server Close so WebSocketCodec.close()'s bounded wait for the peer's Close
         // completes promptly. Without this, a mock read loop has no peer to close it and would block
@@ -80,18 +103,24 @@ class MockWebSocketTransport : ByteStream {
             copy.position(0)
             val isCloseFrame = (copy.readByte().toInt() and 0x0F) == 0x8
             copy.position(0)
-            if (isCloseFrame && open) {
+            if (isCloseFrame && open && peerAfterClose == PeerAfterClose.AcksAndHangsUp) {
                 val closeAck = BufferFactory.Default.allocate(4)
                 closeAck.writeByte(0x88.toByte()) // FIN + Close opcode
                 closeAck.writeByte(0x02) // 2-byte payload: status code only
                 closeAck.writeShort(1000) // 1000 = NORMAL_CLOSURE
                 readQueue.trySend(Result.success(closeAck))
+                // A real server hangs up after the close handshake: reads then end after the ack.
+                readQueue.close()
             }
         }
+        // Published last: a test polling writtenBuffers reads the buffer, and the close-frame check
+        // above moves its position.
+        writtenBuffers.add(copy)
         return BytesWritten(bytes)
     }
 
     override suspend fun close() {
+        closes.addAndFetch(1)
         open = false
         readQueue.close()
     }

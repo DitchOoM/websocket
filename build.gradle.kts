@@ -277,6 +277,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
         // (1) TCP-path unit tests — not relevant on browser's native WS.
         this.filter.excludeTestsMatching("com.ditchoom.websocket.handshake.*")
         this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecMockTest")
+        this.filter.excludeTestsMatching("com.ditchoom.websocket.WebSocketCodecReleaseTest")
         // (1) Direct-to-codec compression tests construct StreamingCompressor/Decompressor
         // explicitly; the buffer library's sync compression needs Node's zlib and will
         // throw on browser construction. Real browser consumers never hit this code path
