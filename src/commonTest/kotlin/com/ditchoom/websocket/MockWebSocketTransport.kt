@@ -16,14 +16,26 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
+/** What the scripted peer does after receiving the client's Close frame. */
+enum class PeerAfterClose {
+    /** Acks with its own Close frame and hangs up, as a conforming server does. */
+    AcksAndHangsUp,
+
+    /** Neither answers nor hangs up. */
+    Silent,
+}
+
 /**
  * Mock [ByteStream] for protocol-level testing without network I/O.
  *
  * Enqueue server responses via [enqueueRead] / [enqueueReadBytes] and
  * inspect client writes via [writtenBuffers].
  */
+
 @OptIn(ExperimentalAtomicApi::class)
-class MockWebSocketTransport : ByteStream {
+class MockWebSocketTransport(
+    private val peerAfterClose: PeerAfterClose = PeerAfterClose.AcksAndHangsUp,
+) : ByteStream {
     private var open = true
     private val closes = AtomicInt(0)
 
@@ -91,7 +103,7 @@ class MockWebSocketTransport : ByteStream {
             copy.position(0)
             val isCloseFrame = (copy.readByte().toInt() and 0x0F) == 0x8
             copy.position(0)
-            if (isCloseFrame && open) {
+            if (isCloseFrame && open && peerAfterClose == PeerAfterClose.AcksAndHangsUp) {
                 val closeAck = BufferFactory.Default.allocate(4)
                 closeAck.writeByte(0x88.toByte()) // FIN + Close opcode
                 closeAck.writeByte(0x02) // 2-byte payload: status code only

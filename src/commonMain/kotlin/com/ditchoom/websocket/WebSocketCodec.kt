@@ -45,6 +45,7 @@ import com.ditchoom.websocket.frame.toPingFrame
 import com.ditchoom.websocket.frame.toPongFrame
 import com.ditchoom.websocket.frame.toTextFrame
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
+import com.ditchoom.websocket.internal.UseGuard
 import com.ditchoom.websocket.internal.truncateUtf8
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
@@ -115,6 +116,26 @@ internal class WebSocketCodec<B>(
     }
 
     private val lifecycle = AtomicReference<Lifecycle>(Lifecycle.Open)
+
+    /**
+     * Owns the compressor and decompressor. Compressing a frame in [send] and decompressing a message
+     * in the read loop each hold it, so the resources are closed only after the last such use has
+     * finished, and a use that starts after release fails with [WebSocketException.ConnectionClosed]
+     * without touching them. The transport needs no such hold: closing it is how a blocked read or
+     * write is aborted, and a read or write on a closed transport fails.
+     */
+    private val compressionResources =
+        UseGuard {
+            val config = compression as? CompressionConfig.Enabled
+            try {
+                config?.compressor?.close()
+            } catch (_: Exception) {
+            }
+            try {
+                config?.decompressor?.close()
+            } catch (_: Exception) {
+            }
+        }
 
     // Completes when the single release (see [release]) has finished, for callers that lost the race to run it.
     private val released = CompletableDeferred<Unit>()
@@ -379,7 +400,7 @@ internal class WebSocketCodec<B>(
         val rawPayload =
             try {
                 if (message.compressed && compression is CompressionConfig.Enabled) {
-                    val decompressed = decompressPayload(message.payload)
+                    val decompressed = compressionResources.use { decompressPayload(message.payload) }
                     if (decompressed !== message.payload) message.payload.freeIfNeeded()
                     decompressed
                 } else {
@@ -608,6 +629,13 @@ internal class WebSocketCodec<B>(
         payload: ReadBuffer,
         fin: Boolean = true,
         compress: Boolean = compressionEnabled,
+    ): ReadBuffer = compressionResources.use { encodeDataFrameHoldingCompressor(opcode, payload, fin, compress) }
+
+    private fun encodeDataFrameHoldingCompressor(
+        opcode: Opcode,
+        payload: ReadBuffer,
+        fin: Boolean,
+        compress: Boolean,
     ): ReadBuffer {
         val shouldCompress = compress && !opcode.isControlFrame() && payload.remaining() > 0
 
@@ -744,12 +772,7 @@ internal class WebSocketCodec<B>(
         try {
             withContext(NonCancellable) {
                 incomingMessageChannel.close()
-                val config = compression as? CompressionConfig.Enabled
-                try {
-                    config?.compressor?.close()
-                    config?.decompressor?.close()
-                } catch (_: Exception) {
-                }
+                compressionResources.release()
                 try {
                     transport.close()
                 } catch (_: Exception) {
@@ -762,15 +785,19 @@ internal class WebSocketCodec<B>(
 
     /**
      * After a Close frame we sent on our own initiative, reads and discards what the peer still
-     * sends until it hangs up (bounded), so closing the transport does not reset the connection
-     * ahead of our Close frame reaching the peer.
+     * sends until it hangs up, so closing the transport does not reset the connection ahead of our
+     * Close frame. Bounded by the close-handshake time and by [DRAIN_LIMIT_BYTES].
      */
     private suspend fun awaitPeerHangUp() {
+        var discarded = 0
         withTimeoutOrNull(minOf(readTimeout, CLOSE_HANDSHAKE_TIMEOUT)) {
             try {
-                while (transport.isOpen) {
+                while (transport.isOpen && discarded < DRAIN_LIMIT_BYTES) {
                     when (val result = transport.read(CLOSE_HANDSHAKE_TIMEOUT)) {
-                        is ReadResult.Data -> result.buffer.freeIfNeeded()
+                        is ReadResult.Data -> {
+                            discarded += result.buffer.remaining()
+                            result.buffer.freeIfNeeded()
+                        }
                         else -> return@withTimeoutOrNull
                     }
                 }
@@ -823,5 +850,8 @@ internal class WebSocketCodec<B>(
          * A well-behaved peer acks within milliseconds; this only caps a peer that never responds.
          */
         val CLOSE_HANDSHAKE_TIMEOUT = 5.seconds
+
+        /** Most bytes read and discarded while waiting for the peer to hang up after a protocol failure. */
+        const val DRAIN_LIMIT_BYTES = 64 * 1024
     }
 }
