@@ -345,11 +345,9 @@ android {
 androidComponents {
     onVariants { variant ->
         val androidTest = (variant as? com.android.build.api.variant.HasAndroidTest)?.androidTest ?: return@onVariants
-        val profilingClasses =
-            listOf(
-                "com.ditchoom.websocket.ProfilingTest",
-                "com.ditchoom.websocket.TimingProfilingTest",
-            )
+        // The same manual benchmarks the JVM and JS lanes leave out: one list, so a benchmark added there
+        // cannot start running on the emulator, whose heap its large-message cases exceed.
+        val profilingClasses = profilingTestPatterns
         val integrationClasses =
             listOf(
                 "com.ditchoom.websocket.AutobahnCase1PayloadTests",
