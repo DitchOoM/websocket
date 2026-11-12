@@ -13,6 +13,7 @@ import com.ditchoom.buffer.codec.PeekResult
 import com.ditchoom.buffer.compression.StreamingCompressor
 import com.ditchoom.buffer.flow.ByteStream
 import com.ditchoom.buffer.flow.Connection
+import com.ditchoom.buffer.flow.ReadResult
 import com.ditchoom.buffer.flow.writeFully
 import com.ditchoom.buffer.freeAll
 import com.ditchoom.buffer.freeIfNeeded
@@ -45,17 +46,23 @@ import com.ditchoom.websocket.frame.toPongFrame
 import com.ditchoom.websocket.frame.toTextFrame
 import com.ditchoom.websocket.internal.GrowableWriteBuffer
 import com.ditchoom.websocket.internal.truncateUtf8
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.concurrent.Volatile
+import kotlin.concurrent.atomics.AtomicReference
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -67,6 +74,7 @@ import kotlin.time.Duration.Companion.seconds
  * variants directly from the raw buffer (zero-copy payload views). Fragment
  * assembly via [MessageAssembler].
  */
+@OptIn(ExperimentalAtomicApi::class, DelicateCoroutinesApi::class)
 internal class WebSocketCodec<B>(
     private val transport: ByteStream,
     private val stream: AutoFillingSuspendingStreamProcessor,
@@ -82,10 +90,6 @@ internal class WebSocketCodec<B>(
 ) : Connection<WebSocketMessage<B>> {
     private val codecJob = kotlinx.coroutines.Job(parentScope?.coroutineContext?.get(kotlinx.coroutines.Job))
 
-    init {
-        codecJob.invokeOnCompletion { closed = true }
-    }
-
     private val scope: CoroutineScope =
         CoroutineScope(
             (parentScope?.coroutineContext ?: Dispatchers.Default) +
@@ -95,14 +99,30 @@ internal class WebSocketCodec<B>(
 
     override val id: Long = 0L
 
-    @Volatile
-    private var closed = false
-    private var serverInitiatedClose = false
+    /** Where the connection is in its life; moves only forward, and ends in [Lifecycle.Released]. */
+    private sealed interface Lifecycle {
+        /** Usable: no Close frame has been sent or received. */
+        data object Open : Lifecycle
 
-    // Set once we've sent a client-initiated Close frame, so the read loop doesn't also emit a
-    // duplicate Close ack when the server's Close response arrives during the close handshake.
-    @Volatile
-    private var clientInitiatedClose = false
+        /** Our Close frame is sent; the peer's Close or EOF is awaited. No more sends. */
+        data object Closing : Lifecycle
+
+        /** Unusable (peer closed, or the transport failed); the transport is not yet released. */
+        data object Closed : Lifecycle
+
+        /** The transport and compression resources are released. Terminal. */
+        data object Released : Lifecycle
+    }
+
+    private val lifecycle = AtomicReference<Lifecycle>(Lifecycle.Open)
+
+    // Completes when the single release (see [release]) has finished, for callers that lost the race to run it.
+    private val released = CompletableDeferred<Unit>()
+
+    // After the lifecycle: a codecJob already cancelled by its parent completes this at once.
+    init {
+        codecJob.invokeOnCompletion { markClosed() }
+    }
 
     // The read-loop coroutine. close() joins it (bounded) so the server's Close response / EOF is
     // observed — i.e. in-flight writes drain — before the transport is torn down.
@@ -136,12 +156,14 @@ internal class WebSocketCodec<B>(
      */
     override fun receive(): Flow<WebSocketMessage<B>> = incomingMessageChannel.receiveAsFlow()
 
-    fun isOpen() = !closed && transport.isOpen
+    fun isOpen() = lifecycle.load().let { it === Lifecycle.Open || it === Lifecycle.Closing } && transport.isOpen
 
     internal fun startReadLoop() {
         val compressionNegotiated = compression is CompressionConfig.Enabled
         readLoopJob =
-            scope.launch {
+            // ATOMIC: the body, and so its `finally` that releases the transport, runs even when the
+            // scope is cancelled before the coroutine gets to start.
+            scope.launch(start = CoroutineStart.ATOMIC) {
                 val messageAssembler = MessageAssembler(compressionNegotiated, bufferFactory)
 
                 try {
@@ -159,23 +181,31 @@ internal class WebSocketCodec<B>(
                             is AssemblyResult.NeedMoreFrames -> {}
                             is AssemblyResult.Error -> {
                                 sendCloseFrame(result.code.code, result.reason)
-                                closed = true
                                 return@launch
                             }
                         }
                     }
                 } catch (_: EndOfStreamException) {
                     // Clean EOF
+                    markClosed()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (
                     @Suppress("TooGenericExceptionCaught") _: Exception,
                 ) {
                     // Transport or protocol error
+                    markClosed()
                 } finally {
                     messageAssembler.reset()
                     stream.release()
                     incomingMessageChannel.close()
+                    // Every way the loop ends — peer Close, EOF, error, local protocol failure, cancellation —
+                    // ends here, so the transport is released here whatever the cause.
+                    try {
+                        if (lifecycle.load() === Lifecycle.Closing && isActive) awaitPeerHangUp()
+                    } finally {
+                        release()
+                    }
                 }
             }
     }
@@ -241,7 +271,6 @@ internal class WebSocketCodec<B>(
                             CloseCode.INVALID_PAYLOAD to "Invalid payload data"
                         }
                     sendCloseFrame(code.code, reason)
-                    closed = true
                     return null
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
@@ -249,7 +278,6 @@ internal class WebSocketCodec<B>(
                     @Suppress("TooGenericExceptionCaught") _: Throwable,
                 ) {
                     sendCloseFrame(CloseCode.INVALID_PAYLOAD.code, "Invalid payload data")
-                    closed = true
                     return null
                 } finally {
                     if (owned) buffer.freeIfNeeded()
@@ -308,14 +336,13 @@ internal class WebSocketCodec<B>(
                 incomingMessageChannel.trySend(WebSocketMessage.Pong(appData))
             }
             is WsFrame.Close -> {
-                serverInitiatedClose = true
                 val closeCode = frame.body?.statusCode ?: CloseCode.NO_STATUS_RECEIVED
                 val reason = frame.body?.reason ?: ""
 
                 // Only ack the server's Close if we haven't already sent our own (client-initiated)
                 // Close — otherwise the server's Close arriving during our close handshake would
                 // trigger a second, spurious Close frame.
-                if (!closed && !clientInitiatedClose) {
+                if (lifecycle.load() === Lifecycle.Open) {
                     val responseCode =
                         if (closeCode == CloseCode.PROTOCOL_ERROR) {
                             CloseCode.PROTOCOL_ERROR.code
@@ -328,7 +355,7 @@ internal class WebSocketCodec<B>(
                 incomingMessageChannel.trySend(
                     WebSocketMessage.Close(closeCode.code, reason),
                 )
-                closed = true
+                markClosed()
             }
             else -> {}
         }
@@ -421,7 +448,7 @@ internal class WebSocketCodec<B>(
     // ──────────────────────── Send path ────────────────────────
 
     override suspend fun send(message: WebSocketMessage<B>) {
-        if (closed) {
+        if (lifecycle.load() !== Lifecycle.Open) {
             throw WebSocketException.ConnectionClosed("Cannot send: not connected")
         }
         val frameBuffer =
@@ -674,6 +701,7 @@ internal class WebSocketCodec<B>(
         code: UShort,
         reason: String = "",
     ) {
+        lifecycle.compareAndSet(Lifecycle.Open, Lifecycle.Closing)
         try {
             val frameBuffer = writeCloseFrame(code, reason)
             writeToTransport(frameBuffer)
@@ -689,22 +717,81 @@ internal class WebSocketCodec<B>(
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
-            closed = true
+            markClosed()
+            release()
+        }
+    }
+
+    /** Moves to [Lifecycle.Closed] unless the connection is already closed or released. */
+    private fun markClosed() {
+        while (true) {
+            val current = lifecycle.load()
+            if (current === Lifecycle.Closed || current === Lifecycle.Released) return
+            if (lifecycle.compareAndSet(current, Lifecycle.Closed)) return
+        }
+    }
+
+    /**
+     * Releases the transport and the compression resources, exactly once however many paths
+     * reach it. The caller that wins the [Lifecycle.Released] exchange does the work; the others
+     * wait for it to finish. Runs to completion even in a cancelled coroutine.
+     */
+    private suspend fun release() {
+        if (lifecycle.exchange(Lifecycle.Released) === Lifecycle.Released) {
+            withContext(NonCancellable) { released.await() }
+            return
+        }
+        try {
+            withContext(NonCancellable) {
+                incomingMessageChannel.close()
+                val config = compression as? CompressionConfig.Enabled
+                try {
+                    config?.compressor?.close()
+                    config?.decompressor?.close()
+                } catch (_: Exception) {
+                }
+                try {
+                    transport.close()
+                } catch (_: Exception) {
+                }
+            }
+        } finally {
+            released.complete(Unit)
+        }
+    }
+
+    /**
+     * After a Close frame we sent on our own initiative, reads and discards what the peer still
+     * sends until it hangs up (bounded), so closing the transport does not reset the connection
+     * ahead of our Close frame reaching the peer.
+     */
+    private suspend fun awaitPeerHangUp() {
+        withTimeoutOrNull(minOf(readTimeout, CLOSE_HANDSHAKE_TIMEOUT)) {
+            try {
+                while (transport.isOpen) {
+                    when (val result = transport.read(CLOSE_HANDSHAKE_TIMEOUT)) {
+                        is ReadResult.Data -> result.buffer.freeIfNeeded()
+                        else -> return@withTimeoutOrNull
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught") _: Exception,
+            ) {
+            }
         }
     }
 
     override suspend fun close() {
-        if (closed) return
-
-        if (!serverInitiatedClose) {
-            clientInitiatedClose = true
+        if (lifecycle.compareAndSet(Lifecycle.Open, Lifecycle.Closing)) {
             try {
                 sendCloseFrame(CloseCode.NORMAL.code, "Client closing")
             } catch (_: Exception) {
             }
             // RFC 6455 §7.1.1: after sending Close, wait (bounded) for the server's Close response /
-            // EOF — i.e. for the read loop to finish — BEFORE tearing down the transport. `closed`
-            // stays false during the wait so the read loop keeps reading. This lets frames already
+            // EOF — i.e. for the read loop to finish — BEFORE tearing down the transport. The lifecycle
+            // stays Closing during the wait so the read loop keeps reading. This lets frames already
             // handed to the transport (e.g. a large data frame sent immediately before close()) drain
             // to the wire instead of being discarded by the transport teardown below — otherwise a
             // send()-then-close() truncates the last message (observed as Autobahn 9.5.1 timing out).
@@ -712,18 +799,8 @@ internal class WebSocketCodec<B>(
             // peer that never sends its Close can't stall close(); real peers ack within milliseconds.
             withTimeoutOrNull(minOf(readTimeout, CLOSE_HANDSHAKE_TIMEOUT)) { readLoopJob?.join() }
         }
-        closed = true
-
-        incomingMessageChannel.close()
-        // Clean up compression resources
-        val config = compression as? CompressionConfig.Enabled
-        config?.compressor?.close()
-        config?.decompressor?.close()
-        // Now safe to break any remaining I/O, then cancelAndJoin.
-        try {
-            transport.close()
-        } catch (_: Exception) {
-        }
+        markClosed()
+        release()
         try {
             codecJob.cancelAndJoin()
         } catch (_: Exception) {
